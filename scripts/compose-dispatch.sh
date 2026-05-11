@@ -47,11 +47,27 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-PROJECT_ROOT="$(cd "$PROJECT_ROOT/.." && pwd)"
+SUBSTRATE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Default PROJECT_ROOT is one dir above the substrate (matches how this script
+# expects to live at <project>/.claude/scripts/...). For substrate-standalone
+# tests, LOA_PROJECT_ROOT env override re-roots .run/ and host-installed paths.
+if [[ -n "${LOA_PROJECT_ROOT:-}" ]]; then
+    PROJECT_ROOT="$LOA_PROJECT_ROOT"
+else
+    PROJECT_ROOT="$(cd "$SUBSTRATE_ROOT/.." && pwd)"
+fi
 COMPOSE_SCHEMA="$PROJECT_ROOT/.claude/schemas/runtime/composition.schema.json"
 HANDOFF_VALIDATOR="$PROJECT_ROOT/.claude/scripts/handoff-validate.sh"
 ROOM_VALIDATOR="$PROJECT_ROOT/.claude/scripts/room-packet-validate.sh"
+
+# Pair-relay (cycle-craft-cluster Sprint 2 B.4) — substrate-canonical first,
+# fall back to host-installed locations.
+PAIR_RELAY_SCHEMA_SUBSTRATE="$SUBSTRATE_ROOT/data/trajectory-schemas/pair-relay-composition.schema.json"
+PAIR_RELAY_SCHEMA_HOST="$PROJECT_ROOT/.claude/data/trajectory-schemas/pair-relay-composition.schema.json"
+PAIR_RELAY_VALIDATOR_SUBSTRATE="$SUBSTRATE_ROOT/scripts/pair-relay-validate.sh"
+PAIR_RELAY_VALIDATOR_HOST="$PROJECT_ROOT/.claude/scripts/pair-relay-validate.sh"
+SURFACE_ENVELOPE_SUBSTRATE="$SUBSTRATE_ROOT/scripts/surface-envelope.sh"
+SURFACE_ENVELOPE_HOST="$PROJECT_ROOT/.claude/scripts/surface-envelope.sh"
 
 usage() {
     cat <<EOF
@@ -79,6 +95,7 @@ RUN_ID=""
 ONE_STAGE=""
 DRY_RUN=0
 OUTPUT_JSON=0
+INJECT_HANDOFFS=()  # cycle-craft-cluster B.4: bats test hook, "<stage>:<path>"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -88,6 +105,11 @@ while [[ $# -gt 0 ]]; do
         --stage) ONE_STAGE="$2"; shift 2 ;;
         --dry-run) DRY_RUN=1; shift ;;
         --json) OUTPUT_JSON=1; shift ;;
+        --inject-handoff)
+            # cycle-craft-cluster B.4: pre-stage a mock handoff packet so bats
+            # tests can exercise the RELAY_LOOP state machine end-to-end without
+            # spinning up real construct subagents. Form: "<stage_index>:<path>".
+            INJECT_HANDOFFS+=("$2"); shift 2 ;;
         -h|--help) usage; exit 0 ;;
         -*) echo "ERROR: unknown flag '$1'" >&2; exit 1 ;;
         *) if [[ -z "$COMP_PATH" ]]; then COMP_PATH="$1"; else echo "ERROR: extra arg" >&2; exit 1; fi; shift ;;
@@ -155,6 +177,22 @@ if [[ "$(echo "$COMP_JSON" | jq -r '._error // ""')" != "" ]]; then
     echo "ERROR: composition YAML parse failed: $(echo "$COMP_JSON" | jq -r '._error')" >&2
     exit 1
 fi
+
+# cycle-craft-cluster B.4 (RFC #235): read composition pattern at
+# COMPOSITION_VALIDATE; default 'parallel' for backward compatibility with the
+# existing chain[]-walking flow. 'pair-relay' routes into RELAY_LOOP below.
+PATTERN="$(echo "$COMP_JSON" | jq -r '.pattern // "parallel"')"
+
+if [[ "$PATTERN" == "pair-relay" ]]; then
+    # Dispatch to the pair-relay branch (defined later in this script).
+    # Schema validation, sequence walk, cycle loop, and envelope surfacing
+    # all live in _run_pair_relay below.
+    PAIR_RELAY_FLOW=1
+else
+    PAIR_RELAY_FLOW=0
+fi
+
+if [[ "$PAIR_RELAY_FLOW" == "0" ]]; then
 
 # Validate against composition schema if available.
 # Pass JSON + schema-path via argv to avoid Python-heredoc injection (BB review F001).
@@ -367,4 +405,293 @@ if [[ "$OUTPUT_JSON" == "1" ]]; then
 else
     echo "[compose-dispatch] complete — $STAGES_DISPATCHED of $NUM_STAGES stages dispatched"
 fi
+
+exit 0
+fi  # end PAIR_RELAY_FLOW==0 branch
+
+# =============================================================================
+# Pair-relay branch (cycle-craft-cluster Sprint 2 B.4 / RFC #235)
+# =============================================================================
+# Implements the RELAY_LOOP state machine from SDD §2.1.2:
+#
+#   INIT → COMPOSITION_VALIDATE → RELAY_LOOP → DONE
+#                                  ↓
+#                              per cycle:
+#                                ROOM_ACTIVATE → DISPATCH
+#                                → HANDOFF_VALIDATE → ENVELOPE_WRITE
+#                                → ENVELOPE_SURFACE → next cycle
+#
+# Bookkeeping: <RUN_DIR>/relay-state.json tracks cycle_count, current_cycle,
+# completed_cycles[], convergence_state.
+# =============================================================================
+
+# Resolve pair-relay schema path: substrate-canonical first, then host-installed.
+if [[ -f "$PAIR_RELAY_SCHEMA_SUBSTRATE" ]]; then
+    PAIR_RELAY_SCHEMA="$PAIR_RELAY_SCHEMA_SUBSTRATE"
+elif [[ -f "$PAIR_RELAY_SCHEMA_HOST" ]]; then
+    PAIR_RELAY_SCHEMA="$PAIR_RELAY_SCHEMA_HOST"
+else
+    echo "ERROR: pair-relay schema not found (tried $PAIR_RELAY_SCHEMA_SUBSTRATE, $PAIR_RELAY_SCHEMA_HOST)" >&2
+    exit 1
+fi
+
+# Resolve surface-envelope: substrate-canonical first, then host-installed.
+if [[ -x "$SURFACE_ENVELOPE_SUBSTRATE" ]]; then
+    SURFACE_ENVELOPE="$SURFACE_ENVELOPE_SUBSTRATE"
+elif [[ -x "$SURFACE_ENVELOPE_HOST" ]]; then
+    SURFACE_ENVELOPE="$SURFACE_ENVELOPE_HOST"
+else
+    echo "ERROR: surface-envelope.sh not found (tried $SURFACE_ENVELOPE_SUBSTRATE, $SURFACE_ENVELOPE_HOST)" >&2
+    exit 1
+fi
+
+# Schema validation against pair-relay schema.
+PR_VALIDATE_RESULT="$(python3 - "$COMP_JSON" "$PAIR_RELAY_SCHEMA" <<'PYEOF'
+import json, sys
+try:
+    import jsonschema
+except ImportError:
+    print(json.dumps({"ok": False, "reason": "jsonschema_not_installed"}))
+    sys.exit(0)
+comp = json.loads(sys.argv[1])
+with open(sys.argv[2]) as f:
+    schema = json.load(f)
+validator = jsonschema.Draft202012Validator(schema)
+errors = sorted(validator.iter_errors(comp), key=lambda e: list(e.absolute_path))
+if errors:
+    print(json.dumps({"ok": False, "errors": [{"path": list(e.absolute_path), "msg": e.message} for e in errors[:5]]}))
+else:
+    print(json.dumps({"ok": True}))
+PYEOF
+)"
+
+if [[ "$(echo "$PR_VALIDATE_RESULT" | jq -r '.ok')" != "true" ]]; then
+    echo "ERROR: pair-relay composition validation failed:" >&2
+    echo "$PR_VALIDATE_RESULT" | jq -r '.errors[]? | "  - \(.path | tojson): \(.msg)"' >&2
+    log_event "compose.pair_relay_validation_failed" "$PR_VALIDATE_RESULT"
+    exit 1
+fi
+
+# Extract composition fields.
+PR_ARTIFACT_NAME="$(echo "$COMP_JSON" | jq -r '.artifact_name')"
+PR_SEQ_LEN="$(echo "$COMP_JSON" | jq '.sequence | length')"
+PR_MAX_CYCLES="$(echo "$COMP_JSON" | jq -r '.max_cycles // 2')"
+PR_SURFACE_MODE="$(echo "$COMP_JSON" | jq -r '.surface_mode')"
+PR_DOMAIN="$(echo "$COMP_JSON" | jq -r '.domain // "<no-domain>"')"
+PR_CYCLE_ID="${LOA_CYCLE_ID:-cycle-craft-cluster}"
+
+# Cross-field semantic check (mirrors pair-relay-validate.sh exit-2 rule).
+if [[ "$PR_MAX_CYCLES" -lt "$PR_SEQ_LEN" ]]; then
+    echo "ERROR: max_cycles ($PR_MAX_CYCLES) < sequence.length ($PR_SEQ_LEN); at least one full walk must complete" >&2
+    log_event "compose.pair_relay_max_cycles_too_low" "$(jq -n --argjson max "$PR_MAX_CYCLES" --argjson seq "$PR_SEQ_LEN" '{max_cycles: $max, sequence_length: $seq}')"
+    exit 1
+fi
+
+# Pre-stage any --inject-handoff fixtures so the RELAY_LOOP picks them up at
+# the expected paths. Used by bats integration tests. Two accepted formats:
+#   <stage>:<path>            — shorthand, defaults to cycle 1
+#   <cycle>:<stage>:<path>    — explicit cycle (1-indexed)
+mkdir -p "$ENVELOPES_DIR"
+for spec in "${INJECT_HANDOFFS[@]:-}"; do
+    [[ -z "$spec" ]] && continue
+    # Count colons to detect format.
+    colons="${spec//[^:]/}"
+    if [[ "${#colons}" -ge 2 ]]; then
+        inj_cycle="${spec%%:*}"
+        rest="${spec#*:}"
+        inj_stage="${rest%%:*}"
+        inj_path="${rest#*:}"
+    else
+        inj_cycle=1
+        inj_stage="${spec%%:*}"
+        inj_path="${spec#*:}"
+    fi
+    if [[ ! -f "$inj_path" ]]; then
+        echo "ERROR: --inject-handoff fixture missing: $inj_path" >&2
+        exit 1
+    fi
+    inj_construct="$(echo "$COMP_JSON" | jq -r ".sequence[$inj_stage].construct // empty")"
+    if [[ -z "$inj_construct" ]]; then
+        echo "ERROR: --inject-handoff stage $inj_stage out of range (sequence length $PR_SEQ_LEN)" >&2
+        exit 1
+    fi
+    inj_target="$ENVELOPES_DIR/$(printf 'c%d.%02d' "$inj_cycle" "$inj_stage").$inj_construct.handoff.json"
+    cp "$inj_path" "$inj_target"
+done
+
+log_event "compose.start" "$(jq -n --arg artifact "$PR_ARTIFACT_NAME" --argjson seq "$PR_SEQ_LEN" --argjson maxc "$PR_MAX_CYCLES" --arg mode "$PR_SURFACE_MODE" --arg domain "$PR_DOMAIN" \
+    '{pattern: "pair-relay", artifact_name: $artifact, sequence_length: $seq, max_cycles: $maxc, surface_mode: $mode, domain: $domain}')"
+
+[[ "$OUTPUT_JSON" == "1" ]] || echo "[compose-dispatch] pair-relay '$PR_ARTIFACT_NAME' — ${PR_SEQ_LEN}-stage sequence, up to ${PR_MAX_CYCLES} cycles, surface=$PR_SURFACE_MODE — run_id=$RUN_ID"
+
+RELAY_STATE_PATH="$RUN_DIR/relay-state.json"
+_write_relay_state() {
+    local current_cycle="$1"
+    local current_stage="$2"
+    local completed_json="$3"
+    local convergence_state="$4"
+    jq -n \
+        --arg run_id "$RUN_ID" \
+        --arg artifact "$PR_ARTIFACT_NAME" \
+        --argjson max_cycles "$PR_MAX_CYCLES" \
+        --argjson seq_len "$PR_SEQ_LEN" \
+        --argjson current_cycle "$current_cycle" \
+        --argjson current_stage "$current_stage" \
+        --argjson completed "$completed_json" \
+        --arg convergence_state "$convergence_state" \
+        --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{
+            run_id: $run_id,
+            pattern: "pair-relay",
+            artifact_name: $artifact,
+            max_cycles: $max_cycles,
+            sequence_length: $seq_len,
+            current_cycle: $current_cycle,
+            current_stage: $current_stage,
+            completed_cycles: $completed,
+            convergence_state: $convergence_state,
+            updated_at: $ts
+        }' > "$RELAY_STATE_PATH"
+}
+
+COMPLETED_CYCLES_JSON='[]'
+PR_CONVERGENCE_STATE="running"
+PR_TOTAL_STAGES_DISPATCHED=0
+PR_PENDING_OPERATOR=0
+_write_relay_state 0 -1 "$COMPLETED_CYCLES_JSON" "$PR_CONVERGENCE_STATE"
+
+for (( cycle=1; cycle<=PR_MAX_CYCLES; cycle++ )); do
+    log_event "relay.cycle_start" "$(jq -n --argjson c "$cycle" '{cycle: $c}')"
+    _write_relay_state "$cycle" 0 "$COMPLETED_CYCLES_JSON" "$PR_CONVERGENCE_STATE"
+
+    CYCLE_STAGES_OK=0
+    for (( s=0; s<PR_SEQ_LEN; s++ )); do
+        STAGE_JSON="$(echo "$COMP_JSON" | jq ".sequence[$s]")"
+        STAGE_CONSTRUCT="$(echo "$STAGE_JSON" | jq -r '.construct')"
+        STAGE_ROLE="$(echo "$STAGE_JSON" | jq -r '.role')"
+        STAGE_PERSONA="$(echo "$STAGE_JSON" | jq -r '.persona // ""')"
+
+        _write_relay_state "$cycle" "$s" "$COMPLETED_CYCLES_JSON" "$PR_CONVERGENCE_STATE"
+
+        HANDOFF_PATH="$ENVELOPES_DIR/$(printf 'c%d.%02d' "$cycle" "$s").$STAGE_CONSTRUCT.handoff.json"
+
+        log_event "stage_enter" "$(jq -n --argjson c "$cycle" --argjson s "$s" --arg construct "$STAGE_CONSTRUCT" --arg role "$STAGE_ROLE" --arg expected "$HANDOFF_PATH" \
+            '{cycle: $c, stage: $s, construct: $construct, role: $role, expected_handoff: $expected}')"
+
+        if [[ "$DRY_RUN" == "1" ]]; then
+            log_event "stage_dry_run" "$(jq -n --argjson c "$cycle" --argjson s "$s" '{cycle: $c, stage: $s}')"
+            continue
+        fi
+
+        # If a handoff is already at the expected path (e.g. injected via
+        # --inject-handoff for tests, or written by a prior interactive paste),
+        # validate it and proceed. Otherwise emit a dispatch prompt and mark
+        # pending-operator.
+        if [[ ! -f "$HANDOFF_PATH" ]]; then
+            # In test/headless mode without injection, the relay can't proceed
+            # past a stage that lacks a handoff packet. Emit a prompt for
+            # operator paste (interactive mode) or a stub log (headless).
+            case "$MODE" in
+                interactive)
+                    PROMPT_PATH="$PROMPTS_DIR/cycle$cycle-stage$s.prompt.md"
+                    {
+                        echo "@agent-construct-$STAGE_CONSTRUCT please run a relay invocation per this stage:"
+                        echo "- Cycle: $cycle of $PR_MAX_CYCLES"
+                        echo "- Stage: $s ($STAGE_ROLE)"
+                        echo "- Composition run: $RUN_ID"
+                        echo "- Persona: ${STAGE_PERSONA:-<none>}"
+                        echo ""
+                        echo "Write your handoff packet to: $HANDOFF_PATH"
+                    } > "$PROMPT_PATH"
+                    log_event "stage_dispatch_pending_operator" "$(jq -n --argjson c "$cycle" --argjson s "$s" --arg prompt "$PROMPT_PATH" '{cycle: $c, stage: $s, prompt: $prompt}')"
+                    PR_PENDING_OPERATOR=1
+                    ;;
+                headless)
+                    log_event "stage_dispatch_headless_stub" "$(jq -n --argjson c "$cycle" --argjson s "$s" '{cycle: $c, stage: $s, status: "sprint_4_completes_this"}')"
+                    ;;
+            esac
+            # Without a real handoff packet, the relay cannot advance further
+            # in this cycle. Persist state and exit with pending-operator code.
+            _write_relay_state "$cycle" "$s" "$COMPLETED_CYCLES_JSON" "blocked-on-stage"
+            if [[ "$PR_PENDING_OPERATOR" == "1" ]]; then
+                if [[ "$OUTPUT_JSON" == "1" ]]; then
+                    jq -n --arg run_id "$RUN_ID" --argjson cycle "$cycle" --argjson stage "$s" \
+                        '{run_id: $run_id, pattern: "pair-relay", cycle: $cycle, stage: $stage, awaiting_operator: true, exit_code: 3}'
+                fi
+                exit 3
+            fi
+            # Headless without a handoff in Sprint 2: cannot complete this cycle;
+            # log and skip remaining stages of this cycle.
+            break
+        fi
+
+        # Validate the packet at HANDOFF_PATH. If the host validator is missing
+        # (substrate-standalone test environment), accept any valid JSON object.
+        if [[ -x "$HANDOFF_VALIDATOR" ]]; then
+            if ! "$HANDOFF_VALIDATOR" "$HANDOFF_PATH" --json > /dev/null 2>&1; then
+                echo "ERROR: cycle $cycle stage $s handoff packet validation failed" >&2
+                "$HANDOFF_VALIDATOR" "$HANDOFF_PATH" >&2 || true
+                log_event "stage.handoff_invalid" "$(jq -n --argjson c "$cycle" --argjson s "$s" --arg path "$HANDOFF_PATH" '{cycle: $c, stage: $s, path: $path}')"
+                _write_relay_state "$cycle" "$s" "$COMPLETED_CYCLES_JSON" "handoff-invalid"
+                exit 2
+            fi
+        else
+            if ! jq -e 'type == "object"' "$HANDOFF_PATH" >/dev/null 2>&1; then
+                echo "ERROR: cycle $cycle stage $s handoff packet is not a JSON object" >&2
+                exit 2
+            fi
+        fi
+
+        log_event "stage_exit" "$(jq -n --argjson c "$cycle" --argjson s "$s" --arg construct "$STAGE_CONSTRUCT" --arg handoff "$HANDOFF_PATH" \
+            '{cycle: $c, stage: $s, construct: $construct, handoff: $handoff}')"
+
+        # Surface the envelope according to the composition's surface_mode.
+        # Bats tests pass surface_mode=silent or =summary so the FIFO branch
+        # doesn't block. Interactive surface_mode is exercised by the
+        # surface-envelope.bats suite directly.
+        if ! "$SURFACE_ENVELOPE" "$HANDOFF_PATH" --run-dir "$RUN_DIR" --cycle "$cycle" --mode "$PR_SURFACE_MODE" 2>/dev/null; then
+            envelope_exit=$?
+            log_event "envelope.surface_failed" "$(jq -n --argjson c "$cycle" --argjson s "$s" --argjson ec "$envelope_exit" '{cycle: $c, stage: $s, exit_code: $ec}')"
+            # Surfacing failures (timeout = exit 2) are NOT fatal to the relay
+            # itself; they just mean the operator didn't respond. Continue.
+        fi
+
+        CYCLE_STAGES_OK=$((CYCLE_STAGES_OK + 1))
+        PR_TOTAL_STAGES_DISPATCHED=$((PR_TOTAL_STAGES_DISPATCHED + 1))
+    done
+
+    if [[ "$CYCLE_STAGES_OK" -eq "$PR_SEQ_LEN" ]]; then
+        COMPLETED_CYCLES_JSON="$(echo "$COMPLETED_CYCLES_JSON" | jq --argjson c "$cycle" '. + [$c]')"
+        log_event "relay.cycle_complete" "$(jq -n --argjson c "$cycle" --argjson stages_ok "$CYCLE_STAGES_OK" '{cycle: $c, stages_completed: $stages_ok}')"
+    else
+        log_event "relay.cycle_incomplete" "$(jq -n --argjson c "$cycle" --argjson stages_ok "$CYCLE_STAGES_OK" '{cycle: $c, stages_completed: $stages_ok}')"
+        # Without a way to satisfy the remaining stages (no handoffs available),
+        # break out of the cycle loop entirely.
+        PR_CONVERGENCE_STATE="halted-no-handoff"
+        break
+    fi
+
+    _write_relay_state "$cycle" $((PR_SEQ_LEN - 1)) "$COMPLETED_CYCLES_JSON" "$PR_CONVERGENCE_STATE"
+done
+
+# Terminal state.
+if [[ "$PR_CONVERGENCE_STATE" == "running" ]]; then
+    PR_CONVERGENCE_STATE="completed-max-cycles"
+fi
+_write_relay_state "$PR_MAX_CYCLES" $((PR_SEQ_LEN - 1)) "$COMPLETED_CYCLES_JSON" "$PR_CONVERGENCE_STATE"
+
+log_event "compose.complete" "$(jq -n --argjson dispatched "$PR_TOTAL_STAGES_DISPATCHED" --argjson cycles "$(echo "$COMPLETED_CYCLES_JSON" | jq 'length')" --arg state "$PR_CONVERGENCE_STATE" '{pattern: "pair-relay", stages_dispatched: $dispatched, cycles_completed: $cycles, convergence_state: $state}')"
+
+if [[ "$OUTPUT_JSON" == "1" ]]; then
+    jq -n --arg run_id "$RUN_ID" --arg artifact "$PR_ARTIFACT_NAME" \
+        --argjson max_cycles "$PR_MAX_CYCLES" --argjson seq_len "$PR_SEQ_LEN" \
+        --argjson dispatched "$PR_TOTAL_STAGES_DISPATCHED" \
+        --argjson completed "$COMPLETED_CYCLES_JSON" \
+        --arg state "$PR_CONVERGENCE_STATE" \
+        '{run_id: $run_id, pattern: "pair-relay", artifact_name: $artifact, max_cycles: $max_cycles, sequence_length: $seq_len, stages_dispatched: $dispatched, completed_cycles: $completed, convergence_state: $state, exit_code: 0}'
+else
+    echo "[compose-dispatch] pair-relay complete — $PR_TOTAL_STAGES_DISPATCHED stages across $(echo "$COMPLETED_CYCLES_JSON" | jq 'length') cycles — state=$PR_CONVERGENCE_STATE"
+fi
+
+exit 0
 exit 0

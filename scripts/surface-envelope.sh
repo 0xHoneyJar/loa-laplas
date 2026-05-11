@@ -191,7 +191,7 @@ row = {
     "blocked_ms": int(blocked_ms),
 }
 with open(log, "a") as f:
-    f.write(json.dumps(row) + "\n")
+    f.write(json.dumps(row, separators=(",", ":")) + "\n")
 PYEOF
 }
 
@@ -214,7 +214,7 @@ row = {
     "envelope_path": env,
 }
 with open(log, "a") as f:
-    f.write(json.dumps(row) + "\n")
+    f.write(json.dumps(row, separators=(",", ":")) + "\n")
 PYEOF
 }
 
