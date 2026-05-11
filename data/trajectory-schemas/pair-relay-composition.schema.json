@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://0xhoneyjar.dev/loa/schemas/pair-relay-composition.schema.json",
+  "title": "Pair-Relay Composition Descriptor",
+  "description": "Composition YAML describing an N-cycle pair-relay between two or more constructs. Schema covers the static, JSON-expressible portion of the validation contract from SDD §2.1.1; cross-field semantic checks (max_cycles >= sequence.length, slug resolution) are enforced by scripts/pair-relay-validate.sh and exit with code 2 on violation. See SDD §2.1 for the runtime model.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "pattern",
+    "artifact_name",
+    "sequence",
+    "surface_mode"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Schema version. Bumped when the descriptor shape changes incompatibly."
+    },
+    "pattern": {
+      "const": "pair-relay",
+      "description": "Composition pattern selector. Read by compose-dispatch.sh at COMPOSITION_VALIDATE to dispatch into the RELAY_LOOP state machine."
+    },
+    "artifact_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Slug-form name of the artifact this composition produces (e.g. 'fidelity-audit-verdict'). Used in envelope filenames and orchestrator logs."
+    },
+    "sequence": {
+      "type": "array",
+      "minItems": 2,
+      "description": "Ordered list of construct stages. The relay walks this sequence; max_cycles caps how many full walks occur. The same construct slug MAY appear multiple times (e.g. artisan -> crucible -> artisan).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["construct", "role"],
+        "properties": {
+          "construct": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Loa construct slug. Resolved via construct-resolve.sh at validation time."
+          },
+          "role": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "description": "Slug-form role label describing what this construct does in this stage (e.g. 'declare-taste', 'validate-shipped'). Surfaced in envelope summaries."
+          },
+          "persona": {
+            "type": ["string", "null"],
+            "maxLength": 64,
+            "pattern": "^[A-Z][A-Z0-9_-]*$",
+            "description": "Optional canonical persona name (e.g. ALEXANDER, LYNCH). Null when the construct has no established persona at this role."
+          }
+        }
+      }
+    },
+    "max_cycles": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 6,
+      "default": 2,
+      "description": "Hard cap on relay iterations. Cross-field rule (enforced by validator, exit 2): max_cycles >= sequence.length so at least one full walk completes."
+    },
+    "convergence_criteria": {
+      "type": ["string", "null"],
+      "maxLength": 1024,
+      "description": "Human-readable description of what 'done' looks like. Operator surfaces this at interactive checkpoints; null means 'run until max_cycles'."
+    },
+    "surface_mode": {
+      "enum": ["silent", "summary", "interactive"],
+      "description": "Envelope-surfacing behavior. silent: jsonl only. summary (default): jsonl + <=24-line <=80-col stderr summary. interactive: + FIFO-blocking wait + WAITING-OPERATOR side-channel signal."
+    },
+    "domain": {
+      "type": ["string", "null"],
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Optional domain tag (e.g. 'fidelity', 'accessibility', 'frame'). Used by gecko + KEEPER lenses for cross-composition analysis."
+    }
+  }
+}

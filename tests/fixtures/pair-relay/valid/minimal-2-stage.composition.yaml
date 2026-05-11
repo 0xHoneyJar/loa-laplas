@@ -1,0 +1,14 @@
+schema_version: 1
+pattern: pair-relay
+artifact_name: minimal-relay-output
+sequence:
+  - construct: artisan
+    role: declare-taste
+    persona: ALEXANDER
+  - construct: crucible
+    role: validate-shipped
+    persona: null
+max_cycles: 2
+surface_mode: summary
+domain: fidelity
+convergence_criteria: "Operator accepts the second-stage envelope as terminal."
