@@ -28,6 +28,7 @@
   "translation_note": {
     "from_construct": "k-hole",
     "to_construct": "artisan",
+    "privacy_scope": "actor_private",
     "note": "Research surfaced 'weight' as confidence-divergence signal in NLA paper. Artisan-domain 'weight' means visual mass / rhythm. Treat the research finding as background context for FEEL judgments — NOT as a substitute for material/rhythm scoring.",
     "key_translations": [
       {
