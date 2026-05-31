@@ -19,6 +19,7 @@ import hashlib
 import json
 import string
 import sys
+import os
 import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,10 +27,26 @@ from pathlib import Path
 import yaml
 
 GEN_VERSION = "1.0.0"
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-PACKS_DIR = PROJECT_ROOT / ".claude" / "constructs" / "packs"
-AGENTS_DIR = PROJECT_ROOT / ".claude" / "agents"
-TEMPLATE_PATH = PROJECT_ROOT / ".claude" / "scripts" / "templates" / "construct-adapter.template.md"
+# Path resolution. Defaults assume the installed layout (script at
+# <PROJECT_ROOT>/.claude/scripts/lib/). Env overrides let the generator target a
+# SPLIT estate — e.g. packs in ~/.loa/constructs/packs (the global store) while
+# adapters land in ~/.claude/agents — which the single-PROJECT_ROOT default cannot
+# express. Set LOA_ADAPTER_PROJECT_ROOT to a common ancestor so persona/manifest
+# path display stays relative.
+PROJECT_ROOT = Path(os.environ["LOA_ADAPTER_PROJECT_ROOT"]).expanduser() if os.environ.get("LOA_ADAPTER_PROJECT_ROOT") else Path(__file__).resolve().parents[3]
+PACKS_DIR = Path(os.environ["LOA_ADAPTER_PACKS_DIR"]).expanduser() if os.environ.get("LOA_ADAPTER_PACKS_DIR") else PROJECT_ROOT / ".claude" / "constructs" / "packs"
+AGENTS_DIR = Path(os.environ["LOA_ADAPTER_AGENTS_DIR"]).expanduser() if os.environ.get("LOA_ADAPTER_AGENTS_DIR") else PROJECT_ROOT / ".claude" / "agents"
+TEMPLATE_PATH = Path(os.environ["LOA_ADAPTER_TEMPLATE"]).expanduser() if os.environ.get("LOA_ADAPTER_TEMPLATE") else PROJECT_ROOT / ".claude" / "scripts" / "templates" / "construct-adapter.template.md"
+
+
+def _rel(p):
+    """Display a path relative to PROJECT_ROOT when possible; fall back to the
+    path as-is (so a pack under an overridden PACKS_DIR outside PROJECT_ROOT
+    never crashes rendering)."""
+    try:
+        return p.relative_to(PROJECT_ROOT)
+    except ValueError:
+        return p
 
 BASELINE_TOOLS = ["Read", "Grep", "Glob", "Bash"]
 
@@ -207,13 +224,13 @@ def build_persona_intro_block(persona_paths: list[Path], persona_names: list[str
         return "_(No persona declared. You operate as the construct itself, without an embodied persona.)_"
     if len(persona_paths) == 1:
         intro = short_persona_intro(persona_paths[0])
-        return f"You embody **{persona_names[0]}**:\n\n{intro}\n\nFull persona content lives at `{persona_paths[0].relative_to(PROJECT_ROOT)}`."
+        return f"You embody **{persona_names[0]}**:\n\n{intro}\n\nFull persona content lives at `{_rel(persona_paths[0])}`."
     blocks: list[str] = []
     blocks.append(f"This construct has multiple personas. Default: **{persona_names[0]}**.\n")
     for name, path in zip(persona_names, persona_paths):
         blocks.append(f"\n### {name}\n")
         blocks.append(short_persona_intro(path))
-        blocks.append(f"\nFull persona at `{path.relative_to(PROJECT_ROOT)}`.\n")
+        blocks.append(f"\nFull persona at `{_rel(path)}`.\n")
     blocks.append(f"\nIf the room activation packet's `persona` field is set to one of {persona_names[1:]}, embody that persona instead of the default ({persona_names[0]}).")
     return "\n".join(blocks)
 
@@ -236,7 +253,7 @@ def description_block_text(description: str) -> str:
 
 def render(slug: str, manifest: dict) -> str:
     manifest_path = PACKS_DIR / slug / "construct.yaml"
-    manifest_relpath = manifest_path.relative_to(PROJECT_ROOT)
+    manifest_relpath = _rel(manifest_path)
     manifest_checksum = sha256_of_file(manifest_path)
 
     persona_paths, persona_names = find_persona_files(slug, manifest)
@@ -276,7 +293,7 @@ def render(slug: str, manifest: dict) -> str:
     domain_out_of = domain_block.get("out_of_domain") or [] if isinstance(domain_block, dict) else []
 
     persona_path_or_null = (
-        f'"{persona_paths[0].relative_to(PROJECT_ROOT)}"' if persona_paths else "null"
+        f'"{_rel(persona_paths[0])}"' if persona_paths else "null"
     )
     default_persona_or_null = persona_names[0] if persona_names else "null"
     persona_or_null_json = json.dumps(persona_names[0]) if persona_names else "null"
