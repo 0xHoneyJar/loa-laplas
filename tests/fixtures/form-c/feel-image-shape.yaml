@@ -1,0 +1,32 @@
+schema_version: "1.3"
+kind: workflow
+name: feel-image-shape
+description: Probe — a mid-chain craft-gate inside an iterate pair cuts to two segments plus one seam.
+intent: "I want to confirm feel-image's shape cuts into 2 segments + 1 terminal seam (segment A loops 2-3, segment B materializes)."
+iterate:
+  - [2, 3]
+max_iterations: 3
+terminate_when: curate accepts a candidate or the cap is hit
+chain:
+  - stage: 1
+    construct: artisan
+    skill: directing-generation
+    persona: ALEXANDER
+    mode: persistent
+    role: primary
+  - stage: 2
+    construct: the-mint
+    skill: prompting-images
+    mode: persistent
+    role: primary
+  - stage: 3
+    construct: the-mint
+    skill: curate
+    mode: fresh
+    role: craft-gate
+    iterates_with: 2
+  - stage: 4
+    construct: the-mint
+    skill: materialize
+    mode: fresh
+    role: primary

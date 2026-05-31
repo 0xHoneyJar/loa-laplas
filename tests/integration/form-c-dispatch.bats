@@ -1,0 +1,516 @@
+#!/usr/bin/env bats
+# =============================================================================
+# form-c-dispatch.bats — cycle-053 Form C (compose-as-CC-workflow) acceptance.
+# =============================================================================
+# Covers: the cut algorithm (every is_seam branch + co-location), the segment
+# emitter (syntax + determinism + injection-safety + room-packet injection +
+# agentType + cap_reached/converged distinction), the compiler path in
+# compose-dispatch.sh --form-c (validate-before-spend, manifest, room packets),
+# the typed handoff wrap+validate, and the clew-at-seam capture.
+#
+# Uses REPO-RELATIVE paths (this pack's own scripts/), so it runs in standalone
+# dev as well as when installed. State is isolated under a temp LOA_PROJECT_ROOT.
+# =============================================================================
+
+fail() { echo "FAIL: $*" >&2; return 1; }
+
+setup() {
+    SUBSTRATE_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+    DISPATCH="$SUBSTRATE_ROOT/scripts/compose-dispatch.sh"
+    CUT="$SUBSTRATE_ROOT/scripts/lib/compose-cut.py"
+    EMIT="$SUBSTRATE_ROOT/scripts/lib/segment-emitter.py"
+    SYNTAX="$SUBSTRATE_ROOT/scripts/lib/workflow-syntax-check.js"
+    HARNESS="$SUBSTRATE_ROOT/scripts/lib/run-emitted-segment.js"
+    HWRAP="$SUBSTRATE_ROOT/scripts/compose-handoff-wrap.sh"
+    SEAMCLEW="$SUBSTRATE_ROOT/scripts/compose-seam-clew.sh"
+    PILOT="$SUBSTRATE_ROOT/compositions/code-implement-and-review.yaml"
+    FX="$SUBSTRATE_ROOT/tests/fixtures/form-c"
+
+    [[ -f "$DISPATCH" ]] || skip "compose-dispatch.sh not found"
+    [[ -f "$CUT" ]] || skip "compose-cut.py not found"
+    [[ -f "$EMIT" ]] || skip "segment-emitter.py not found"
+
+    # Resolve the bridge composition schema: env override, then sibling host repo.
+    if [[ -n "${LOA_COMPOSE_SCHEMA:-}" && -f "${LOA_COMPOSE_SCHEMA:-}" ]]; then
+        SCHEMA="$LOA_COMPOSE_SCHEMA"
+    elif [[ -f "$SUBSTRATE_ROOT/../loa-constructs/.claude/schemas/runtime/composition.schema.json" ]]; then
+        SCHEMA="$(cd "$SUBSTRATE_ROOT/../loa-constructs/.claude/schemas/runtime" && pwd)/composition.schema.json"
+    else
+        SCHEMA=""
+    fi
+
+    TMPROOT="$(mktemp -d)"
+    # Isolate clew side-effects (ledger + best-effort trajectory) to the temp dir
+    # so the seam-clew tests never write into the repo (grimoires/, ~/.loa/).
+    export LOA_GRIMOIRE_DIR="$TMPROOT/grimoires"
+    export LOA_CLEW_LEDGER_ROOT="$TMPROOT/ledger"
+}
+
+teardown() {
+    [[ -n "${TMPROOT:-}" && -d "$TMPROOT" ]] && rm -rf "$TMPROOT"
+    return 0
+}
+
+# Convert a YAML composition to JSON on stdout.
+_y2j() { python3 -c "import yaml,json,sys; json.dump(yaml.safe_load(open(sys.argv[1])), sys.stdout)" "$1"; }
+# Run the cut over a YAML fixture; print the plan JSON.
+_cut() { _y2j "$1" | python3 "$CUT" -; }
+
+# -----------------------------------------------------------------------------
+# Cut algorithm — is_seam + the walk + co-location
+# -----------------------------------------------------------------------------
+
+@test "cut: pilot -> 1 iterating segment [1,2] + 1 terminal craft-gate seam" {
+    [[ -f "$PILOT" ]] || skip "pilot composition missing"
+    local plan; plan="$(_cut "$PILOT")"
+    [[ "$(echo "$plan" | jq -r '.ok')" == "true" ]] || fail "cut not ok: $plan"
+    [[ "$(echo "$plan" | jq '.segments|length')" -eq 1 ]] || fail "expected 1 segment"
+    [[ "$(echo "$plan" | jq '.seams|length')" -eq 1 ]] || fail "expected 1 seam"
+    [[ "$(echo "$plan" | jq -r '.segments[0].kind')" == "iterating" ]] || fail "segment not iterating"
+    [[ "$(echo "$plan" | jq -c '.segments[0].iterate')" == "[1,2]" ]] || fail "iterate not [1,2]"
+    [[ "$(echo "$plan" | jq -r '.seams[0].kind')" == "craft-gate" ]] || fail "seam not craft-gate"
+    [[ "$(echo "$plan" | jq -r '.seams[0].terminal')" == "true" ]] || fail "seam not terminal"
+    [[ "$(echo "$plan" | jq -r '.seams[0].autonomous_test_in_segment')" == "true" ]] || fail "gate test should co-locate"
+}
+
+@test "cut: feel-image shape -> 2 segments + 1 seam (segment A loops 2-3, B is stage 4)" {
+    local plan; plan="$(_cut "$FX/feel-image-shape.yaml")"
+    [[ "$(echo "$plan" | jq '.segments|length')" -eq 2 ]] || fail "expected 2 segments: $(echo "$plan"|jq -c '.segments|length')"
+    [[ "$(echo "$plan" | jq '.seams|length')" -eq 1 ]] || fail "expected 1 seam"
+    [[ "$(echo "$plan" | jq -c '[.segments[0].stages[].stage]')" == "[1,2,3]" ]] || fail "segment A should be [1,2,3]"
+    [[ "$(echo "$plan" | jq -c '[.segments[1].stages[].stage]')" == "[4]" ]] || fail "segment B should be [4]"
+    [[ "$(echo "$plan" | jq -r '.seams[0].after_segment')" == "0" ]] || fail "seam should follow segment 0"
+}
+
+@test "cut: seamless chain -> 1 segment, 0 seams (zero clew surface)" {
+    local plan; plan="$(_cut "$FX/seamless.yaml")"
+    [[ "$(echo "$plan" | jq '.segments|length')" -eq 1 ]] || fail "expected 1 segment"
+    [[ "$(echo "$plan" | jq '.seams|length')" -eq 0 ]] || fail "expected 0 seams"
+    [[ "$(echo "$plan" | jq -r '.segments[0].kind')" == "sequential" ]] || fail "should be sequential"
+}
+
+@test "cut: hitl_by_nature + hard-stop -> two standalone pure-pause seams (never automated)" {
+    local plan; plan="$(_cut "$FX/hitl-and-hardstop.yaml")"
+    [[ "$(echo "$plan" | jq '.seams|length')" -eq 2 ]] || fail "expected 2 seams"
+    # The hitl stage (2) and hard-stop stage (4) must NOT appear inside any segment.
+    local in_seg; in_seg="$(echo "$plan" | jq '[.segments[].stages[].stage] | map(select(. == 2 or . == 4)) | length')"
+    [[ "$in_seg" -eq 0 ]] || fail "hitl/hard-stop stages must be pure-pause seams, not in a segment"
+    echo "$plan" | jq -e '.seams[] | select(.kind=="hitl-by-nature" and .autonomous_test_in_segment==false)' >/dev/null || fail "missing hitl-by-nature pure-pause seam"
+    echo "$plan" | jq -e '.seams[] | select(.kind=="hard-stop")' >/dev/null || fail "missing hard-stop seam"
+}
+
+@test "cut: --seam-roles can drop 'gate' from the seam set (configurable)" {
+    # A composition whose only gate is role:gate, with seam-roles excluding gate,
+    # should produce zero seams (the gate is treated as autonomous).
+    local comp plan
+    comp='{"schema_version":"1.0","kind":"workflow","name":"gate-only","description":"role gate only probe for seam-roles","intent":"I want to confirm gate role is a configurable seam via --seam-roles.","chain":[{"stage":1,"construct":"artisan","role":"primary"},{"stage":2,"construct":"crucible","role":"gate"}]}'
+    plan="$(printf '%s' "$comp" | python3 "$CUT" - --seam-roles "hard-stop,craft-gate")"
+    [[ "$(echo "$plan" | jq '.seams|length')" -eq 0 ]] || fail "with gate excluded, expected 0 seams"
+    plan="$(printf '%s' "$comp" | python3 "$CUT" -)"  # default includes gate
+    [[ "$(echo "$plan" | jq '.seams|length')" -eq 1 ]] || fail "default seam-roles should treat gate as a seam"
+}
+
+@test "cut: blocking mode is a seam regardless of role" {
+    local comp plan
+    comp='{"schema_version":"1.2","kind":"workflow","name":"blocking-probe","description":"blocking mode seam probe regardless of role","intent":"I want to confirm mode:blocking cuts a seam even with role primary.","chain":[{"stage":1,"construct":"artisan","role":"primary"},{"stage":2,"construct":"crucible","role":"primary","mode":"blocking"}]}'
+    plan="$(printf '%s' "$comp" | python3 "$CUT" -)"
+    [[ "$(echo "$plan" | jq '.seams|length')" -eq 1 ]] || fail "blocking mode should be a seam"
+    [[ "$(echo "$plan" | jq -r '.seams[0].kind')" == "blocking" ]] || fail "seam kind should be blocking"
+}
+
+@test "cut: §1.4 caveat — an iterate pair whose b is mode:blocking does NOT co-locate" {
+    # gate-seam-clew-mechanics §1.4: when the iterated gate is mode:blocking (not an
+    # autonomous craft-gate test), the loop cannot close headless. The cut must NOT
+    # fold it into the segment — it is a standalone pure-pause seam; the preceding
+    # stage(s) form the segment; the loop is driven by the operator re-firing.
+    local comp plan
+    comp='{"schema_version":"1.2","kind":"workflow","name":"blocking-iterate","description":"iterate pair whose b is mode blocking probe for the 1.4 caveat","intent":"I want to confirm a blocking-iterate gate does not co-locate into the segment.","iterate":[[1,2]],"max_iterations":3,"terminate_when":"operator continues","chain":[{"stage":1,"construct":"artisan","role":"primary"},{"stage":2,"construct":"crucible","role":"craft-gate","mode":"blocking","iterates_with":1}]}'
+    plan="$(printf '%s' "$comp" | python3 "$CUT" -)"
+    [[ "$(echo "$plan" | jq '.segments|length')" -eq 1 ]] || fail "expected 1 segment (only stage 1)"
+    [[ "$(echo "$plan" | jq -c '[.segments[0].stages[].stage]')" == "[1]" ]] || fail "segment should be [1], not co-locate the blocking gate"
+    [[ "$(echo "$plan" | jq -r '.segments[0].kind')" == "sequential" ]] || fail "segment must be sequential, not iterating (loop cannot close headless)"
+    [[ "$(echo "$plan" | jq -r '.seams[0].kind')" == "blocking" ]] || fail "seam kind should be blocking"
+    [[ "$(echo "$plan" | jq -r '.seams[0].autonomous_test_in_segment')" == "false" ]] || fail "blocking gate test must NOT co-locate"
+}
+
+@test "cut: a craft-gate NOT in any iterate pair is a standalone seam (not co-located)" {
+    local comp plan
+    comp='{"schema_version":"1.0","kind":"workflow","name":"lone-gate","description":"a craft-gate with no iterate pairing probe","intent":"I want to confirm a non-iterated craft-gate is a standalone seam.","chain":[{"stage":1,"construct":"artisan","role":"primary"},{"stage":2,"construct":"crucible","role":"craft-gate"}]}'
+    plan="$(printf '%s' "$comp" | python3 "$CUT" -)"
+    [[ "$(echo "$plan" | jq '.segments|length')" -eq 1 ]] || fail "expected 1 segment ([1])"
+    [[ "$(echo "$plan" | jq -c '[.segments[0].stages[].stage]')" == "[1]" ]] || fail "segment should be [1]"
+    [[ "$(echo "$plan" | jq -r '.seams[0].autonomous_test_in_segment')" == "false" ]] || fail "non-iterated gate must not co-locate"
+}
+
+@test "cut: non-chain (pair-relay) composition is rejected by the cut" {
+    local comp; comp='{"schema_version":"1.0","pattern":"pair-relay","name":"pr","sequence":[]}'
+    run bash -c "printf '%s' '$comp' | python3 '$CUT' -"
+    [[ "$status" -eq 1 ]] || fail "expected exit 1 for non-chain composition"
+    echo "$output" | jq -e '.ok == false' >/dev/null || fail "expected ok:false"
+}
+
+# -----------------------------------------------------------------------------
+# Segment emitter — syntax / determinism / injection / room-authority
+# -----------------------------------------------------------------------------
+
+_emit_pilot_seg0() {
+    # cut the pilot, emit segment 0 with two room packets, print the .js path.
+    local plan seg rooms out
+    plan="$(_cut "$PILOT")"
+    seg="$(echo "$plan" | jq -c '.segments[0]')"
+    rooms='{"1":{"room_id":"sha256:1111111111111111111111111111111111111111111111111111111111111111","cycle_id":"c","construct_slug":"codex-rescue","mode":"room","invocation_path":"agent_call","expected_output_type":"Artifact","created_at":"2026-05-31T00:00:00Z","created_by":"t"},"2":{"room_id":"sha256:2222222222222222222222222222222222222222222222222222222222222222","cycle_id":"c","construct_slug":"codex-review","mode":"room","invocation_path":"agent_call","expected_output_type":"Verdict","created_at":"2026-05-31T00:00:00Z","created_by":"t"}}'
+    _y2j "$PILOT" > "$TMPROOT/comp.json"
+    out="$TMPROOT/seg0.workflow.js"
+    printf '%s' "$seg" | python3 "$EMIT" --segment - --composition "$TMPROOT/comp.json" \
+        --room-packets "$rooms" --cycle-id c --run-id r --authored-at "2026-05-31T00:00:00Z" > "$out"
+    echo "$out"
+}
+
+@test "emit: pilot segment passes syntax + determinism check" {
+    [[ -f "$PILOT" ]] || skip "pilot missing"
+    command -v node >/dev/null || skip "node not available"
+    local js; js="$(_emit_pilot_seg0)"
+    run node "$SYNTAX" "$js"
+    [[ "$status" -eq 0 ]] || fail "syntax/determinism check failed: $output"
+}
+
+@test "emit: agentType is construct-<slug> for both stages" {
+    [[ -f "$PILOT" ]] || skip "pilot missing"
+    local js; js="$(_emit_pilot_seg0)"
+    grep -q 'agentType: "construct-codex-rescue"' "$js" || fail "missing construct-codex-rescue agentType"
+    grep -q 'agentType: "construct-codex-review"' "$js" || fail "missing construct-codex-review agentType"
+}
+
+@test "emit: room packet is baked in-prompt (room authority, not studio)" {
+    [[ -f "$PILOT" ]] || skip "pilot missing"
+    local js; js="$(_emit_pilot_seg0)"
+    [[ "$(grep -c 'ROOM ACTIVATION PACKET' "$js")" -ge 2 ]] || fail "room packets not injected into both stages"
+    grep -q 'invocation_path.*agent_call' "$js" || fail "room packet should carry invocation_path agent_call"
+}
+
+@test "emit: cap_reached is distinct from converged (never folded)" {
+    [[ -f "$PILOT" ]] || skip "pilot missing"
+    local js; js="$(_emit_pilot_seg0)"
+    grep -q 'outcome: "converged"' "$js" || fail "missing converged outcome"
+    grep -q 'outcome: "cap_reached"' "$js" || fail "missing cap_reached outcome"
+    grep -q 'auto_approved_at_cap: true' "$js" || fail "cap_reached must carry auto_approved_at_cap"
+    grep -q 'outcome: "degraded"' "$js" || fail "missing degraded outcome (StructuredOutput guard)"
+}
+
+@test "emit: typed failure sentinel present; never bare null on failure" {
+    [[ -f "$PILOT" ]] || skip "pilot missing"
+    local js; js="$(_emit_pilot_seg0)"
+    grep -q '__stage_failed' "$js" || fail "missing __stage_failed sentinel"
+}
+
+@test "emit: no Date / Math.random (determinism guard)" {
+    [[ -f "$PILOT" ]] || skip "pilot missing"
+    local js; js="$(_emit_pilot_seg0)"
+    ! grep -qE '\bDate\b' "$js" || fail "emitted source must not contain Date"
+    ! grep -qE 'Math\s*\.\s*random' "$js" || fail "emitted source must not contain Math.random"
+}
+
+@test "emit: INJECTION — hostile composition strings are neutralized (no breakout)" {
+    command -v node >/dev/null || skip "node not available"
+    local plan seg out
+    plan="$(_cut "$FX/injection.yaml")"
+    seg="$(echo "$plan" | jq -c '.segments[0]')"
+    _y2j "$FX/injection.yaml" > "$TMPROOT/inj.json"
+    out="$TMPROOT/inj.workflow.js"
+    printf '%s' "$seg" | python3 "$EMIT" --segment - --composition "$TMPROOT/inj.json" \
+        --room-packets '{}' --cycle-id c --run-id r --authored-at "2026-05-31T00:00:00Z" > "$out"
+    # If escaping failed, the hostile quotes/parens would break the parse.
+    run node "$SYNTAX" "$out"
+    [[ "$status" -eq 0 ]] || fail "injection broke out (syntax check failed): $output"
+    # The payload globals must NOT have been emitted as live assignments — they
+    # can only appear inside JSON-escaped string literals (\" sequences).
+    ! grep -qE '^\s*globalThis\.PWNED' "$out" || fail "PWNED assignment escaped into live code"
+    run node -e "process.exit(0)"   # node present sanity
+}
+
+# Emit segment N from a composition YAML/JSON to a file; echo the path.
+_emit_from() {
+    local comp_yaml="$1" idx="${2:-0}" rooms="${3:-{\}}"
+    local cj="$TMPROOT/_comp.json" plan="$TMPROOT/_plan.json" seg="$TMPROOT/_seg.json" out="$TMPROOT/_seg-$idx.js"
+    python3 -c "import yaml,json,sys; json.dump(yaml.safe_load(open(sys.argv[1])), open(sys.argv[2],'w'))" "$comp_yaml" "$cj"
+    python3 "$CUT" "$cj" > "$plan" 2>/dev/null
+    python3 -c "import json,sys; print(json.dumps(json.load(open(sys.argv[1]))['segments'][int(sys.argv[2])]))" "$plan" "$idx" > "$seg"
+    python3 "$EMIT" --segment "$seg" --composition "$cj" --room-packets "$rooms" --cycle-id c --run-id r --authored-at z > "$out"
+    echo "$out"
+}
+
+# --- adversarial-review regressions (cycle-053 review wil6tsg7h) ---
+
+@test "emit INJECTION (A): composition name cannot break out of the doc-comment" {
+    command -v node >/dev/null || skip "node not available"
+    cat > "$TMPROOT/inj-name.yaml" <<'EOF'
+schema_version: "1.0"
+kind: workflow
+name: probe-name-breakout
+description: 'desc "}); globalThis.PWNED=1; (function(){return ({x:"'
+intent: "I want to confirm a hostile name/description cannot break out of the leading doc-comment or meta."
+chain:
+  - {stage: 1, construct: artisan, role: primary}
+EOF
+    # also smuggle a comment-terminator via a stage note (lands in meta.phases detail)
+    local js; js="$(_emit_from "$TMPROOT/inj-name.yaml" 0)"
+    run node "$SYNTAX" "$js"
+    [[ "$status" -eq 0 ]] || fail "name/description injection broke the parse: $output"
+    ! grep -qE '^\s*globalThis\.PWNED' "$js" || fail "PWNED escaped into live code"
+}
+
+@test "emit INJECTION (B): max_iterations is int-coerced, not raw-interpolated" {
+    command -v node >/dev/null || skip "node not available"
+    cat > "$TMPROOT/inj-cap.yaml" <<'EOF'
+schema_version: "1.0"
+kind: workflow
+name: probe-cap-injection
+description: max_iterations injection probe for the emitter boundary coercion
+intent: "I want to confirm a non-integer max_iterations cannot inject code into MAX_ITER."
+iterate: [[1, 2]]
+max_iterations: "99; globalThis.PWNED=1; while(true){}"
+terminate_when: gate approves
+chain:
+  - {stage: 1, construct: worker, role: primary}
+  - {stage: 2, construct: gate, role: craft-gate, iterates_with: 1}
+EOF
+    local js; js="$(_emit_from "$TMPROOT/inj-cap.yaml" 0)"
+    grep -qE 'const MAX_ITER = [0-9]+;' "$js" || fail "MAX_ITER not an integer literal"
+    ! grep -q 'while(true)' "$js" || fail "injected while(true) leaked into source"
+    ! grep -qE '^\s*globalThis\.PWNED' "$js" || fail "PWNED leaked into live code"
+    run node "$SYNTAX" "$js"; [[ "$status" -eq 0 ]] || fail "syntax check failed: $output"
+}
+
+@test "emit INJECTION (C): clew_example marker is js-escaped — no live agent() splice" {
+    command -v node >/dev/null || skip "node not available"
+    cat > "$TMPROOT/inj-clew.yaml" <<'EOF'
+schema_version: "1.0"
+kind: workflow
+name: probe-clew-injection
+description: clew_example raw-interpolation probe for the gate construct/skill
+intent: "I want to confirm the clew marker cannot splice a live agent() call via construct/skill."
+iterate: [[1, 2]]
+max_iterations: 3
+terminate_when: gate approves
+chain:
+  - {stage: 1, construct: worker, role: primary}
+  - {stage: 2, construct: g, skill: 'a"+agent("PWNED")+"', role: craft-gate, iterates_with: 1}
+EOF
+    local js; js="$(_emit_from "$TMPROOT/inj-clew.yaml" 0)"
+    run node "$SYNTAX" "$js"; [[ "$status" -eq 0 ]] || fail "syntax check failed: $output"
+    # the LIVE (bare-quote) form must be absent; only the escaped form may appear.
+    ! grep -F 'agent("PWNED")' "$js" || fail "live agent(\"PWNED\") spliced into source"
+    grep -qF 'agent(\"PWNED\")' "$js" || fail "expected the payload as an escaped literal"
+}
+
+@test "emit DETERMINISM (D): 'Date'/'Math.random' in prose compiles (det-escaped, value preserved)" {
+    command -v node >/dev/null || skip "node not available"
+    cat > "$TMPROOT/date-prose.yaml" <<'EOF'
+schema_version: "1.0"
+kind: workflow
+name: probe-date-prose
+description: Validate the release Date metadata and the Math.random sampling docs here.
+intent: "I want the Date header validated and Math.random documented; this is benign prose."
+chain:
+  - {stage: 1, construct: artisan, role: primary, notes: "check the Date format and avoid Math.random for seeds"}
+EOF
+    local js; js="$(_emit_from "$TMPROOT/date-prose.yaml" 0)"
+    run node "$SYNTAX" "$js"
+    [[ "$status" -eq 0 ]] || fail "benign Date/Math.random prose was wrongly rejected: $output"
+    ! grep -qE '\bDate\b' "$js" || fail "raw Date token present in emitted source"
+    ! grep -qE 'Math\s*\.\s*random' "$js" || fail "raw Math.random token present in emitted source"
+    # value is preserved: the \\u0044ate escape decodes back to 'Date'
+    grep -q 'u0044ate' "$js" || fail "expected the determinism-escaped form of Date"
+}
+
+@test "emit BOUNDS (F): a stage before the iterate lower bound is a once-only preamble (not in the loop)" {
+    command -v node >/dev/null || skip "node not available"
+    # feel-image-shape: iterate [[2,3]], stage 1 (artisan) precedes the loop bound.
+    local js; js="$(_emit_from "$FX/feel-image-shape.yaml" 0)"
+    run node "$SYNTAX" "$js"; [[ "$status" -eq 0 ]] || fail "syntax check failed: $output"
+    local la lw
+    la="$(grep -n 'agentType: "construct-artisan"' "$js" | head -1 | cut -d: -f1)"
+    lw="$(grep -n 'while (iteration' "$js" | head -1 | cut -d: -f1)"
+    [[ -n "$la" && -n "$lw" && "$la" -lt "$lw" ]] || fail "stage 1 (artisan) must be emitted before the while loop (la=$la lw=$lw)"
+}
+
+@test "runtime (E): a StructuredOutput miss degrades — never surfaces as converged" {
+    command -v node >/dev/null || skip "node not available"
+    [[ -f "$HARNESS" ]] || skip "harness missing"
+    local js; js="$(_emit_pilot_seg0)"
+    # work stage returns {} (incomplete), gate APPROVES — the old bug surfaced converged+empty.
+    run node "$HARNESS" "$js" '{"construct-codex-rescue":{},"construct-codex-review":{"verdict":"APPROVED","findings":[]}}'
+    [[ "$status" -eq 0 ]] || fail "harness error: $output"
+    local outcome; outcome="$(echo "$output" | jq -r '.outcome')"
+    [[ "$outcome" == "degraded" ]] || fail "expected degraded, got $outcome (StructuredOutput miss masked as $outcome)"
+    [[ "$(echo "$output" | jq -r '.degraded.reason')" == "structured-output-miss" ]] || fail "wrong degrade reason"
+}
+
+@test "runtime (mandate 6): a stage that throws becomes a sentinel -> degraded, never crashes or converges" {
+    command -v node >/dev/null || skip "node not available"
+    [[ -f "$HARNESS" ]] || skip "harness missing"
+    local js; js="$(_emit_pilot_seg0)"
+    run node "$HARNESS" "$js" '{"construct-codex-rescue":"__THROW__","construct-codex-review":{"verdict":"APPROVED","findings":[]}}'
+    [[ "$status" -eq 0 ]] || fail "a thrown stage crashed the workflow (should be caught): $output"
+    [[ "$(echo "$output" | jq -r '.outcome')" == "degraded" ]] || fail "thrown stage should degrade, got $(echo "$output" | jq -r '.outcome')"
+}
+
+@test "runtime: cap_reached is a distinct outcome with auto_approved_at_cap (never folded into converged)" {
+    command -v node >/dev/null || skip "node not available"
+    [[ -f "$HARNESS" ]] || skip "harness missing"
+    local js; js="$(_emit_pilot_seg0)"
+    run node "$HARNESS" "$js" '{"construct-codex-rescue":{"output":"d","rationale":"w"},"construct-codex-review":{"verdict":"CHANGES_REQUIRED","findings":[]}}'
+    [[ "$status" -eq 0 ]] || fail "harness error: $output"
+    [[ "$(echo "$output" | jq -r '.outcome')" == "cap_reached" ]] || fail "expected cap_reached"
+    [[ "$(echo "$output" | jq -r '.converged')" == "false" ]] || fail "cap_reached must not be converged"
+    [[ "$(echo "$output" | jq -r '.auto_approved_at_cap')" == "true" ]] || fail "missing auto_approved_at_cap"
+}
+
+@test "runtime: a clean operator-skip (agent->null) is distinct from a stage failure" {
+    command -v node >/dev/null || skip "node not available"
+    [[ -f "$HARNESS" ]] || skip "harness missing"
+    local js; js="$(_emit_pilot_seg0)"
+    # no scripted response for the work stage -> agent() returns null -> operator-skip
+    run node "$HARNESS" "$js" '{"construct-codex-review":{"verdict":"APPROVED","findings":[]}}'
+    [[ "$status" -eq 0 ]] || fail "harness error: $output"
+    [[ "$(echo "$output" | jq -r '.degraded.reason')" == "operator-skip" ]] || fail "null should be operator-skip, got $(echo "$output" | jq -r '.degraded.reason')"
+}
+
+# -----------------------------------------------------------------------------
+# Compiler path — compose-dispatch.sh --form-c
+# -----------------------------------------------------------------------------
+
+@test "form-c: compose-dispatch.sh --form-c compiles the pilot (exit 3, manifest, segment)" {
+    [[ -f "$PILOT" ]] || skip "pilot missing"
+    export LOA_PROJECT_ROOT="$TMPROOT"
+    [[ -n "$SCHEMA" ]] && export LOA_COMPOSE_SCHEMA="$SCHEMA"
+    run bash "$DISPATCH" "$PILOT" --form-c --run-id fc1 --json
+    [[ "$status" -eq 3 ]] || fail "expected exit 3 (awaiting main loop), got $status: $output"
+    echo "$output" | jq -e '.mode == "workflow" and .segments == 1 and .seams == 1 and .awaiting_main_loop == true' >/dev/null || fail "bad json: $output"
+    local rd="$TMPROOT/.run/compose/fc1"
+    [[ -f "$rd/form-c-manifest.json" ]] || fail "manifest missing"
+    [[ -f "$rd/workflows/code-implement-and-review.segment-1.workflow.js" ]] || fail "segment workflow missing"
+    # manifest contract
+    jq -e '.segments[0].agent_types == ["construct-codex-rescue","construct-codex-review"]' "$rd/form-c-manifest.json" >/dev/null || fail "bad agent_types in manifest"
+    jq -e '.seams[0].kind == "craft-gate" and .seams[0].terminal == true' "$rd/form-c-manifest.json" >/dev/null || fail "bad seam in manifest"
+    jq -e '.seams[0].clew_targets[0].construct == "codex-review"' "$rd/form-c-manifest.json" >/dev/null || fail "missing clew target"
+}
+
+@test "form-c: emitted room packets use agent_call + room mode and validate" {
+    [[ -f "$PILOT" ]] || skip "pilot missing"
+    export LOA_PROJECT_ROOT="$TMPROOT"
+    [[ -n "$SCHEMA" ]] && export LOA_COMPOSE_SCHEMA="$SCHEMA"
+    bash "$DISPATCH" "$PILOT" --form-c --run-id fc2 --json >/dev/null 2>&1 || true
+    local n=0
+    for rp in "$TMPROOT"/.run/rooms/*.json; do
+        [[ -f "$rp" ]] || continue
+        jq -e '.mode == "room" and .invocation_path == "agent_call"' "$rp" >/dev/null || fail "room packet not agent_call/room: $rp"
+        run bash "$SUBSTRATE_ROOT/scripts/room-packet-validate.sh" "$rp" --schema "$SUBSTRATE_ROOT/data/trajectory-schemas/room-activation-packet.schema.json" --json
+        [[ "$status" -eq 0 ]] || fail "room packet failed validation (schema + content-addressable id): $rp"
+        n=$((n+1))
+    done
+    [[ "$n" -ge 2 ]] || fail "expected >=2 room packets, got $n"
+}
+
+@test "form-c: validate-before-spend — invalid composition fails the cut, emits no segment" {
+    [[ -n "$SCHEMA" ]] || skip "host composition schema not resolvable"
+    export LOA_PROJECT_ROOT="$TMPROOT"
+    export LOA_COMPOSE_SCHEMA="$SCHEMA"
+    # iterate without max_iterations is a schema violation (FR-7.2).
+    cat > "$TMPROOT/bad.yaml" <<'EOF'
+schema_version: "1.0"
+kind: workflow
+name: bad-no-cap
+description: iterate present but no max_iterations should fail validation before any emit
+intent: "I want to confirm validate-before-spend blocks an invalid composition."
+iterate:
+  - [1, 2]
+chain:
+  - stage: 1
+    construct: artisan
+    role: primary
+  - stage: 2
+    construct: crucible
+    role: craft-gate
+    iterates_with: 1
+EOF
+    run bash "$DISPATCH" "$TMPROOT/bad.yaml" --form-c --run-id fc3
+    [[ "$status" -eq 1 ]] || fail "expected exit 1 (validation failed), got $status"
+    [[ ! -d "$TMPROOT/.run/compose/fc3/workflows" ]] || fail "no segment should be emitted for an invalid composition"
+}
+
+# -----------------------------------------------------------------------------
+# Typed handoff wrap + validate
+# -----------------------------------------------------------------------------
+
+@test "handoff-wrap: a valid stage seed wraps into a schema-valid construct-handoff" {
+    [[ -f "$HWRAP" ]] || skip "handoff-wrap missing"
+    export LOA_PROJECT_ROOT="$TMPROOT"
+    local seed='{"construct_slug":"codex-rescue","persona":"CODEX-RESCUE","output_type":"Artifact","invocation_mode":"room","stage_index":1,"verdict":{"output":"diff","rationale":"why"}}'
+    run bash -c "printf '%s' '$seed' | bash '$HWRAP' --seed - --cycle-id cycle-053 --run-id hw1 --json"
+    [[ "$status" -eq 0 ]] || fail "handoff-wrap failed: $output"
+    echo "$output" | jq -e '.ok == true' >/dev/null || fail "expected ok: $output"
+    [[ -f "$TMPROOT/.run/compose/hw1/envelopes/01.codex-rescue.handoff.json" ]] || fail "envelope not written"
+}
+
+@test "handoff-wrap: missing required field fails validation (exit 2, never silently accepted)" {
+    [[ -f "$HWRAP" ]] || skip "handoff-wrap missing"
+    export LOA_PROJECT_ROOT="$TMPROOT"
+    run bash -c "printf '%s' '{\"output_type\":\"Verdict\",\"verdict\":{\"verdict\":\"APPROVED\"}}' | bash '$HWRAP' --seed - --cycle-id cycle-053 --run-id hw2"
+    [[ "$status" -eq 2 ]] || fail "expected exit 2 for missing construct_slug, got $status"
+}
+
+# -----------------------------------------------------------------------------
+# Clew at the seam (injection-safe)
+# -----------------------------------------------------------------------------
+
+@test "seam-clew: a >>clew marker is captured to the construct ledger" {
+    [[ -f "$SEAMCLEW" ]] || skip "seam-clew missing"
+    export LOA_CLEW_LEDGER_ROOT="$TMPROOT/ledger"
+    run bash "$SEAMCLEW" ">>clew@codex-review/reviewing-diffs: tighten off-by-one detection"
+    [[ "$status" -eq 0 ]] || fail "capture failed: $output"
+    [[ -f "$TMPROOT/ledger/codex-review/LEARNINGS.jsonl" ]] || fail "ledger not written"
+    jq -e '.target.construct == "codex-review" and .target.skill_slug == "reviewing-diffs"' "$TMPROOT/ledger/codex-review/LEARNINGS.jsonl" >/dev/null || fail "bad ledger entry"
+}
+
+@test "seam-clew: INJECTION — shell metachars in the steer are stored literally, never executed" {
+    [[ -f "$SEAMCLEW" ]] || skip "seam-clew missing"
+    export LOA_CLEW_LEDGER_ROOT="$TMPROOT/ledger"
+    local marker; marker='>>clew@artisan: $(touch '"$TMPROOT"'/PWNED); `id`; rm -rf x'
+    run bash -c "printf '%s' \"\$1\" | bash '$SEAMCLEW' --stdin" _ "$marker"
+    [[ "$status" -eq 0 ]] || fail "capture should not fail: $output"
+    [[ ! -e "$TMPROOT/PWNED" ]] || fail "INJECTION EXECUTED — command substitution ran"
+    grep -q 'touch' "$TMPROOT/ledger/artisan/LEARNINGS.jsonl" || fail "literal payload not captured"
+}
+
+@test "seam-clew: a steer without a marker records nothing (opt-in, silent)" {
+    [[ -f "$SEAMCLEW" ]] || skip "seam-clew missing"
+    export LOA_CLEW_LEDGER_ROOT="$TMPROOT/ledger"
+    run bash "$SEAMCLEW" "ship it, looks great"
+    [[ "$status" -eq 0 ]] || fail "no-marker steer should exit 0"
+    [[ ! -d "$TMPROOT/ledger" ]] || fail "nothing should be recorded without a marker"
+}
+
+# -----------------------------------------------------------------------------
+# Bridge schema (hitl_by_nature, v1.3) — additive, non-breaking
+# -----------------------------------------------------------------------------
+
+@test "schema: hitl_by_nature validates under v1.3; pre-1.3 compositions unaffected" {
+    [[ -n "$SCHEMA" ]] || skip "host composition schema not resolvable"
+    run python3 - "$SCHEMA" <<'PY'
+import json, sys, jsonschema
+from referencing import Registry, Resource
+schema = json.load(open(sys.argv[1]))
+reg = Registry(retrieve=lambda u: Resource.from_contents({"$schema":"https://json-schema.org/draft/2020-12/schema"}))
+V = jsonschema.Draft202012Validator(schema, registry=reg)
+assert "hitl_by_nature" in schema["$defs"]["Stage"]["properties"], "field missing"
+assert "1.3" in schema["properties"]["schema_version"]["enum"], "v1.3 missing"
+good = {"schema_version":"1.3","kind":"workflow","name":"hitl-ok","description":"hitl_by_nature additive probe for v1.3","intent":"I want to confirm the new optional field validates additively.","chain":[{"stage":1,"construct":"the-mint","role":"primary","hitl_by_nature":True}]}
+assert not list(V.iter_errors(good)), "v1.3 + hitl_by_nature should validate"
+v12 = {"schema_version":"1.2","kind":"workflow","name":"pre-one-three","description":"pre-1.3 composition unaffected by the additive field","intent":"I want to confirm absence of the field still validates under v1.2.","chain":[{"stage":1,"construct":"artisan","role":"primary"}]}
+assert not list(V.iter_errors(v12)), "pre-1.3 composition must still validate"
+print("schema-ok")
+PY
+    [[ "$status" -eq 0 ]] || fail "schema check failed: $output"
+    [[ "$output" == *"schema-ok"* ]] || fail "unexpected: $output"
+}

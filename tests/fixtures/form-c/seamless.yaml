@@ -1,0 +1,12 @@
+schema_version: "1.0"
+kind: workflow
+name: seamless-probe
+description: Probe — a gate-free chain compiles to one segment with zero clew surface.
+intent: "I want to confirm a fully autonomous chain is one segment and gathers zero learnings by construction."
+chain:
+  - stage: 1
+    construct: k-hole
+    role: primary
+  - stage: 2
+    construct: artisan
+    role: primary
