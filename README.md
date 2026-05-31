@@ -3,11 +3,28 @@
 > a substrate that puts every loa construct into an isolated room.
 > kids in a classroom, each with a role, passing envelopes that show how they thought.
 
-[![status](https://img.shields.io/badge/status-experimental-yellow)](#status)
-[![type](https://img.shields.io/badge/type-substrate-blueviolet)](#what-this-is)
-[![runtime](https://img.shields.io/badge/runtime-claude--code--native--subagents-blue)](#runtime-target)
+[![status](https://img.shields.io/badge/status-experimental-yellow)](#status--origin)
+[![type](https://img.shields.io/badge/type-composition--runtime-blueviolet)](#what-this-is)
+[![runtime](https://img.shields.io/badge/runtime-claude--code--workflows-blue)](#runtime-target)
 [![scope](https://img.shields.io/badge/scope-pan--construct-green)](#what-this-is)
 [![thesis](https://img.shields.io/badge/thesis-observability--first-orange)](#the-thesis-observability)
+
+---
+
+`construct-rooms-substrate` is the **composition runtime** for Loa constructs. It takes a composition — a declared chain of construct invocations — and runs it as a sequence of Claude Code dynamic-workflow segments, with every construct boundary enforced as a traced, packet-emitting **room**. It ships the adapter generator, the Form C compiler, the handoff/room/composition schemas, the validators, the observability hooks, and a set of reference compositions.
+
+It is **substrate, not expertise**. It does not know what `artisan` does or what `k-hole` finds. It knows how to put either of them into a room, watch the room run, and record what came out. It has no persona, no skills, no domain opinion — it prescribes a runtime *shape*, never a domain answer.
+
+The pipeline:
+
+```
+composition.yaml
+  → validate (offline, before token spend)
+  → cut at gate seams         (compose-cut.py · is_seam)
+  → emit one .workflow.js per autonomous segment + per-stage room packets + a run manifest
+  → CC main loop runs each segment via the Workflow tool (agent() spawns inside the workflow)
+  → seam protocol between segments  (AskUserQuestion + clew capture)
+```
 
 ---
 
@@ -15,314 +32,212 @@
 
 The point of a runtime substrate isn't to make agents work — agents work fine. The point is to make their work **legible to an outside observer**.
 
-The originating brief framed this as a school-handoff metaphor: a classroom of students, each with a specific role, passes envelopes between desks. To delegate work cleanly, the teacher has to be able to **read into the envelopes** and see how each student is thinking — not just what they wrote on the front. When chains of agents pass results to each other, the bug almost never lives in any single agent. It lives in the gap between *what one agent thought it was producing* and *what the next agent thought it was receiving*. That gap is invisible until envelopes carry a WHY.
+The originating brief framed this as a school-handoff metaphor: a classroom of students, each with a role, passes envelopes between desks. To delegate cleanly the teacher must **read into the envelopes** and see how each student thought — not just what they wrote on the front. When chains of agents pass results to each other, the bug almost never lives in any single agent. It lives in the gap between *what one agent thought it was producing* and *what the next agent thought it was receiving*. That gap is invisible until envelopes carry a WHY.
 
-This pack enforces three observability invariants:
+Three observability invariants:
 
-1. **No handoffs without WHY.** Every handoff packet has a required `why.rationale` field (≥32 characters of stated reasoning). The validator rejects packets without it. School rule: you don't pass a note without showing your work.
+1. **No room finishes silently.** Every room returns a typed `construct-handoff` packet — required: `construct_slug`, `output_type`, `verdict`, `invocation_mode`, `cycle_id` — gated by `handoff-validate.sh` (three-tier: required fail-closed · recommended warn · optional). School rule: you don't leave the room without handing in your work.
 
-2. **Stated reasoning is suspect — pair with cross-validation.** Per the [Anthropic NLA paper (2026)](https://transformer-circuits.pub/2026/nla/), models maintain internal beliefs that diverge from their verbalized outputs. Confabulation produces plausible-sounding rationales that contain verifiable factual errors. The substrate addresses this by pairing the rationale (which can lie) with **cross-validation signals**:
-   - `why.decisions_considered` — what options were weighed and rejected (verifiable against actual behavior)
-   - `why.tools_used` — what tools the construct invoked, with purpose (verifiable against the transcript)
-   - `why.confidence` — self-reported confidence (calibratable over time)
-   - `why.alternative_verdicts` — counterfactuals (catches over-confidence)
+2. **Stated reasoning is suspect — pair it with diffable signal.** Per the [Anthropic NLA paper (2026)](https://transformer-circuits.pub/2026/nla/), a model's verbalized rationale can diverge from its actual behavior. So the packet pairs the `verdict` with fields an observer can cross-check against the transcript: `evidence` (file:line refs, excerpts, prior packet IDs), `pushback_invitation` (the construct's own `primary_uncertainty` + a specific `operator_check`), `kaironic_context` (why/when it fired), and `gates_passed` / `gates_failed`.
 
-   An outside observer can compare stated decisions against tool-call traces and surface divergence.
+3. **Content travels as packets, not transcript.** Anything longer than the verdict is referenced via `output_refs`, never embedded — so a chain is legible from its envelopes alone, without replaying a single room.
 
-3. **WHY surfaces at the top of the reply, not buried in files.** Each adapter instructs the construct to put its rationale at the head of the response, before any output. Files persist for replay; the human reading the orchestrator transcript sees the WHY first.
-
-The handoff packet schema enforces (1) at validation time. The adapter template enforces (2) and (3) by construction. Future-cycle work: an observability station that visualizes envelope chains and flags rationale-vs-behavior divergence (zero-native.dev or successor).
-
-This is what the brief meant by "the operator cannot reliably see *this construct was spawned* in the Claude Code UI" — the goal isn't UI affordance for its own sake, it's making reasoning visible enough to debug.
+Observability now extends past the packet: Form C makes spawns visible in `/workflows`, and the clew-at-seam loop captures operator corrections as durable construct learnings.
 
 ---
 
 ## What this is
 
-**A pack that provides invocation boundaries for any Loa construct.**
+When `construct-rooms-substrate` is installed in a repo with constructs synced, every construct becomes invocable as a Claude Code native subagent in an **isolated room** — its own context, its own tool allowlist, its own transcript — emitting a typed **handoff packet** when it finishes. Compositions chain rooms via packets, never via raw transcript.
 
-When `construct-rooms-substrate` is installed in a repo with constructs synced, every construct becomes invocable as a Claude Code native subagent. Each invocation runs in an **isolated room** — its own context, its own tool allowlist, its own transcript — and emits a typed **handoff packet** when it finishes. Multi-stage compositions chain rooms together via packets, never via raw transcript.
+### Concretely, this pack ships
 
-It is **substrate**, not expertise. It does not know what `artisan` does or what `k-hole` finds. It knows how to put either of them into a room, watch the room run, and record what came out.
-
-### Concretely, this pack ships:
-
-| Component | Purpose |
-|---|---|
-| **Adapter generator** | `construct-adapter-gen.sh` produces `.claude/agents/construct-<slug>.md` from any construct's `construct.yaml` |
-| **Adapter template** | `templates/construct-adapter.template.md` — the canonical native-subagent shape |
-| **Composition runner** | `compose-dispatch.sh` — orchestrates multi-stage construct chains into visible subagent dispatches |
-| **Handoff packet schema** | Structured artifact emitted at every room boundary; three-tier required/recommended/optional policy |
-| **Room activation packet schema** | Pre-spawn invocation envelope; content-addressable IDs |
-| **Construct manifest v4 schema** | Additive over v3; declares `tools.{allowlist,denylist,required}` + `adapter.{description_hint,color,...}` |
-| **Validators** | `handoff-validate.sh`, `room-packet-validate.sh`, `construct-manifest-validate.sh` |
-| **Parity checker** | `handoff-parity-check.sh` — diffs native vs headless packets; reports allowed-only vs substantive divergence |
-| **Hooks** | `subagent-start` / `subagent-stop` for tool-mandate observability + handoff collection |
-| **Migration scripts** | `migrate-subagents-to-agents.sh` for the legacy `.claude/subagents/` → `.claude/agents/loa-validator-*` move |
-| **Library** | `construct-handoff-lib.sh` mirroring L6 helper signatures |
-| **Test suite** | 35 bats integration tests across 4 suites, covering all 8 PRD acceptance gates |
+| Component | Path | Purpose |
+|---|---|---|
+| Adapter generator | `scripts/construct-adapter-gen.sh` | produces `.claude/agents/construct-<slug>.md` from any `construct.yaml` |
+| Adapter template | `templates/construct-adapter.template.md` | the canonical native-subagent shape (emits the typed handoff at the boundary) |
+| **Form C compiler** | `scripts/compose-dispatch.sh --form-c` | validate → cut at seams → emit workflow-segments + room packets + manifest |
+| **Seam cut** | `scripts/lib/compose-cut.py` | `is_seam` + co-location rule; cuts a composition into segments |
+| **Segment emitter** | `scripts/lib/segment-emitter.py` | emits one deterministic `.workflow.js` per autonomous segment |
+| **Handoff wrap** | `scripts/compose-handoff-wrap.sh` | seeds → validates → envelopes a typed handoff at each seam |
+| **Clew-at-seam** | `scripts/compose-seam-clew.sh` + `scripts/clew/` | captures `>>clew@<construct>: <why>` corrections into construct `LEARNINGS.jsonl` |
+| **Dry-run harness** | `scripts/lib/run-emitted-segment.js` | runs an emitted segment with scripted agent responses, zero token spend |
+| Syntax/determinism gate | `scripts/lib/workflow-syntax-check.js` | offline check of emitted JS (no `Date`/`Math.random`, typed sentinel present) |
+| Schemas | `data/trajectory-schemas/`, `data/schemas/` | handoff · room-activation-packet · pair-relay-composition · construct-manifest-v4 |
+| Validators | `handoff-validate.sh` · `room-packet-validate.sh` · `construct-manifest-validate.sh` · `pair-relay-validate.sh` | gate every packet/schema |
+| Pair-relay | `scripts/pair-relay-validate.sh` · `scripts/surface-envelope.sh` | a shipped two-construct relay composition shape |
+| Parity checker | `scripts/handoff-parity-check.sh` | diffs native vs headless packets; allowed-only vs substantive divergence |
+| Hooks | `hooks/` (`subagent-start` / `subagent-stop`) | tool-mandate observability + handoff collection |
+| Reference compositions | `compositions/` | `code-implement-and-review.yaml` (pilot) · `access-relay` · `fidelity-relay` · `frame-relay` |
+| Tests | `tests/integration/*.bats` | **115 `@test` assertions across 8 suites** |
 
 ### Why "rooms"?
 
-A room is **one explicit Loa construct invocation boundary**. The brief that originated this pack used the term to distinguish two failure modes Loa needed to address:
+A room is **one explicit construct invocation boundary**. It distinguishes two modes:
 
-- **Studio mode** — natural-language synthesis where the agent "thinks with" several constructs at once. Useful but cannot claim individual construct authority.
-- **Room mode** — explicit invocation: this construct, with these inputs, producing this output type, recorded in this transcript, finished by this packet.
+- **Studio mode** — natural-language synthesis where the agent "thinks with" several constructs at once. Useful, but cannot claim individual construct authority.
+- **Room mode** — explicit invocation: this construct, these inputs, this output type, this transcript, finished by this packet.
 
-Rooms make construct boundaries operationally enforceable. Studios stay studios. The substrate provides the room mechanics.
-
----
-
-## What this IS NOT
-
-This list is intentionally explicit. The point of a substrate is to be small and clear about its scope.
-
-### NOT a Loa framework feature
-
-The Loa framework already provides first-class construct support (cycle-051 / [`loa#454`](https://github.com/0xHoneyJar/loa/pull/454), closes [`loa#452`](https://github.com/0xHoneyJar/loa/issues/452)). The framework's L1-L5 stack ships:
-
-- `construct-index-gen.sh` → `.run/construct-index.yaml`
-- `construct-resolve.sh` (slug / name / command resolution)
-- Composition routing via writes/reads path overlap
-- `archetype-resolver.sh` (personal modes)
-- Ambient session greeting + open thread tracking
-
-That's the **lightweight in-session approach**: agent reads the index, loads the persona inline, scopes to the construct's read/write paths. It works without spawning subagents. **It is the canonical Loa construct contract.**
-
-`construct-rooms-substrate` is a **separate, opt-in runtime** that adds Claude Code-native subagent spawning on top. It does not replace the framework's L1-L5; it complements it. Both can coexist in the same repo. Operators can prefer one, the other, or use both.
-
-### NOT a replacement for Loa's construct contract
-
-A construct's identity remains its `construct.yaml`. A construct's persona remains its `identity/<PERSONA>.md`. A construct's skills remain its `skills/<slug>/SKILL.md` directories. None of this changes.
-
-The substrate adds:
-
-- An **adapter** at `.claude/agents/construct-<slug>.md` (generated, gitignored per repo)
-- An optional `tools.{allowlist,denylist,required}` block in the manifest (v4; v3 manifests work unchanged)
-- An optional `adapter.{description_hint,color,model,foreground_default,invocation_modes}` block (v4; defaults applied if absent)
-
-That is the only manifest surface the substrate reads.
-
-### NOT its own construct
-
-`construct-rooms-substrate` has no persona. No taste tokens. No domain expertise. No "voice." It is mechanism. If you `@-mention construct-construct-rooms-substrate` you get nothing useful — there is nothing to embody.
-
-For comparison: `construct-artisan` IS a construct (ALEXANDER persona, craft expertise). `construct-observer` IS a construct (KEEPER persona, user-research expertise). `construct-rooms-substrate` is the floor those constructs invoke FROM, not a construct itself.
-
-### NOT prescriptive about modes, workflows, or composition shapes
-
-The substrate is silent on:
-
-- Whether you use Operator OS modes (FEEL/ARCH/DIG/SHIP) or some other personal cognitive frame
-- Whether you follow the Loa golden path (`/plan → /build → /review → /ship`) or freestyle
-- Whether you prefer agent teams, autonomous mode, simstim, or something else
-- Whether your compositions are linear pipes, branching graphs, or single-stage rooms
-
-It only enforces that **when a construct is invoked as a room**, the invocation is explicit, the boundary is recorded, and the output is a packet. What you do inside the room is your business.
-
-### NOT a sandbox runtime
-
-A "room" is a named, traced, packet-emitting invocation boundary. **It is not a security sandbox.** This pack does not provide:
-
-- Process isolation
-- Resource limits / cgroups
-- Network policy
-- Filesystem chroot
-- Capability dropping
-
-Tool mandates are enforced via Claude Code's native subagent `tools` allowlist (frontmatter) plus `SubagentStart`-hook observability. Sprint 0 of the originating cycle confirmed this is **observability primary** — the hook logs violations; it does not block spawn. Strict sandboxing is deferred future work.
-
-### NOT for non-Claude-Code runtimes
-
-The adapter format targets Claude Code's `.claude/agents/*.md` registry. It will not produce subagents for:
-
-- OpenAI Agent SDK
-- Anthropic API direct (without Claude Code)
-- Local LLM frontends
-- Custom orchestrators
-
-Other runtimes are welcome and possible — they would be **separate substrate packs** that share the construct manifest contract and the handoff packet schema (which IS runtime-agnostic). Cross-runtime parity is a future-cycle concern.
-
-### NOT a way to create new construct expertise
-
-If you want to author a new construct (`construct-foo`), use the existing tooling: `/create-construct` skill, `construct-base` template, the construct-creator pack. `construct-rooms-substrate` only provides the room mechanics for constructs that already exist.
-
-### NOT a tool for the construct registry
-
-The Loa Constructs Network ([`constructs.network`](https://constructs.network)) handles publication, discovery, version sync, install. This pack does not modify that. It is published TO the network like any other pack; it does not BECOME network infrastructure.
+Rooms make construct boundaries operationally enforceable. Studios stay studios. Form C *hardens* this: a spawned segment is passed its room-activation packet (`mode: room`, `invocation_path: agent_call`), so `agent()` runs in **room authority** — without the packet the construct self-labels `studio_synthesis`. `room-packet-validate.sh` gates it.
 
 ---
 
-## Responsibilities table
+## The runtime: Form C (cycle-053)
+
+A composition is **not one workflow** — it is a **chain of workflow-segments cut at gate seams**. Form C replaces the Form A (operator @-mention paste) and Form B (`claude -p` stub) dispatch hacks with the primitive they were faking: programmatic subagent spawn via the Claude Code **Workflow tool**, with `/workflows` visibility.
+
+**Division of labor** — bash can't run agents; the main loop can.
+
+| Role | Who | What |
+|---|---|---|
+| **Compiler** | `compose-dispatch.sh --form-c` (bash) | validate (offline-robust, **before spend**) → cut at seams → emit `.workflow.js` segments + per-stage room packets + a run manifest. Emitted JS cannot touch the filesystem. |
+| **Executor** | the CC **main loop** | run each segment via `Workflow({scriptPath, args})`; wrap+validate its handoffs; at each seam run the **seam protocol** (`AskUserQuestion` + clew capture); fire the next segment with explicit JSON. |
+
+**The cut.** A stage is a seam when:
+
+```
+is_seam(stage) := stage.mode == "blocking"
+              OR  stage.role in {hard-stop, craft-gate, gate}   # LOA_SEAM_ROLES, --seam-roles
+              OR  stage.hitl_by_nature == true                  # v1.3 third seam class
+```
+
+The co-location rule folds an autonomous iterate-pair's terminal test into the preceding segment; only the human verdict becomes a terminal seam. **N seams → up to N+1 segments.**
+
+**The seam protocol cannot live inside a workflow** — a CC workflow run takes no mid-run human input. Every human decision point is therefore a workflow boundary, run by the main loop *between* segments. Three outcomes surface via `AskUserQuestion`: `converged` → confirm; `cap_reached` → operator gate (auto-approved-at-cap, the most clew-worthy); `degraded` → operator gate (handoff untrusted). **`cap_reached` is never folded into `converged`** — distinct end-to-end.
+
+**Clew fires only at a seam.** No human is present mid-run, so there is **no clew hook inside an autonomous workflow body** — a seamless (all-primary) composition gathers zero learnings by construction. Gate = guidance + clew; no gate = no clew. One `>>clew@<construct>/<skill>: <why>` gesture both steers the next segment and deposits a durable learning (`scripts/clew/` → construct `LEARNINGS.jsonl`; capture-only — distill→ratify→PR stays cold-path, human-gated).
+
+**`hitl_by_nature` stays human.** `feel-image` (image generation) and `game-feel-loop` (kaironic) are seams *forever* — never auto-migrated into an autonomous span. They mark the construct-vs-workflow boundary: the line between what the substrate automates and what stays human.
+
+**Injection hardening.** Composition values reach emitted JS only via the `js()` escaper (`json.dumps` + determinism-escape); runtime values reach prompts only via `JSON.stringify`; clew/steer text reaches capture via argv/stdin, **never** shell-interpolated. A thrown stage → a typed `{__stage_failed: true, …}` sentinel; an `agent()` → `null` (operator-skip) is distinct. Failure is never empty.
+
+> Authority for the seam protocol: `docs/compose-as-cc-workflow.md`.
+
+**Form A/B are the legacy fall-through**, retired once the loom ribbon re-points at `/workflows` (the compat `orchestrator.jsonl` stream keeps them working until then). Do not treat them as gone yet.
+
+---
+
+## Boundaries (what this is NOT)
+
+| It is NOT… | Because |
+|---|---|
+| **a security sandbox** | A room is a *named, traced, packet-emitting* boundary — no process isolation, cgroups, chroot, or capability dropping. Tool mandates are **observability-primary**: the `SubagentStart` hook **logs** violations, it does not **block** spawn. Do not treat a room boundary as a security boundary. |
+| **a non-Claude-Code runtime** | Targets the `.claude/agents/*.md` registry **only** — not the OpenAI Agent SDK, Anthropic API direct, local LLM frontends, or custom orchestrators. The runtime-agnostic part is the **handoff packet schema**, not the adapter. |
+| **a redefinition of construct identity** | `construct.yaml` is identity, `identity/<PERSONA>.md` is persona, `skills/<slug>/SKILL.md` are skills. The substrate reads **only** `tools.{allowlist,denylist,required}` + `adapter.{…}` from the manifest — nothing else. |
+| **a replacement for Loa's L1-L5** | It complements the framework's in-session construct support; it does not replace it. Different operators want different runtimes. |
+| **its own embodied construct** | It now ships a real `construct.yaml` (`type: skill-pack`, `personas: []`, `skills: []`) — a manifest that declares its own emptiness. It is an installable *runtime* construct, but there is nothing to embody: `@construct-construct-rooms-substrate` yields nothing useful. Mechanism, not voice. |
+
+---
+
+## Responsibilities
 
 | Concern | Owner |
 |---|---|
-| Skill execution surface (slash commands, gates, beads, golden path) | **Loa framework** |
-| Construct contract (`construct.yaml` schema, identity, skills, taste, manifest) | **Loa framework** + individual construct repos |
-| In-session construct awareness (index, name resolution, composition routing, archetype, ambient greeting) | **Loa framework** ✅ already shipped (cycle-051) |
-| Construct registry, distribution, install, version sync | **Loa Constructs Network** ([this repo](https://github.com/0xHoneyJar/loa-constructs)) |
-| Domain expertise, persona content, skills, taste tokens | **Individual construct packs** (e.g. `construct-artisan`, `construct-k-hole`) |
-| **Native-subagent invocation boundaries (rooms), generator, composition runner, handoff packets, hooks** | **`construct-rooms-substrate`** ← this pack |
-| Other runtime targets (OpenAI Agent SDK, headless Python, in-browser) | **Separate substrate packs** (future, not this one) |
-| Per-repo generated outputs (`.claude/agents/`, `.run/`, `grimoires/`) | **Per-repo (consumer)** |
-| Sandbox isolation (process, network, fs) | **Not yet shipped** (future cycle) |
+| What a construct *knows / does* (persona, skills, taste) | the construct's own pack |
+| How a construct is *invoked, traced, composed* (rooms, packets, Form C) | **this pack** |
+| The composition runtime + seam-cut shape | **this pack** |
+| Which *model* a construct runs on | Hounfour routing (see below) — **not** this pack |
+| The composition *bridge schema* (`composition.schema.json`, v1.3 `hitl_by_nature`) | the **host** (`loa-constructs`); the substrate only **reads** it |
+| Cross-construct + cross-runtime concerns | the Loa framework |
 
-If you find yourself asking "where does X go," the test is: does it know about a specific construct? If yes — construct pack. Does it know about a specific runtime? If yes — substrate pack (this one or a sibling). Does it know about all constructs and all runtimes? If yes — Loa framework.
-
----
-
-## Status
-
-**Experimental.** This pack was authored as the deliverable of the `cycle-construct-rooms` cycle (simstim-20260509-aead9136). It is currently staged in the loa-constructs monorepo at [`construct-rooms-substrate/`](.) pending publication as a standalone construct pack repo and registration with the Loa Constructs Network.
-
-Until publication:
-
-- Operators can copy the contents into a repo's `.claude/{scripts,data,hooks,agents}/` paths to enable the rooms runtime
-- All 35 bats acceptance tests pass when run from a repo with the contents installed
-- The originating cycle's PR `loa-constructs#234` ships the pilot in the loa-constructs repo itself
-
-After publication (planned next cycle):
-
-- `/constructs install construct-rooms-substrate` will provide the substrate to any Loa-mounted repo
-- Construct sync workflow will trigger `construct-adapter-gen.sh` post-install to populate `.claude/agents/`
-- Other repos (mcv-interface, mibera-interface, etc.) become opt-in clients
+**Where does X go?** Does it know about a specific construct? → construct pack. A specific runtime? → substrate pack. *All* constructs **and** *all* runtimes? → Loa framework.
 
 ---
 
 ## Runtime target
 
-Claude Code v2.1.0+ — the version where project agents at `.claude/agents/<name>.md` are loaded into the agent registry and surfaced via `@`-mention typeahead.
+Claude Code **v2.1.0+** — the version where project agents at `.claude/agents/<name>.md` are loaded into the registry and surfaced via `@`-mention typeahead.
 
-**Empirically verified during cycle Sprint 0** (probe-tool-restricted experiment):
-
-- `claude agents` lists project agents from `.claude/agents/*.md` ✅
-- `@agent-construct-<slug>` typeahead works in operator's main session ✅
-- Subagent transcripts persist at `~/.claude/projects/<project>/<session>/subagents/agent-<id>.jsonl` ✅
-- The parent session's `Agent` tool has a **fixed `subagent_type` allowlist computed at session start** — project agents from `.claude/agents/` are NOT in it ❌ (this is why room invocation goes via @-mention, not via skill-side `Agent()` calls)
-
-The PRD §6.4 FR-4 invocation contract reflects this empirical finding.
+Sprint-0 probe facts that still hold: transcripts persist; the agent registry is read at session start. The probe also found that the parent session's `Agent` tool has a **fixed `subagent_type` allowlist computed at session start** that excludes project agents — which is precisely the gap Form C routes around: it spawns via the **Workflow tool** (`agent()` inside a CC dynamic workflow), not the parent `Agent` tool. `agentType` resolution is **probe-validated** (`construct-the-mint` resolves → embodies CELLINI → refuses out-of-domain).
 
 ---
 
-## Acceptance gates
+## Acceptance gates → tests
 
-Eight gates from the originating cycle's PRD §8 — all have green test infrastructure:
+The 8 PRD gates (T1–T8) are covered by **115 `@test` assertions across 8 bats suites**:
 
-| Gate | Test suite | Tests |
-|---|---|---|
-| T1 — Native Adapter Discovery | `pilot-adapter-discovery.bats` | 10 |
-| T2 — Explicit Invocation Only In Rooms | `composition-pilot.bats` | 3 |
-| T3 — Handoff Packet Surfacing | `composition-pilot.bats` | 2 |
-| T4 — Composition As Visible Agent Chain | `composition-pilot.bats` | 3 |
-| T5 — Headless Parity | `headless-parity.bats` | 7 |
-| T6 — Tool Mandate Enforcement | `tool-mandate.bats` | 5 |
-| T7 — AskUserQuestion Gate | `tool-mandate.bats` | 3 |
-| T8 — Delete-First Migration | `migrate-subagents-verify.sh` | 4 (script-based) |
+| Suite | `@test` |
+|---|---|
+| `form-c-dispatch.bats` | 34 |
+| `pair-relay-validate.bats` | 20 |
+| `surface-envelope.bats` | 14 |
+| `pair-relay-orchestrator.bats` | 12 |
+| `pilot-adapter-discovery.bats` | 10 |
+| `tool-mandate.bats` | 10 |
+| `composition-pilot.bats` | 8 |
+| `headless-parity.bats` | 7 |
 
-35 acceptance assertions total.
+Form C runtime behavior (`converged` / `cap_reached` / `degraded` / operator-skip / throw) is exercised through the `run-emitted-segment.js` dry-run harness — scripted agent responses, zero token spend.
 
 ---
 
-## How to use (when published)
+## How to use
 
 ```bash
-# 1. Install the substrate
-/constructs install construct-rooms-substrate
+# 1. generate native-subagent adapters from synced constructs
+bash scripts/construct-adapter-gen.sh            # → .claude/agents/construct-<slug>.md
 
-# 2. Generate adapters for every construct in this repo
-bash .claude/scripts/construct-adapter-gen.sh
+# 2. compile a composition into Form C workflow-segments (validates BEFORE spend)
+bash scripts/compose-dispatch.sh compositions/code-implement-and-review.yaml --form-c
+#    → .run/compose/<run_id>/{ workflows/<comp>.segment-K.workflow.js,
+#                              form-c-manifest.json, composition.json, orchestrator.jsonl }
+#    → .run/rooms/<room_id>.json   (per-stage room-activation packets)
+#    exit 3 = "awaiting main-loop run": the CC main loop runs each segment via the
+#             Workflow tool and drives the seam protocol between segments.
 
-# 3. Verify
-claude agents | grep construct-
+# 3. (optional) gate an emitted segment offline
+node scripts/lib/workflow-syntax-check.js .run/compose/<run_id>/workflows/<seg>.workflow.js
+node scripts/lib/run-emitted-segment.js   <seg>.workflow.js '<responsesByAgentType>' '<args>'
 
-# 4. Invoke a construct as a room
-# (in your operator session)
-@agent-construct-artisan review the visual surface at src/components/Card.tsx
+# 4. run the test suite
+bats tests/integration/
 ```
 
-For multi-stage compositions, use `compose-dispatch.sh` against a `composition.yaml` describing the stages. See `docs/runtime/construct-adapters.md` for the full operator workflow.
+In practice you do not hand-run this — the **`/compose` skill** reaches for the Form C runtime automatically when composition work appears (run / fire / dogfood a composition, audit-feel / code-implement-and-review / pair-relay chains, "use construct X then Y with a gate").
 
----
-
-## What it composes with
-
-Designed to coexist with:
-
-- **Loa framework's L1-L5 in-session construct support** — both runtimes work; operator picks per invocation
-- **L6 structured-handoff library** — shares JCS canonicalization, atomic-publish patterns; handoff packet schema is a sibling, not a child
-- **Existing `compose-run.sh`** — composition runner extends, does not replace
-- **Existing `.claude/subagents/`** — migrated to `.claude/agents/loa-validator-*` per Sprint 6
-
-Designed NOT to require:
-
-- Custom CLI surface (no `loa-rooms run …` command — uses existing dispatchers)
-- New room schema beyond invocation/composition envelopes
-- Visual UI (text contract first; tmux renderer remains optional debug surface)
-
----
-
-## Origin
-
-This pack distills the deliverables of the `cycle-construct-rooms` cycle (May 2026). The originating brief, PRD, SDD, sprint plan, and Bridgebuilder reviews are local-only operator artifacts under `grimoires/loa/` in the cycle's repo. The cycle's PR ([`loa-constructs#234`](https://github.com/0xHoneyJar/loa-constructs/pull/234)) shipped the pilot.
-
-Source brief: "Loa-First Construct Invocation Boundaries" — operator-private; activation receipt declared at simstim cycle entry; expiry: cycle close.
+Single-construct, interactive invocation (`@construct-<slug>`) remains available as the legacy single-room path.
 
 ---
 
 ## Model routing & token cost (open design)
 
-Each generated adapter currently emits `model: inherit` in its frontmatter — meaning the spawned subagent inherits the parent session's model and thinking effort. If your operator session is running **opus + high thinking**, every spawned construct also runs opus + high thinking. With 31 constructs and any composition that touches a few of them, token cost compounds quickly.
+Generated adapters inherit the framework default (`model: inherit`), which can cascade Opus across an estate of constructs. **The substrate does not decide which model a construct runs on** — it is mechanism, not opinion. When Hounfour's task-adaptive routing contract finalizes, it becomes the source of truth and the substrate's only job is to render that decision into adapter frontmatter.
 
-This is an open architectural concern, not solved by this pack:
-
-- **What constructs *should* do (operator's stated direction):** model selection should be **task-adaptive** and routed via Hounfour (`loa-hounfour@8.3.1`, the L2 protocol layer). A construct typically shouldn't need to declare which model runs it — research-class tasks route to opus, craft-class to sonnet, action-class to haiku, and an operator can always override. Hounfour's intelligence-routing contract is still being specified ([@janitooor](https://github.com/janitooor) is working through the details); the substrate cannot bake in a final answer until that lands.
-
-- **What constructs *can* do today (interim):**
-  - **Per-adapter override**: edit a generated `.claude/agents/construct-X.md` to set `model: sonnet` (or `haiku-4-5`, etc.) — but regeneration overwrites unless the manifest `adapter.model` field is set.
-  - **Per-manifest override**: set `adapter.model: <alias>` in a construct's `construct.yaml` (v4 schema field). Generator honors it.
-  - **Global default override**: set `LOA_ROOMS_DEFAULT_MODEL` env var (e.g., `LOA_ROOMS_DEFAULT_MODEL=sonnet bash construct-adapter-gen.sh`) — generator uses it for any construct without an explicit `adapter.model`. Not yet implemented; future-cycle work.
-
-- **What the substrate explicitly does NOT decide:** which model a given construct should use. `construct-rooms-substrate` is mechanism, not opinion. When Hounfour's routing contract finalizes, it becomes the source of truth; the substrate's job is to render whatever model decision Hounfour produces into the adapter frontmatter.
-
-If you've just deployed the global mirror and your token cost is climbing, the immediate lever is:
-
-```bash
-# Quick interim mass-override of the global mirror only (does not affect future regens)
-sed -i.bak 's|^model: inherit$|model: sonnet|' ~/.claude/agents/construct-*.md
-rm -f ~/.claude/agents/construct-*.md.bak
-```
-
-Re-running `cp .claude/agents/construct-*.md ~/.claude/agents/` from loa-constructs will revert this — until either the manifest declares `adapter.model` per-construct, or the global config knob lands.
-
-## Trade-offs (the honest version)
-
-This substrate makes a specific bet: **operator-visible Claude Code subagents are a useful runtime affordance, worth the additional machinery.** That bet has costs:
-
-- More files per repo (~38 generated adapters + 8 scripts + 3 schemas + 2 hooks)
-- Form A operator-paste workflow for interactive composition (operator-in-the-loop UX bottleneck)
-- Hook integration with Claude Code's `.claude/settings.json` is operator-controlled (per-repo decision)
-- Specific runtime opinion locked in (rooms = subagents; not OpenAI agents, not headless Python)
-
-The alternative — continuing with Loa's existing in-session L1-L5 only — has different trade-offs:
-
-- Lighter (no extra machinery)
-- No operator-visible spawn surface (can't see "the construct ran" in the Claude Code UI panel)
-- Composition is logical (path overlap) rather than runtime-enforced (separate transcripts)
-- No tool-mandate observability per spawn
-
-Different operators want different runtimes. This pack is one runtime; the framework's existing L1-L5 is another. Neither is wrong.
+Interim overrides remain manual (per-adapter frontmatter, per-manifest `adapter.model`, or a mass `sed` over `.claude/agents/`). A central `LOA_ROOMS_DEFAULT_MODEL` knob is **not yet implemented**.
 
 ---
 
-## License
+## Trade-offs (the honest version)
 
-AGPL-3.0 — matches Loa framework + Loa Constructs Network conventions.
+**The bet:** operator-visible, packet-emitting Claude Code subagents are a useful runtime affordance, worth the additional machinery.
+
+**Its costs:**
+- A compile step before every composition run (validate → cut → emit), plus main-loop orchestration overhead (run segment → wrap/validate handoff → seam protocol → fire next).
+- A composition is now an *opinionated* shape (segments cut at seams), not a free-form pipe — the substrate prescribes a runtime shape even though it holds no domain opinion.
+- Form A/B retirement is gated on the loom ribbon re-pointing at `/workflows`; two paths coexist until then.
+- The bridge schema (`hitl_by_nature`, v1.3) lives host-side, so a schema bump is a cross-repo coordination, not a local edit.
+
+**The alternative** — staying L1-L5-only — costs you the visible spawn surface, the typed handoff, and the clew loop, but carries none of the above machinery. Different operators want different runtimes. This pack is one runtime; the framework's L1-L5 is another. Neither is wrong.
+
+---
+
+## Status & origin
+
+Experimental, **v0.3.0**, spun out to its own repo (`0xHoneyJar/construct-rooms-substrate`). Form C merged to `main` as `fc9897a` (PR #4, cycle-053); 115 tests green; `compositions/` is live with the `code-implement-and-review` pilot plus three relay references.
+
+Authored as the deliverable of `cycle-construct-rooms`; the runtime + adapters are this repo's own source, edited directly here (framework `/implement` is walled off from the consumer `.claude/` System Zone). The composition bridge schema stays host-side in `loa-constructs`. Originating brief / PRD / SDD remain local-only under `grimoires/` (activation-receipt required before treating them as doctrine).
 
 ---
 
 ## See also
 
-- [`loa#452`](https://github.com/0xHoneyJar/loa/issues/452) — RFC: First-Class Construct Support (CLOSED, addressed by [`loa#454`](https://github.com/0xHoneyJar/loa/pull/454))
-- [`loa-constructs#181`](https://github.com/0xHoneyJar/loa-constructs/issues/181) — RFC: Network-side schema hygiene + install surface
-- [`loa-constructs#234`](https://github.com/0xHoneyJar/loa-constructs/pull/234) — the originating cycle's PR (pilot in loa-constructs)
-- `docs/runtime/construct-adapters.md` (in this pack) — operator workflow guide
+- `docs/compose-as-cc-workflow.md` — Form C runtime + seam-protocol authority
+- `docs/cycles/cycle-053-compose-as-cc-workflow.md` — the build-spec
+- `docs/runtime/construct-adapters.md` · `docs/runtime/composition-patterns.md`
+- loa#452 · loa-constructs#181 / #234 — originating threads
+
+---
+
+## License
+
+AGPL-3.0.
