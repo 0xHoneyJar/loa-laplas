@@ -1,7 +1,7 @@
 schema_version: 4
 slug: construct-rooms-substrate
 name: Construct Rooms Substrate
-version: 0.1.0
+version: 0.3.0
 type: skill-pack
 short_description: "Substrate that puts every Loa construct into an isolated Claude Code subagent room"
 description: |

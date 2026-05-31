@@ -24,6 +24,17 @@ setup() {
     cd "$PROJECT_ROOT"
     AGENTS_DIR="$PROJECT_ROOT/.claude/agents"
     PACKS_DIR="$PROJECT_ROOT/.claude/constructs/packs"
+    # T1 is an INSTALLED-MODE acceptance suite: it asserts adapters were generated
+    # into <project>/.claude/agents by the generator at
+    # <project>/.claude/scripts/lib/adapter-generator.py. In the standalone substrate
+    # repo the generator lives at scripts/lib/ (not under .claude/), and
+    # adapter-generator.py resolves PROJECT_ROOT to parents[3] (ABOVE this repo), so
+    # adapters cannot be generated into this repo's .claude/agents here. Skip rather
+    # than fail when the installed layout is absent — matches the
+    # [[ -f "$DISPATCHER" ]] || skip idiom in composition-pilot.bats. Adapters are
+    # per-environment artifacts, never committed; CI exercises this in install mode.
+    [[ -f "$PROJECT_ROOT/.claude/scripts/lib/adapter-generator.py" ]] \
+        || skip "installed-mode adapter-discovery suite — generator not under .claude/scripts (standalone substrate repo)"
 }
 
 # -----------------------------------------------------------------------------
