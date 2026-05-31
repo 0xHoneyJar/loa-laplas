@@ -56,9 +56,27 @@ if [[ -n "${LOA_PROJECT_ROOT:-}" ]]; then
 else
     PROJECT_ROOT="$(cd "$SUBSTRATE_ROOT/.." && pwd)"
 fi
-COMPOSE_SCHEMA="$PROJECT_ROOT/.claude/schemas/runtime/composition.schema.json"
+# Composition (bridge) schema. Canonical home is the host (loa-constructs); this
+# script reads it from the installed PROJECT_ROOT. For substrate-standalone runs /
+# CI, LOA_COMPOSE_SCHEMA overrides, and a substrate-local copy is a last resort.
+if [[ -n "${LOA_COMPOSE_SCHEMA:-}" ]]; then
+    COMPOSE_SCHEMA="$LOA_COMPOSE_SCHEMA"
+elif [[ -f "$PROJECT_ROOT/.claude/schemas/runtime/composition.schema.json" ]]; then
+    COMPOSE_SCHEMA="$PROJECT_ROOT/.claude/schemas/runtime/composition.schema.json"
+elif [[ -f "$SUBSTRATE_ROOT/data/runtime-schemas/composition.schema.json" ]]; then
+    COMPOSE_SCHEMA="$SUBSTRATE_ROOT/data/runtime-schemas/composition.schema.json"
+else
+    COMPOSE_SCHEMA="$PROJECT_ROOT/.claude/schemas/runtime/composition.schema.json"
+fi
 HANDOFF_VALIDATOR="$PROJECT_ROOT/.claude/scripts/handoff-validate.sh"
 ROOM_VALIDATOR="$PROJECT_ROOT/.claude/scripts/room-packet-validate.sh"
+# Form C (cycle-053) libs — the cut algorithm + segment emitter + syntax checker.
+COMPOSE_CUT_LIB="$SCRIPT_DIR/lib/compose-cut.py"
+SEGMENT_EMITTER_LIB="$SCRIPT_DIR/lib/segment-emitter.py"
+WORKFLOW_SYNTAX_CHECK="$SCRIPT_DIR/lib/workflow-syntax-check.js"
+# Substrate-canonical handoff/room schemas (fallback when host paths absent).
+HANDOFF_SCHEMA_SUBSTRATE="$SUBSTRATE_ROOT/data/trajectory-schemas/construct-handoff.schema.json"
+ROOM_SCHEMA_SUBSTRATE="$SUBSTRATE_ROOT/data/trajectory-schemas/room-activation-packet.schema.json"
 
 # Pair-relay (cycle-craft-cluster Sprint 2 B.4) — substrate-canonical first,
 # fall back to host-installed locations.
@@ -76,6 +94,13 @@ Usage: compose-dispatch.sh <composition.yaml> [options]
 Options:
   --interactive    Force interactive mode (Form A — operator pastes dispatch prompt)
   --headless       Force headless mode (Form B — claude -p; partial in Sprint 2)
+  --form-c         Form C (cycle-053): compile the composition into Claude Code
+                   dynamic-workflow segments cut at gate seams. Emits one
+                   .workflow.js per autonomous segment + room packets + a manifest;
+                   the Claude Code main loop runs them via the Workflow tool and
+                   drives the seam protocol. (alias: --workflow)
+  --seam-roles R   Comma-separated roles treated as seams in the cut
+                   (default: hard-stop,craft-gate,gate; env LOA_SEAM_ROLES)
   --run-id ID      Specific run_id (default: generated YYYYMMDD-HEXSHORT)
   --stage N        Execute only stage N (0-indexed)
   --dry-run        Validate composition; emit room packets; do not dispatch
@@ -85,7 +110,7 @@ Exit codes:
   0  All stages dispatched + handoffs validated
   1  Composition validation failed
   2  Stage failed
-  3  Awaiting operator (Form A interactive)
+  3  Awaiting operator (Form A interactive) / awaiting main-loop run (Form C)
 EOF
 }
 
@@ -95,12 +120,15 @@ RUN_ID=""
 ONE_STAGE=""
 DRY_RUN=0
 OUTPUT_JSON=0
+SEAM_ROLES="${LOA_SEAM_ROLES:-hard-stop,craft-gate,gate}"  # Form C cut: seam roles
 INJECT_HANDOFFS=()  # cycle-craft-cluster B.4: bats test hook, "<stage>:<path>"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --interactive) MODE="interactive"; shift ;;
         --headless) MODE="headless"; shift ;;
+        --form-c|--workflow) MODE="workflow"; shift ;;
+        --seam-roles) SEAM_ROLES="$2"; shift 2 ;;
         --run-id) RUN_ID="$2"; shift 2 ;;
         --stage) ONE_STAGE="$2"; shift 2 ;;
         --dry-run) DRY_RUN=1; shift ;;
@@ -159,6 +187,180 @@ log_event() {
         '{event: $event, ts: $ts, run_id: $run_id, payload: $payload}' >> "$ORCHESTRATOR_LOG"
 }
 
+# =============================================================================
+# Form C (cycle-053): compile a composition into Claude Code dynamic-workflow
+# segments. This script is the COMPILER; the Claude Code main loop is the
+# EXECUTOR (runs each emitted segment via the Workflow tool + the seam protocol).
+# =============================================================================
+
+# Build the per-stage room-activation packets (invocation_path=agent_call so the
+# construct runs in ROOM AUTHORITY, not studio mode — FINDINGS #2b). Writes each
+# packet to ROOMS_DIR and prints a JSON map {"<stage>": <packet>} to stdout.
+# Inputs passed via argv (injection-safe — no shell interpolation into Python).
+_build_room_packets_map() {
+    local cycle_id="$1"
+    python3 - "$COMP_JSON" "$cycle_id" "$RUN_ID" "$ROOMS_DIR" <<'PYEOF'
+import json, sys, hashlib
+try:
+    import rfc8785
+    def canon(b): return rfc8785.dumps(b)
+except Exception:
+    # Deterministic fallback so room_id is still content-addressable offline.
+    def canon(b): return json.dumps(b, sort_keys=True, separators=(",", ":")).encode()
+
+comp = json.loads(sys.argv[1]); cycle_id = sys.argv[2]; run_id = sys.argv[3]; rooms_dir = sys.argv[4]
+out = {}
+for st in sorted(comp.get("chain", []), key=lambda s: float(s.get("stage", 0))):
+    writes = st.get("writes") or []
+    body = {
+        "cycle_id": cycle_id,
+        "construct_slug": st.get("construct"),
+        "persona": (st.get("persona") if st.get("persona") not in ("", None) else None),
+        "mode": "room",
+        "invocation_path": "agent_call",   # Form C: programmatic agent() spawn
+        "inputs": [],
+        "expected_output_type": (writes[0] if writes else "Verdict"),
+        "expected_handoff_path": None,
+        "composition_run_id": run_id,
+        "stage_index": None,
+        "forbidden_context": [],
+        "allowed_skills": ([st.get("skill")] if st.get("skill") else []),
+        "created_at": "1970-01-01T00:00:00Z",  # stable for content-addressing; runner stamps logs
+        "created_by": "compose-dispatch.sh (form-c)",
+    }
+    room_id = "sha256:" + hashlib.sha256(canon(body)).hexdigest()
+    packet = dict(body); packet["room_id"] = room_id
+    path = f"{rooms_dir}/{room_id[len('sha256:'):]}.json"
+    with open(path, "w") as f:
+        json.dump(packet, f, indent=2)
+    out[str(st.get("stage"))] = packet
+print(json.dumps(out))
+PYEOF
+}
+
+_run_form_c() {
+    local comp_name cycle_id wf_dir plan schema_arg authored_at
+    comp_name="$(echo "$COMP_JSON" | jq -r '.name // "composition"')"
+    cycle_id="${LOA_CYCLE_ID:-cycle-053}"
+    wf_dir="$RUN_DIR/workflows"
+
+    # 1. VALIDATE (offline-robust) + CUT — before any token OR artifact is spent
+    # (NFR-2 cost-ordering: an invalid composition emits NOTHING).
+    schema_arg=()
+    [[ -f "$COMPOSE_SCHEMA" ]] && schema_arg=(--schema "$COMPOSE_SCHEMA")
+    plan="$(printf '%s' "$COMP_JSON" | python3 "$COMPOSE_CUT_LIB" - "${schema_arg[@]}" --seam-roles "$SEAM_ROLES" 2>/dev/null)"
+    if [[ -z "$plan" ]] || [[ "$(echo "$plan" | jq -r '.ok // false')" != "true" ]]; then
+        echo "ERROR: Form C validate/cut failed for '$comp_name':" >&2
+        echo "${plan:-<no output>}" | jq -r '.errors[]? | "  - \(.path | tojson): \(.msg)"' 2>/dev/null >&2 || echo "  $plan" >&2
+        log_event "form_c.cut_failed" "$(echo "${plan:-{\}}" | jq -c '. // {}')"
+        return 1
+    fi
+
+    # Validation passed — only NOW create the emit dir + persist the composition.
+    mkdir -p "$wf_dir"
+    printf '%s' "$COMP_JSON" | jq . > "$RUN_DIR/composition.json"
+
+    local n_segs n_seams
+    n_segs="$(echo "$plan" | jq '.segments | length')"
+    n_seams="$(echo "$plan" | jq '.seams | length')"
+    log_event "compose.start" "$(jq -n --arg name "$comp_name" --arg mode "workflow" --arg cycle "$cycle_id" --argjson segs "$n_segs" --argjson seams "$n_seams" \
+        '{composition: $name, mode: $mode, cycle_id: $cycle, segments: $segs, seams: $seams}')"
+    log_event "form_c.cut" "$(echo "$plan" | jq -c '{segments: [.segments[] | {index, segment_name, kind, iterate, ends_at_seam}], seams: [.seams[] | {after_segment, kind, terminal}]}')"
+    [[ "$OUTPUT_JSON" == "1" ]] || echo "[compose-dispatch] Form C '$comp_name' — cut into $n_segs segment(s) + $n_seams seam(s) — run_id=$RUN_ID"
+
+    # 2. ROOM PACKETS (agent_call → room authority).
+    local rooms_map
+    rooms_map="$(_build_room_packets_map "$cycle_id")"
+    if [[ -z "$rooms_map" ]] || ! echo "$rooms_map" | jq -e 'type == "object"' >/dev/null 2>&1; then
+        echo "ERROR: Form C room-packet construction failed" >&2
+        log_event "form_c.room_packets_failed" "{}"
+        return 2
+    fi
+    # Validate each written room packet. Resolve the validator: host install first,
+    # then substrate-canonical (standalone / CI). Same for the schema path.
+    local room_validator="$ROOM_VALIDATOR"
+    [[ -x "$room_validator" ]] || room_validator="$SUBSTRATE_ROOT/scripts/room-packet-validate.sh"
+    local room_schema_arg=()
+    if [[ -f "$PROJECT_ROOT/.claude/data/trajectory-schemas/room-activation-packet.schema.json" ]]; then
+        room_schema_arg=(--schema "$PROJECT_ROOT/.claude/data/trajectory-schemas/room-activation-packet.schema.json")
+    elif [[ -f "$ROOM_SCHEMA_SUBSTRATE" ]]; then
+        room_schema_arg=(--schema "$ROOM_SCHEMA_SUBSTRATE")
+    fi
+    if [[ -x "$room_validator" ]]; then
+        while IFS= read -r rp_path; do
+            [[ -f "$rp_path" ]] || continue
+            if ! "$room_validator" "$rp_path" "${room_schema_arg[@]}" --json >/dev/null 2>&1; then
+                echo "ERROR: Form C room packet failed validation: $rp_path" >&2
+                "$room_validator" "$rp_path" "${room_schema_arg[@]}" >&2 2>&1 || true
+                log_event "form_c.room_packet_invalid" "$(jq -n --arg p "$rp_path" '{packet: $p}')"
+                return 2
+            fi
+        done < <(echo "$rooms_map" | jq -r '.[].room_id' | while read -r rid; do echo "$ROOMS_DIR/${rid#sha256:}.json"; done)
+    fi
+
+    # 3. EMIT each segment + syntax/determinism check (fail-closed before spend).
+    authored_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    local emitted_files="[]"
+    local si
+    for ((si=0; si<n_segs; si++)); do
+        local seg seg_name out_file
+        seg="$(echo "$plan" | jq -c ".segments[$si]")"
+        seg_name="$(echo "$seg" | jq -r '.segment_name')"
+        out_file="$wf_dir/${seg_name}.workflow.js"
+        if ! printf '%s' "$seg" | python3 "$SEGMENT_EMITTER_LIB" --segment - \
+                --composition "$RUN_DIR/composition.json" \
+                --room-packets "$rooms_map" \
+                --cycle-id "$cycle_id" --run-id "$RUN_ID" --authored-at "$authored_at" \
+                > "$out_file"; then
+            echo "ERROR: Form C emit failed for segment $si ($seg_name)" >&2
+            log_event "form_c.emit_failed" "$(jq -n --argjson idx "$si" --arg name "$seg_name" '{index: $idx, segment: $name}')"
+            return 2
+        fi
+        # Syntax + determinism gate (matches the runtime's Date/Math.random guard).
+        if command -v node >/dev/null 2>&1 && [[ -f "$WORKFLOW_SYNTAX_CHECK" ]]; then
+            if ! node "$WORKFLOW_SYNTAX_CHECK" "$out_file" >/dev/null 2>&1; then
+                echo "ERROR: emitted segment failed syntax/determinism check: $out_file" >&2
+                node "$WORKFLOW_SYNTAX_CHECK" "$out_file" >&2 || true
+                log_event "form_c.segment_invalid" "$(jq -n --arg f "$out_file" '{file: $f}')"
+                return 2
+            fi
+        fi
+        emitted_files="$(echo "$emitted_files" | jq --arg f "$out_file" '. + [$f]')"
+        log_event "form_c.segment_emitted" "$(jq -n --argjson idx "$si" --arg name "$seg_name" --arg file "$out_file" \
+            '{index: $idx, segment: $name, workflow_file: $file}')"
+        [[ "$OUTPUT_JSON" == "1" ]] || echo "[compose-dispatch]   segment $si → $out_file"
+    done
+
+    # 4. MANIFEST — the contract the main loop's seam protocol consumes.
+    local manifest="$RUN_DIR/form-c-manifest.json"
+    echo "$plan" | jq \
+        --arg run_id "$RUN_ID" --arg comp "$comp_name" --arg cycle "$cycle_id" \
+        --argjson files "$emitted_files" --argjson rooms "$rooms_map" \
+        --arg seam_doc "docs/compose-as-cc-workflow.md" \
+        '{
+            run_id: $run_id, composition: $comp, cycle_id: $cycle, mode: "workflow",
+            schema_version: .composition.schema_version, seam_roles: .composition.seam_roles,
+            segments: [ .segments[] as $s | $s + { workflow_file: $files[$s.index],
+                agent_types: [ $s.stages[] | "construct-" + .construct ] } ],
+            seams: [ .seams[] | . + { clew_targets: ( if .seam_stage then
+                [ { construct: .seam_stage.construct, skill: (.seam_stage.skill // "") } ] else [] end ) } ],
+            room_packets: $rooms,
+            seam_protocol: $seam_doc,
+            clew_capture: "scripts/clew/loa-clew-capture.sh"
+        }' > "$manifest"
+    log_event "form_c.manifest" "$(jq -n --arg m "$manifest" --argjson segs "$n_segs" --argjson seams "$n_seams" '{manifest: $m, segments: $segs, seams: $seams}')"
+    log_event "compose.awaiting_main_loop" "$(jq -n --argjson segs "$n_segs" '{segments: $segs, runner: "Claude Code Workflow tool"}')"
+
+    # 5. OUTPUT.
+    if [[ "$OUTPUT_JSON" == "1" ]]; then
+        jq -n --arg run_id "$RUN_ID" --arg comp "$comp_name" --argjson segs "$n_segs" --argjson seams "$n_seams" --arg manifest "$manifest" \
+            '{run_id: $run_id, composition: $comp, mode: "workflow", segments: $segs, seams: $seams, manifest: $manifest, awaiting_main_loop: true, exit_code: 3}'
+    else
+        echo "[compose-dispatch] Form C compiled — run each segment via the Workflow tool per: $manifest"
+    fi
+    return 3
+}
+
 # -----------------------------------------------------------------------------
 # Step 1: Validate composition YAML against schema
 # -----------------------------------------------------------------------------
@@ -176,6 +378,15 @@ PYEOF
 if [[ "$(echo "$COMP_JSON" | jq -r '._error // ""')" != "" ]]; then
     echo "ERROR: composition YAML parse failed: $(echo "$COMP_JSON" | jq -r '._error')" >&2
     exit 1
+fi
+
+# Form C (cycle-053): compile the composition into CC dynamic-workflow segments.
+# Runs its OWN offline-robust validate+cut (compose-cut.py) and exits — it does
+# not fall through to the Form A/B chain walk or the network-fragile inline
+# validator below. The main loop then runs the emitted segments + seam protocol.
+if [[ "$MODE" == "workflow" ]]; then
+    _run_form_c
+    exit $?
 fi
 
 # cycle-craft-cluster B.4 (RFC #235): read composition pattern at

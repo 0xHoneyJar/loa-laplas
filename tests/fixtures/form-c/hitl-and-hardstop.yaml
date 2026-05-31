@@ -1,0 +1,20 @@
+schema_version: "1.3"
+kind: workflow
+name: hitl-hardstop-probe
+description: Probe — hitl_by_nature and hard-stop each cut a standalone pure-pause seam, never automated.
+intent: "I want to confirm the third seam class (hitl_by_nature) and hard-stop both produce pure-pause seams."
+chain:
+  - stage: 1
+    construct: artisan
+    role: primary
+  - stage: 2
+    construct: the-mint
+    skill: prompting-images
+    role: primary
+    hitl_by_nature: true
+  - stage: 3
+    construct: crucible
+    role: primary
+  - stage: 4
+    construct: scar
+    role: hard-stop

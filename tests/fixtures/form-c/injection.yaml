@@ -1,0 +1,12 @@
+schema_version: "1.0"
+kind: workflow
+name: injection-probe
+description: 'Hostile desc "}); globalThis.PWNED=1; (function(){return ({ x: "end'
+intent: "I want to confirm composition string fields are json-escaped before entering emitted source (no breakout)."
+chain:
+  - stage: 1
+    construct: artisan
+    persona: 'P"); globalThis.PWNED2=1; ("'
+    role: primary
+    notes: 'Notes `${process.exit(1)}` "); log("INJECTED"); ("  and a newline
+      continues here with backtick ` and dollar ${x}'
