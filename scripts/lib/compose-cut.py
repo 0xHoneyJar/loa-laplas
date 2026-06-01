@@ -247,6 +247,32 @@ def cut(comp, seam_roles=None):
     if current:
         emit_segment(current)
 
+    # Warn when a construct-bearing stage was cut to a PURE seam and therefore will
+    # NOT run as an agent — the silent-elision trap (#11). A craft-gate/gate stage
+    # that names a real agent-construct but is not co-located into a preceding
+    # iterate segment never executes; authors usually meant it to run. Surface it
+    # (loud, non-fatal) instead of dropping the construct silently.
+    #
+    # Warn PER ELIDED STAGE — a seam stage is by construction never part of a segment.
+    # Do NOT gate on whether the same construct runs in some OTHER stage: a different
+    # stage using construct X running does not mean THIS elided stage runs (#15 fagan
+    # finding — track stages, not construct membership).
+    warnings = []
+    for seam in seams:
+        ss = seam.get("seam_stage") or {}
+        c = ss.get("construct")
+        if (
+            c
+            and c not in ("claude-code", "operator")
+            and not seam.get("autonomous_test_in_segment")
+        ):
+            warnings.append(
+                f"stage {ss.get('stage')} '{ss.get('name') or c}' (construct '{c}', "
+                f"{seam.get('reason')}) is cut as a SEAM (operator pause) and will NOT "
+                f"run as an agent. Use role:primary to run it as a stage, or set "
+                f"construct:claude-code if it is a pure operator gate."
+            )
+
     return {
         "composition": {
             "name": comp_name,
@@ -259,6 +285,7 @@ def cut(comp, seam_roles=None):
         },
         "segments": segments,
         "seams": seams,
+        "warnings": warnings,
     }
 
 

@@ -272,6 +272,16 @@ _run_form_c() {
     fi
     rm -f "$cut_err"
 
+    # Surface non-fatal cut warnings (#11): e.g. a construct-bearing stage cut to a
+    # PURE seam, which will NOT run as an agent — the author may not realize their
+    # construct was turned into an operator pause. Loud (stderr) but non-blocking.
+    # Redirection order matters (see the #8 fix): `>&2 2>/dev/null` sends jq's stdout
+    # to the real stderr, THEN drops jq's own stderr — `2>/dev/null >&2` would discard
+    # the warning by pointing stdout at the already-/dev/null'd fd2.
+    # printf (not echo) so the plan bytes reach jq exactly — echo may interpret
+    # backslash escapes / leading-dash options (fagan review of #11 cleanup).
+    printf '%s' "$plan" | jq -r '.warnings[]? | "  ⚠ compose: \(.)"' >&2 2>/dev/null || true
+
     # Validation passed — only NOW create the emit dir + persist the composition.
     mkdir -p "$wf_dir"
     printf '%s' "$COMP_JSON" | jq . > "$RUN_DIR/composition.json"
