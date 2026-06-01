@@ -248,13 +248,29 @@ _run_form_c() {
     # (NFR-2 cost-ordering: an invalid composition emits NOTHING).
     schema_arg=()
     [[ -f "$COMPOSE_SCHEMA" ]] && schema_arg=(--schema "$COMPOSE_SCHEMA")
-    plan="$(printf '%s' "$COMP_JSON" | python3 "$COMPOSE_CUT_LIB" - "${schema_arg[@]}" --seam-roles "$SEAM_ROLES" 2>/dev/null)"
+    # compose-cut.py exits NON-ZERO on an invalid composition and emits its
+    # {ok:false, errors:[...]} report on STDOUT. Under `set -euo pipefail`, a bare
+    # `plan="$(... | python3 ...)"` assignment propagates that intended non-zero exit
+    # and aborts the script HERE — before the error-reporting branch below ever runs.
+    # That is what surfaced to operators as a silent `exit 1` with no diagnostic.
+    # `|| true` keeps the validator's expected failure from killing its own report;
+    # stderr is captured (not discarded to /dev/null) so a validator *crash* traceback
+    # is surfaced too — previously the `2>/dev/null` hid it.
+    local cut_err; cut_err="$(mktemp)"
+    plan="$(printf '%s' "$COMP_JSON" | python3 "$COMPOSE_CUT_LIB" - "${schema_arg[@]}" --seam-roles "$SEAM_ROLES" 2>"$cut_err")" || true
     if [[ -z "$plan" ]] || [[ "$(echo "$plan" | jq -r '.ok // false')" != "true" ]]; then
         echo "ERROR: Form C validate/cut failed for '$comp_name':" >&2
-        echo "${plan:-<no output>}" | jq -r '.errors[]? | "  - \(.path | tojson): \(.msg)"' 2>/dev/null >&2 || echo "  $plan" >&2
+        # Redirection order is load-bearing: `>&2 2>/dev/null` sends jq's STDOUT to the
+        # real stderr, THEN routes jq's own stderr to /dev/null. The previous order
+        # (`2>/dev/null >&2`) pointed stdout at the already-/dev/null'd fd2 — so the
+        # error report was silently discarded even when it was correctly generated.
+        echo "${plan:-<no output>}" | jq -r '.errors[]? | "  - \(.path | tojson): \(.msg)"' >&2 2>/dev/null || echo "  ${plan:-<no output>}" >&2
+        [[ -s "$cut_err" ]] && { echo "  validator stderr:" >&2; sed 's/^/    /' "$cut_err" >&2; }
+        rm -f "$cut_err"
         log_event "form_c.cut_failed" "$(echo "${plan:-{\}}" | jq -c '. // {}')"
         return 1
     fi
+    rm -f "$cut_err"
 
     # Surface non-fatal cut warnings (#11): e.g. a construct-bearing stage cut to a
     # PURE seam, which will NOT run as an agent — the author may not realize their
