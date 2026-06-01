@@ -67,12 +67,75 @@ else
 fi
 
 # 4. adapters -----------------------------------------------------------------
-n_adapters=$(ls "$AGENTS_DIR"/construct-*.md 2>/dev/null | wc -l | tr -d ' ')
-if [[ "$n_adapters" -gt 0 ]]; then
-    row "$green" "adapters" "$n_adapters construct-* agents available globally"
-else
+# Count INVOKABLE agent types, not adapter FILES (#12). An adapter whose YAML
+# frontmatter lacks a non-empty `name` or `description` is SILENTLY DROPPED from the
+# agent registry — the file exists and the old file-count reported it green, but
+# agentType resolution fails at run time (root cause of the construct-arneson silent
+# drop). Readiness must be true at the point of consumption, not asserted by a count.
+#
+# Parse the frontmatter with a REAL YAML parser (the registry's own contract), NOT
+# grep/sed: regex YAML-parsing false-greens on quoting/empty-value variants —
+# `description: ''`, `description:` (null), `'' # comment`, a missing closing `---`,
+# etc. (fagan #12, rounds 2-5). NO regex fallback: guessing at YAML always reintroduces
+# some false-green. A leading `--- … ---` block (closing delimiter required) is decoded
+# by PyYAML; both fields must be non-empty strings. If PyYAML is absent — already a
+# broken state, since compose-dispatch needs it to parse compositions at all — the scan
+# reports SKIPPED (sentinel n_ok=-1) and the doctor warns rather than guessing.
+adapter_scan=$(python3 - "$AGENTS_DIR" <<'PY'
+import sys, os, re, glob
+try:
+    import yaml
+except Exception:
+    yaml = None
+
+files = sorted(glob.glob(os.path.join(sys.argv[1], "construct-*.md")))
+if yaml is None:
+    print("%d\t-1\t" % len(files))   # cannot validate without a YAML parser; never guess
+    sys.exit(0)
+
+n_ok = 0
+dropped = []
+for f in files:
+    try:
+        text = open(f, encoding="utf-8", errors="replace").read()
+    except Exception:
+        text = ""
+    # Frontmatter = a LEADING `--- … ---` block; the closing delimiter is required.
+    m = re.match(r"^---\n(.*?)\n---\s*\n", text, re.DOTALL)
+    ok = False
+    if m:
+        try:
+            data = yaml.safe_load(m.group(1))
+            if isinstance(data, dict):
+                nm, desc = data.get("name"), data.get("description")
+                ok = (isinstance(nm, str) and nm.strip() != ""
+                      and isinstance(desc, str) and desc.strip() != "")
+        except Exception:
+            ok = False
+    if ok:
+        n_ok += 1
+    else:
+        dropped.append(os.path.basename(f)[:-3].replace("construct-", "", 1))
+print("%d\t%d\t%s" % (len(files), n_ok, " ".join(dropped)))
+PY
+)
+IFS=$'\t' read -r n_files n_ok dropped <<< "$adapter_scan"
+if [[ "$n_files" -eq 0 ]]; then
     row "$red" "adapters" "no construct-* adapters in $AGENTS_DIR — agentTypes won't resolve"
     hard_fail=1
+elif [[ "$n_ok" -eq -1 ]]; then
+    # PyYAML absent — cannot validate frontmatter without guessing (and guessing is
+    # what reintroduced the false-greens). Warn honestly rather than claim invokability.
+    row "$amber" "adapters" "$n_files adapter files present, but invokability NOT verified — PyYAML unavailable (pip install pyyaml; compose-dispatch needs it too)"
+elif [[ -n "$dropped" ]]; then
+    # A detected-but-dropped adapter is a real readiness FAILURE — agentType resolution
+    # is broken for that construct — so fail the gate, don't merely warn (fagan review
+    # of #12: amber-without-hard_fail is a yellower false-green that still exits 0, the
+    # exact pathology this fix exists to kill).
+    row "$red" "adapters" "$n_ok/$n_files construct-* agents INVOKABLE — these would be SILENTLY DROPPED by the registry (empty name/description; regenerate via construct-adapter-gen):$dropped"
+    hard_fail=1
+else
+    row "$green" "adapters" "$n_ok construct-* agents invokable (frontmatter-validated, not just file-counted)"
 fi
 
 # 5. node ---------------------------------------------------------------------
