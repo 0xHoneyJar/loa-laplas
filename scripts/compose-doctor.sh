@@ -89,7 +89,12 @@ if [[ "$n_files" -eq 0 ]]; then
     row "$red" "adapters" "no construct-* adapters in $AGENTS_DIR — agentTypes won't resolve"
     hard_fail=1
 elif [[ -n "$dropped" ]]; then
-    row "$amber" "adapters" "$n_ok/$n_files construct-* agents INVOKABLE — would be silently dropped by the registry (empty name/description; regenerate via construct-adapter-gen):$dropped"
+    # A detected-but-dropped adapter is a real readiness FAILURE — agentType resolution
+    # is broken for that construct — so fail the gate, don't merely warn (fagan review
+    # of #12: amber-without-hard_fail is a yellower false-green that still exits 0, the
+    # exact pathology this fix exists to kill).
+    row "$red" "adapters" "$n_ok/$n_files construct-* agents INVOKABLE — these would be SILENTLY DROPPED by the registry (empty name/description; regenerate via construct-adapter-gen):$dropped"
+    hard_fail=1
 else
     row "$green" "adapters" "$n_ok construct-* agents invokable (frontmatter-validated, not just file-counted)"
 fi
