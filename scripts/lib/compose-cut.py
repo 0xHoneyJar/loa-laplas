@@ -252,12 +252,11 @@ def cut(comp, seam_roles=None):
     # that names a real agent-construct but is not co-located into a preceding
     # iterate segment never executes; authors usually meant it to run. Surface it
     # (loud, non-fatal) instead of dropping the construct silently.
-    running = {
-        st.get("construct")
-        for seg in segments
-        for st in seg["stages"]
-        if st.get("construct")
-    }
+    #
+    # Warn PER ELIDED STAGE — a seam stage is by construction never part of a segment.
+    # Do NOT gate on whether the same construct runs in some OTHER stage: a different
+    # stage using construct X running does not mean THIS elided stage runs (#15 fagan
+    # finding — track stages, not construct membership).
     warnings = []
     for seam in seams:
         ss = seam.get("seam_stage") or {}
@@ -265,7 +264,6 @@ def cut(comp, seam_roles=None):
         if (
             c
             and c not in ("claude-code", "operator")
-            and c not in running
             and not seam.get("autonomous_test_in_segment")
         ):
             warnings.append(
