@@ -278,7 +278,9 @@ _run_form_c() {
     # Redirection order matters (see the #8 fix): `>&2 2>/dev/null` sends jq's stdout
     # to the real stderr, THEN drops jq's own stderr — `2>/dev/null >&2` would discard
     # the warning by pointing stdout at the already-/dev/null'd fd2.
-    echo "$plan" | jq -r '.warnings[]? | "  ⚠ compose: \(.)"' >&2 2>/dev/null || true
+    # printf (not echo) so the plan bytes reach jq exactly — echo may interpret
+    # backslash escapes / leading-dash options (fagan review of #11 cleanup).
+    printf '%s' "$plan" | jq -r '.warnings[]? | "  ⚠ compose: \(.)"' >&2 2>/dev/null || true
 
     # Validation passed — only NOW create the emit dir + persist the composition.
     mkdir -p "$wf_dir"
