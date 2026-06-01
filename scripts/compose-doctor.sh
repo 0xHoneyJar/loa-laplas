@@ -82,8 +82,11 @@ for f in "$AGENTS_DIR"/construct-*.md; do
     # when the frontmatter fields are missing, preserving the false-green this fix
     # exists to kill (fagan review of #12).
     fm=$(awk 'NR==1 && $0=="---"{infm=1; next} infm && $0=="---"{exit} infm' "$f")
-    nm=$(printf '%s\n' "$fm" | grep -m1 '^name:' | sed 's/^name:[[:space:]]*//; s/^"//; s/"$//')
-    desc=$(printf '%s\n' "$fm" | grep -m1 '^description:' | sed 's/^description:[[:space:]]*//; s/^"//; s/"$//')
+    # `|| true`: a missing field makes grep exit 1. The doctor runs `set -uo pipefail`
+    # (no `-e`), so it does not abort today — but the guard keeps the adapter scan robust
+    # if `-e` is ever added: the loop must RECORD the drop, not die mid-scan (fagan #12).
+    nm=$(printf '%s\n' "$fm" | grep -m1 '^name:' | sed 's/^name:[[:space:]]*//; s/^"//; s/"$//' || true)
+    desc=$(printf '%s\n' "$fm" | grep -m1 '^description:' | sed 's/^description:[[:space:]]*//; s/^"//; s/"$//' || true)
     if [[ -n "$nm" && -n "$desc" ]]; then
         n_ok=$((n_ok + 1))
     else
