@@ -67,33 +67,60 @@ else
 fi
 
 # 4. adapters -----------------------------------------------------------------
-# Count INVOKABLE agent types, not adapter FILES (#12). An adapter with an empty or
-# missing `description:` (or `name:`) is SILENTLY DROPPED from the agent registry —
-# the file exists and the old file-count reported it green, but agentType resolution
-# fails at run time (this is the root cause of the construct-arneson silent drop).
-# Readiness must be true at the point of consumption, not asserted by a count.
-n_files=0; n_ok=0; dropped=""
-shopt -s nullglob
-for f in "$AGENTS_DIR"/construct-*.md; do
-    n_files=$((n_files + 1))
-    # Read name/description from the YAML FRONTMATTER ONLY — the block between the
-    # first `---` and the next `---`, which is what the agent registry consumes.
-    # Scanning the whole file would let body / example lines satisfy the check even
-    # when the frontmatter fields are missing, preserving the false-green this fix
-    # exists to kill (fagan review of #12).
-    fm=$(awk 'NR==1 && $0=="---"{infm=1; next} infm && $0=="---"{exit} infm' "$f")
-    # `|| true`: a missing field makes grep exit 1. The doctor runs `set -uo pipefail`
-    # (no `-e`), so it does not abort today — but the guard keeps the adapter scan robust
-    # if `-e` is ever added: the loop must RECORD the drop, not die mid-scan (fagan #12).
-    nm=$(printf '%s\n' "$fm" | grep -m1 '^name:' | sed 's/^name:[[:space:]]*//; s/^"//; s/"$//' || true)
-    desc=$(printf '%s\n' "$fm" | grep -m1 '^description:' | sed 's/^description:[[:space:]]*//; s/^"//; s/"$//' || true)
-    if [[ -n "$nm" && -n "$desc" ]]; then
-        n_ok=$((n_ok + 1))
-    else
-        dropped="$dropped $(basename "$f" .md | sed 's/^construct-//')"
-    fi
-done
-shopt -u nullglob
+# Count INVOKABLE agent types, not adapter FILES (#12). An adapter whose YAML
+# frontmatter lacks a non-empty `name` or `description` is SILENTLY DROPPED from the
+# agent registry — the file exists and the old file-count reported it green, but
+# agentType resolution fails at run time (root cause of the construct-arneson silent
+# drop). Readiness must be true at the point of consumption, not asserted by a count.
+#
+# Parse the frontmatter with a REAL YAML parser (the registry's own contract), not
+# grep/sed: regex YAML-parsing false-greens on quoting/empty-value variants —
+# `description: ''`, `description:` (null), a missing closing `---`, etc. (fagan #12).
+# A leading `--- … ---` block with a closing delimiter is required; PyYAML decodes it
+# and both fields must be non-empty strings. Regex fallback only if PyYAML is absent.
+adapter_scan=$(python3 - "$AGENTS_DIR" <<'PY'
+import sys, os, re, glob
+try:
+    import yaml
+except Exception:
+    yaml = None
+
+def fallback(block, key):
+    m = re.search(r'(?m)^%s:[ \t]*(.*)$' % re.escape(key), block)
+    return m.group(1).strip().strip('"').strip("'").strip() if m else ""
+
+n_files = n_ok = 0
+dropped = []
+for f in sorted(glob.glob(os.path.join(sys.argv[1], "construct-*.md"))):
+    n_files += 1
+    try:
+        text = open(f, encoding="utf-8", errors="replace").read()
+    except Exception:
+        text = ""
+    # Frontmatter = a LEADING `--- … ---` block; the closing delimiter is required.
+    m = re.match(r"^---\n(.*?)\n---\s*\n", text, re.DOTALL)
+    ok = False
+    if m:
+        block = m.group(1)
+        if yaml is not None:
+            try:
+                data = yaml.safe_load(block)
+                if isinstance(data, dict):
+                    nm, desc = data.get("name"), data.get("description")
+                    ok = (isinstance(nm, str) and nm.strip() != ""
+                          and isinstance(desc, str) and desc.strip() != "")
+            except Exception:
+                ok = fallback(block, "name") != "" and fallback(block, "description") != ""
+        else:
+            ok = fallback(block, "name") != "" and fallback(block, "description") != ""
+    if ok:
+        n_ok += 1
+    else:
+        dropped.append(os.path.basename(f)[:-3].replace("construct-", "", 1))
+print("%d\t%d\t%s" % (n_files, n_ok, " ".join(dropped)))
+PY
+)
+IFS=$'\t' read -r n_files n_ok dropped <<< "$adapter_scan"
 if [[ "$n_files" -eq 0 ]]; then
     row "$red" "adapters" "no construct-* adapters in $AGENTS_DIR — agentTypes won't resolve"
     hard_fail=1
