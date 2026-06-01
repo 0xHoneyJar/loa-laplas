@@ -67,12 +67,31 @@ else
 fi
 
 # 4. adapters -----------------------------------------------------------------
-n_adapters=$(ls "$AGENTS_DIR"/construct-*.md 2>/dev/null | wc -l | tr -d ' ')
-if [[ "$n_adapters" -gt 0 ]]; then
-    row "$green" "adapters" "$n_adapters construct-* agents available globally"
-else
+# Count INVOKABLE agent types, not adapter FILES (#12). An adapter with an empty or
+# missing `description:` (or `name:`) is SILENTLY DROPPED from the agent registry —
+# the file exists and the old file-count reported it green, but agentType resolution
+# fails at run time (this is the root cause of the construct-arneson silent drop).
+# Readiness must be true at the point of consumption, not asserted by a count.
+n_files=0; n_ok=0; dropped=""
+shopt -s nullglob
+for f in "$AGENTS_DIR"/construct-*.md; do
+    n_files=$((n_files + 1))
+    nm=$(grep -m1 '^name:' "$f" | sed 's/^name:[[:space:]]*//; s/^"//; s/"$//')
+    desc=$(grep -m1 '^description:' "$f" | sed 's/^description:[[:space:]]*//; s/^"//; s/"$//')
+    if [[ -n "$nm" && -n "$desc" ]]; then
+        n_ok=$((n_ok + 1))
+    else
+        dropped="$dropped $(basename "$f" .md | sed 's/^construct-//')"
+    fi
+done
+shopt -u nullglob
+if [[ "$n_files" -eq 0 ]]; then
     row "$red" "adapters" "no construct-* adapters in $AGENTS_DIR — agentTypes won't resolve"
     hard_fail=1
+elif [[ -n "$dropped" ]]; then
+    row "$amber" "adapters" "$n_ok/$n_files construct-* agents INVOKABLE — would be silently dropped by the registry (empty name/description; regenerate via construct-adapter-gen):$dropped"
+else
+    row "$green" "adapters" "$n_ok construct-* agents invokable (frontmatter-validated, not just file-counted)"
 fi
 
 # 5. node ---------------------------------------------------------------------
