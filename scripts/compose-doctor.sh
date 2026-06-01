@@ -76,8 +76,14 @@ n_files=0; n_ok=0; dropped=""
 shopt -s nullglob
 for f in "$AGENTS_DIR"/construct-*.md; do
     n_files=$((n_files + 1))
-    nm=$(grep -m1 '^name:' "$f" | sed 's/^name:[[:space:]]*//; s/^"//; s/"$//')
-    desc=$(grep -m1 '^description:' "$f" | sed 's/^description:[[:space:]]*//; s/^"//; s/"$//')
+    # Read name/description from the YAML FRONTMATTER ONLY — the block between the
+    # first `---` and the next `---`, which is what the agent registry consumes.
+    # Scanning the whole file would let body / example lines satisfy the check even
+    # when the frontmatter fields are missing, preserving the false-green this fix
+    # exists to kill (fagan review of #12).
+    fm=$(awk 'NR==1 && $0=="---"{infm=1; next} infm && $0=="---"{exit} infm' "$f")
+    nm=$(printf '%s\n' "$fm" | grep -m1 '^name:' | sed 's/^name:[[:space:]]*//; s/^"//; s/"$//')
+    desc=$(printf '%s\n' "$fm" | grep -m1 '^description:' | sed 's/^description:[[:space:]]*//; s/^"//; s/"$//')
     if [[ -n "$nm" && -n "$desc" ]]; then
         n_ok=$((n_ok + 1))
     else
