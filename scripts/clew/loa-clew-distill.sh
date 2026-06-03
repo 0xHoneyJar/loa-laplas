@@ -6,8 +6,12 @@
 # the construct LEVELS UP by absorbing its own corrections. This script is the MECHANICAL
 # half (list pending / show one construct's pending clews + resolve source repo + target
 # SKILL paths / mark a clew proposed). The JUDGMENT half — reading the target SKILL and
-# drafting the contract-safe teaching edit + PR — is the AGENT's (see the /distill skill).
+# drafting the contract-safe teaching edit + PR — is the AGENT's (see the /clew skill).
 # Sibling of loa-clew-capture.sh; same per-pack LEARNINGS.jsonl ledger format.
+#
+# Naming note: the filename's "distill" is the ACTION verb (capture fills, distill
+# drains), NOT the operator command. The command is /clew (~/.claude/skills/clew);
+# /distill is an unrelated skill (Arneson's session compressor). File = action; cmd = /clew.
 #
 # Governance (Ostrom / the design): there is NO loop here. The OPERATOR names ONE construct
 # per invocation; the fan-out is the operator's eye, not a script — so a whole-network sweep
@@ -40,7 +44,7 @@ if not rows:
     print("  ∴ clew-drain: all ledgers drained — no pending clews (silence is the signal)"); sys.exit(0)
 print("  ∴ clew-drain · constructs carrying undischarged clews (the level-up backlog):")
 for c, p, t in sorted(rows, key=lambda x: -x[1]):
-    print(f"    · {c:24} {p} pending / {t} total   →  /distill {c}")
+    print(f"    · {c:24} {p} pending / {t} total   →  /clew {c}")
 PY
     ;;
   --help|-h)
@@ -87,7 +91,7 @@ PY
     fi
 
     # show
-    echo "  ∴ /distill $construct — pending clews + where each teaches:"
+    echo "  ∴ /clew $construct — pending clews + where each teaches:"
     src="$SRC_ROOT/construct-$construct"
     if [ -d "$src/.git" ]; then echo "  source: $src  (branch $(git -C "$src" rev-parse --abbrev-ref HEAD 2>/dev/null))"; else echo "  source: construct-$construct NOT cloned at $SRC_ROOT — clone before drafting the PR"; fi
     python3 - "$ledger" "$src" <<'PY'
