@@ -9,6 +9,10 @@
 # drafting the contract-safe teaching edit + PR — is the AGENT's (see the /clew skill).
 # Sibling of loa-clew-capture.sh; same per-pack LEARNINGS.jsonl ledger format.
 #
+# Naming note: the filename's "distill" is the ACTION verb (capture fills, distill
+# drains), NOT the operator command. The command is /clew (~/.claude/skills/clew);
+# /distill is an unrelated skill (Arneson's session compressor). File = action; cmd = /clew.
+#
 # Governance (Ostrom / the design): there is NO loop here. The OPERATOR names ONE construct
 # per invocation; the fan-out is the operator's eye, not a script — so a whole-network sweep
 # can never open N PRs in one night. SENSE is free; ACT is operator-paced.
