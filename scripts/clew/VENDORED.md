@@ -35,3 +35,15 @@ for f in loa-clew-capture.sh ledger-append.sh clew-lock.sh learnings-construct.s
   git -C "$SRC" show <new-commit>:scripts/clew/$f > scripts/clew/$f
 done
 ```
+
+## Local patches (divergence from pin — must be upstreamed before re-sync)
+
+> ⚠ This vendored copy is the **live** capture path (the operator's
+> `~/.claude/settings.json` UserPromptSubmit hook runs THIS `loa-clew-capture.sh`),
+> so a real bug found here is patched locally to fix it immediately, then the SAME
+> change MUST be applied to canonical `loa-constructs@feat/construct-clew` (PR #249)
+> so the next re-vendor doesn't regress it.
+
+| date | file | change | upstream status |
+|------|------|--------|-----------------|
+| 2026-06-03 | `ledger-append.sh` | `_clew_resolve_path` now normalizes a leading `construct-` (`slug="${slug#construct-}"`) so `>>clew@construct-<x>` resolves to the same short-slug pack dir as `>>clew@<x>` instead of a phantom `packs/construct-<x>/` the drain never surfaces (silent-loss class). Mirrors `construct-ensure.sh:17`. | **TODO** — apply identical 1-line fix to `loa-constructs@feat/construct-clew:scripts/clew/ledger-append.sh` before merging #249. |

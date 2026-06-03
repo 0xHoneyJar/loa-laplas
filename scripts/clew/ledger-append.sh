@@ -30,6 +30,11 @@ _clew_ledger_root() { printf '%s\n' "${LOA_CLEW_LEDGER_ROOT:-$HOME/.loa/construc
 # THE single slug→path resolver. Validates slug as a safe path component.
 _clew_resolve_path() {
   local slug="$1"
+  # Normalize a leading `construct-` so a >>clew@construct-noether marker resolves to the
+  # SAME pack dir as >>clew@noether (pack dirs use short slugs). Mirrors construct-ensure.sh.
+  # Without this, `construct-<x>` passes the regex and writes to a PHANTOM packs/construct-<x>/
+  # dir that the drain (which lists by short slug) never surfaces — a silent-loss class.
+  slug="${slug#construct-}"
   if [[ ! "$slug" =~ ^[a-z][a-z0-9-]*$ ]]; then
     echo "clew: invalid construct slug '$slug' (must match ^[a-z][a-z0-9-]*\$)" >&2
     return $CLEW_USAGE
