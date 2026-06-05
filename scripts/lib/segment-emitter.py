@@ -127,29 +127,70 @@ GATE_REQUIRED = ["verdict", "findings"]
 # model instead of blindly inheriting the session model. Compose-local ladder; a
 # small mirror of advisor_strategy's SHAPE (NOT its multi-provider map — segment
 # bodies are Claude-only).
+#
+# R-F001 (alias provenance): the values "haiku" | "sonnet" | "opus" below are the
+# model ALIASES accepted by the Workflow tool's agent() `opts.model` parameter —
+# that runtime is the SOURCE OF TRUTH for these strings; they are not arbitrary.
+# Changing them here without a matching change at the agent() boundary silently
+# breaks dispatch.
+# TODO (R-F001): close the runtime-dispatch verification gap with a live
+# MODELINV-envelope probe — assert each emitted alias actually routes to the
+# intended model class at agent() invocation, not merely that the literal is emitted.
 TIER_MODEL = {"cheap": "haiku", "standard": "sonnet", "deep": "opus"}
 
-# Default-by-role (when a stage carries no explicit intelligence_tier): a lowercase
-# substring match on the stage's role slug. The DEEP set is the quality/decision
-# class — gates, judges, verifiers, reviewers, synthesizers. The CHEAP set is the
-# mechanical-fan-out class — read/scan/gather/format. EVERYTHING ELSE (including any
-# unrecognized or missing role) is STANDARD — the conservative default that never
-# downgrades an unknown stage below sonnet.
-DEEP_ROLE_SUBSTRINGS = (
+# Default-by-role (when a stage carries no explicit intelligence_tier): a TOKEN-EXACT
+# match on the stage's role slug. The DEEP set is the quality/decision class — gates,
+# judges, verifiers, reviewers, synthesizers. The CHEAP set is the mechanical-fan-out
+# class — read/scan/gather/format. EVERYTHING ELSE (including any unrecognized or
+# missing role) is STANDARD — the conservative default that never downgrades an
+# unknown stage below sonnet.
+#
+# R-F002 (token-exact, NOT substring): the role slug is tokenized (lowercase, split
+# on -/_///whitespace into a token SET) and classified by EXACT token membership.
+# Substring matching produced false collisions — "thread-merge" matched CHEAP via
+# "read", "navigate-x" matched DEEP via "gate", "preview-pane" matched DEEP via
+# "review". Token-exact membership eliminates all three classes.
+#
+# RISK ASYMMETRY (load-bearing): a false CHEAP match is DANGEROUS — it downgrades a
+# stage to haiku. So CHEAP must be precise: token-exact only, NEVER substring. A
+# stage matching NEITHER set defaults to STANDARD (sonnet), never cheap. (A false
+# DEEP match merely over-promotes — wasteful, not unsafe — but token-exact is used
+# for both sets for symmetry and to kill the over-promotion collisions too.)
+DEEP_ROLE_TOKENS = frozenset({
     "gate", "judge", "verify", "review", "audit", "synthesize",
-    "craft", "decide", "advisor", "hard-stop",
-)
-CHEAP_ROLE_SUBSTRINGS = (
+    "craft", "decide", "advisor", "stop",
+})
+# NOTE: "hard-stop" tokenizes to {hard, stop} (-> deep via "stop") and "craft-gate"
+# tokenizes to {craft, gate} (-> deep via either) — both preserved by the token set
+# above, which carries the same keywords as the prior substring list.
+CHEAP_ROLE_TOKENS = frozenset({
     "explore", "read", "scan", "gather", "capture", "format", "lint", "fetch",
-)
+})
+
+# Tokenize a role slug: lowercase, split on - / _ / / and whitespace into a token set.
+_ROLE_TOKEN_RE = re.compile(r"[-_/\s]+")
+
+
+def _role_tokens(role):
+    """Return the set of lowercase tokens in a role slug (split on -/_///whitespace).
+    Empty tokens (from leading/trailing/duplicate separators) are dropped."""
+    return {t for t in _ROLE_TOKEN_RE.split((role or "").lower()) if t}
 
 
 def _role_is_deep(role):
     """True when the role slug names a quality/decision (gate-class) stage. These are
     NEVER safe to downgrade — a mis-routed quality gate silently dropped to a cheap
-    model is the worst failure mode this resolver must prevent."""
-    r = (role or "").lower()
-    return any(sub in r for sub in DEEP_ROLE_SUBSTRINGS)
+    model is the worst failure mode this resolver must prevent. Token-exact (R-F002):
+    a role is deep iff ANY of its tokens is a member of DEEP_ROLE_TOKENS."""
+    return not _role_tokens(role).isdisjoint(DEEP_ROLE_TOKENS)
+
+
+def _role_is_cheap(role):
+    """True when the role slug names a mechanical-fan-out (cheap-class) stage.
+    Token-exact (R-F002) — a false cheap match is DANGEROUS (downgrades to haiku), so
+    this must never be a substring match. A role is cheap iff ANY of its tokens is a
+    member of CHEAP_ROLE_TOKENS."""
+    return not _role_tokens(role).isdisjoint(CHEAP_ROLE_TOKENS)
 
 
 def _resolve_model(stage):
@@ -174,16 +215,30 @@ def _resolve_model(stage):
     tier = stage.get("intelligence_tier")
     if tier in TIER_MODEL:
         model = TIER_MODEL[tier]
-    elif role_is_deep:
-        model = "opus"
-    elif any(sub in (stage.get("role") or "").lower() for sub in CHEAP_ROLE_SUBSTRINGS):
-        model = "haiku"
     else:
-        model = "sonnet"  # conservative default — unrecognized/missing role -> sonnet
+        # R-F004: a set-but-invalid tier (not None/empty, not a TIER_MODEL key) is a
+        # composition authoring error — warn (naming the value + valid tiers) and fall
+        # through to the role-based default rather than silently ignoring it. Do NOT
+        # raise; the role default + conservative floor still produce a safe model.
+        if tier:
+            sys.stderr.write(
+                "segment-emitter: invalid intelligence_tier %r (valid: cheap, standard, deep); "
+                "falling back to role-based default\n" % (tier,)
+            )
+        # Default-by-role: DEEP-token set -> opus, CHEAP-token set -> haiku, else sonnet.
+        # (The DEEP branch here is informational only — the unconditional bottom guard
+        # below is the AUTHORITATIVE opus floor for a gate-class stage; see R-F003.)
+        if _role_is_cheap(stage.get("role")):
+            model = "haiku"
+        else:
+            model = "sonnet"  # conservative default — unrecognized/missing role -> sonnet
 
-    # Conservative guard: floor a gate-class (DEEP-role) stage at opus. An explicit
-    # tier can only push it UP (it is already opus); it can never silently drop it to
-    # haiku/sonnet. The gate is never cheaper than the work it gates.
+    # R-F003: the AUTHORITATIVE conservative floor. Floor a gate-class (DEEP-role)
+    # stage at opus regardless of tier or role-default above. An explicit tier can only
+    # push it UP (already opus); it can never silently drop a gate to haiku/sonnet. The
+    # gate is never cheaper than the work it gates. (A prior `elif role_is_deep: opus`
+    # branch in the cascade above was dead — always overridden by this guard — so it
+    # was removed; this `if` is the single source of the deep-role opus floor.)
     if role_is_deep:
         model = "opus"
 

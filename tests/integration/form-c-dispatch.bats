@@ -532,6 +532,23 @@ print(m._resolve_model(json.loads(sys.argv[2])))
 PY
 }
 
+# Resolve a stage dict to its model alias AND its stderr (R-F004 warning channel).
+# Prints two lines: the model alias, then the captured stderr (may be empty).
+_resolve_model_stderr() {
+    python3 - "$EMIT" "$1" <<'PY' 2>/dev/null
+import importlib.util, json, sys, io
+spec = importlib.util.spec_from_file_location("se", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+buf = io.StringIO(); real = sys.stderr; sys.stderr = buf
+try:
+    model = m._resolve_model(json.loads(sys.argv[2]))
+finally:
+    sys.stderr = real
+sys.stdout.write(model + "\n")
+sys.stdout.write("STDERR:" + buf.getvalue().replace("\n", " ").strip() + "\n")
+PY
+}
+
 @test "intel: explicit intelligence_tier cheap->haiku, standard->sonnet, deep->opus" {
     [[ "$(_resolve_model '{"intelligence_tier":"cheap","role":"primary"}')" == "haiku" ]] || fail "cheap should map to haiku"
     [[ "$(_resolve_model '{"intelligence_tier":"standard","role":"primary"}')" == "sonnet" ]] || fail "standard should map to sonnet"
@@ -621,4 +638,61 @@ EOF
     grep -q 'agentType: "construct-worker", model: "sonnet"' "$js" || fail "loop work role should emit model:sonnet"
     grep -q 'agentType: "construct-reviewer", model: "opus"' "$js" || fail "craft-gate+cheap MUST emit model:opus (GATE-NEVER-HAIKU in emitted source)"
     ! grep -q 'agentType: "construct-reviewer", model: "haiku"' "$js" || fail "gate must NEVER be emitted on haiku"
+}
+
+# --- BB review on #20: token-match (no substring collisions) + invalid-tier warn ---
+# R-F002: role classification is TOKEN-EXACT, not substring. The three collision
+# classes the substring matcher produced are now GONE — every collision role matches
+# NEITHER set and falls to the conservative sonnet default.
+
+@test "intel R-F002: 'thread-merge' (no tier) -> sonnet (NOT haiku via the old 'read' substring)" {
+    # "thread-merge" tokenizes to {thread, merge}; neither is a CHEAP token. The old
+    # substring matcher saw 'read' inside 'thREAD' and wrongly downgraded to haiku —
+    # the DANGEROUS false-cheap class. Token-exact resolves it to sonnet.
+    [[ "$(_resolve_model '{"role":"thread-merge"}')" == "sonnet" ]] || fail "thread-merge must be sonnet, never haiku via 'read' substring"
+    [[ "$(_resolve_model '{"role":"thread-merge"}')" != "haiku" ]] || fail "thread-merge wrongly downgraded to haiku (substring collision)"
+}
+
+@test "intel R-F002: 'navigate-flow' (no tier) -> sonnet (NOT opus via the old 'gate' substring)" {
+    # "navigate-flow" tokenizes to {navigate, flow}; neither is a DEEP token. The old
+    # substring matcher saw 'gate' inside 'naviGATE' and over-promoted to opus.
+    # Over-promotion is merely wasteful (not unsafe), but assert the precise result.
+    [[ "$(_resolve_model '{"role":"navigate-flow"}')" == "sonnet" ]] || fail "navigate-flow must be sonnet, never opus via 'gate' substring"
+    # also the original BB phrasing "navigate-x":
+    [[ "$(_resolve_model '{"role":"navigate-x"}')" == "sonnet" ]] || fail "navigate-x must be sonnet, never opus via 'gate' substring"
+}
+
+@test "intel R-F002: 'preview-pane' (no tier) -> sonnet (NOT opus via the old 'review' substring)" {
+    # "preview-pane" tokenizes to {preview, pane}; neither is a DEEP token. The old
+    # substring matcher saw 'review' inside 'pREVIEW' and over-promoted to opus.
+    [[ "$(_resolve_model '{"role":"preview-pane"}')" == "sonnet" ]] || fail "preview-pane must be sonnet, never opus via 'review' substring"
+}
+
+@test "intel R-F004: invalid intelligence_tier on a non-deep role -> role default (sonnet) + stderr warning" {
+    # An invalid (set-but-unrecognized) tier is an authoring error: warn (naming the
+    # bad value + valid tiers) and fall through to the role default — never silently
+    # ignore, never raise.
+    run _resolve_model_stderr '{"role":"primary","intelligence_tier":"medium"}'
+    [[ "$status" -eq 0 ]] || fail "resolver errored: $output"
+    [[ "$(echo "$output" | head -1)" == "sonnet" ]] || fail "invalid tier on primary must fall to sonnet, got $(echo "$output" | head -1)"
+    echo "$output" | grep -q 'STDERR:.*invalid intelligence_tier' || fail "expected a stderr warning naming the invalid tier; got: $output"
+    echo "$output" | grep -q "medium" || fail "warning should name the invalid value 'medium'"
+    echo "$output" | grep -qE 'cheap.*standard.*deep' || fail "warning should list the valid tiers"
+}
+
+@test "intel R-F004: invalid tier does NOT lift the gate floor — craft-gate+invalid still opus + warning" {
+    # The conservative floor is unconditional: an invalid tier on a gate-class role
+    # warns but the bottom guard still floors it at opus (GATE-NEVER-HAIKU holds even
+    # for malformed tiers).
+    run _resolve_model_stderr '{"role":"craft-gate","intelligence_tier":"medium"}'
+    [[ "$status" -eq 0 ]] || fail "resolver errored: $output"
+    [[ "$(echo "$output" | head -1)" == "opus" ]] || fail "craft-gate+invalid tier must still floor at opus"
+    echo "$output" | grep -q 'STDERR:.*invalid intelligence_tier' || fail "expected a stderr warning for the invalid tier"
+}
+
+@test "intel R-F002: re-confirm GATE-NEVER-HAIKU — craft-gate + intelligence_tier cheap -> opus (unchanged by token matching)" {
+    # The token-matching refactor must NOT weaken the conservative safety floor. The
+    # canonical GATE-NEVER-HAIKU invariant still holds after R-F002/R-F003/R-F004.
+    [[ "$(_resolve_model '{"role":"craft-gate","intelligence_tier":"cheap"}')" == "opus" ]] || fail "craft-gate+cheap MUST floor at opus (GATE-NEVER-HAIKU)"
+    [[ "$(_resolve_model '{"role":"craft-gate","intelligence_tier":"cheap"}')" != "haiku" ]] || fail "GATE-NEVER-HAIKU violated"
 }
