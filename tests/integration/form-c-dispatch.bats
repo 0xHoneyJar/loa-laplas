@@ -514,3 +514,185 @@ PY
     [[ "$status" -eq 0 ]] || fail "schema check failed: $output"
     [[ "$output" == *"schema-ok"* ]] || fail "unexpected: $output"
 }
+
+# -----------------------------------------------------------------------------
+# Per-segment intelligence routing (2026-06-03-intelligence-router-coherence)
+# A stage declares intelligence_tier (cheap|standard|deep); the emitter resolves
+# it (or a default-by-role) to a Claude model ALIAS (haiku|sonnet|opus) injected at
+# the agent() opts. The conservative guard (GATE-NEVER-HAIKU) is LOAD-BEARING.
+# -----------------------------------------------------------------------------
+
+# Resolve a stage dict (JSON on argv) to its model alias via the emitter's resolver.
+_resolve_model() {
+    python3 - "$EMIT" "$1" <<'PY'
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("se", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m._resolve_model(json.loads(sys.argv[2])))
+PY
+}
+
+# Resolve a stage dict to its model alias AND its stderr (R-F004 warning channel).
+# Prints two lines: the model alias, then the captured stderr (may be empty).
+_resolve_model_stderr() {
+    python3 - "$EMIT" "$1" <<'PY' 2>/dev/null
+import importlib.util, json, sys, io
+spec = importlib.util.spec_from_file_location("se", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+buf = io.StringIO(); real = sys.stderr; sys.stderr = buf
+try:
+    model = m._resolve_model(json.loads(sys.argv[2]))
+finally:
+    sys.stderr = real
+sys.stdout.write(model + "\n")
+sys.stdout.write("STDERR:" + buf.getvalue().replace("\n", " ").strip() + "\n")
+PY
+}
+
+@test "intel: explicit intelligence_tier cheap->haiku, standard->sonnet, deep->opus" {
+    [[ "$(_resolve_model '{"intelligence_tier":"cheap","role":"primary"}')" == "haiku" ]] || fail "cheap should map to haiku"
+    [[ "$(_resolve_model '{"intelligence_tier":"standard","role":"primary"}')" == "sonnet" ]] || fail "standard should map to sonnet"
+    [[ "$(_resolve_model '{"intelligence_tier":"deep","role":"primary"}')" == "opus" ]] || fail "deep should map to opus"
+}
+
+@test "intel: default-by-role — gather/explore->haiku, gate/craft-gate/judge->opus, primary/work->sonnet" {
+    [[ "$(_resolve_model '{"role":"gather"}')" == "haiku" ]] || fail "gather (no tier) should default to haiku"
+    [[ "$(_resolve_model '{"role":"explore"}')" == "haiku" ]] || fail "explore (no tier) should default to haiku"
+    [[ "$(_resolve_model '{"role":"gate"}')" == "opus" ]] || fail "gate (no tier) should default to opus"
+    [[ "$(_resolve_model '{"role":"craft-gate"}')" == "opus" ]] || fail "craft-gate (no tier) should default to opus"
+    [[ "$(_resolve_model '{"role":"judge"}')" == "opus" ]] || fail "judge (no tier) should default to opus"
+    [[ "$(_resolve_model '{"role":"primary"}')" == "sonnet" ]] || fail "primary (no tier) should default to sonnet"
+    [[ "$(_resolve_model '{"role":"work"}')" == "sonnet" ]] || fail "work (no tier) should default to sonnet"
+}
+
+@test "intel: unrecognized/missing role with no tier -> sonnet (conservative default)" {
+    [[ "$(_resolve_model '{"role":"frobnicate"}')" == "sonnet" ]] || fail "unrecognized role must conservatively default to sonnet, never haiku"
+    [[ "$(_resolve_model '{}')" == "sonnet" ]] || fail "missing role must conservatively default to sonnet"
+    [[ "$(_resolve_model '{"role":null}')" == "sonnet" ]] || fail "null role must conservatively default to sonnet"
+}
+
+@test "intel: GATE-NEVER-HAIKU — craft-gate + explicit intelligence_tier cheap still resolves to opus" {
+    # The conservative guard: an explicit cheaper tier may NOT silently downgrade a
+    # gate-class stage. The worst failure mode (a quality gate dropped to a cheap
+    # model) is structurally impossible.
+    [[ "$(_resolve_model '{"role":"craft-gate","intelligence_tier":"cheap"}')" == "opus" ]] || fail "craft-gate+cheap MUST floor at opus (GATE-NEVER-HAIKU)"
+    [[ "$(_resolve_model '{"role":"review","intelligence_tier":"standard"}')" == "opus" ]] || fail "review+standard MUST floor at opus"
+    [[ "$(_resolve_model '{"role":"audit","intelligence_tier":"cheap"}')" == "opus" ]] || fail "audit+cheap MUST floor at opus"
+    # an explicit tier may UPGRADE a non-gate stage
+    [[ "$(_resolve_model '{"role":"work","intelligence_tier":"deep"}')" == "opus" ]] || fail "work+deep should upgrade to opus"
+}
+
+@test "intel: cut carries intelligence_tier into the stage-plan (compose-cut.py)" {
+    local comp plan
+    comp='{"schema_version":"1.4","kind":"workflow","name":"intel-cut","description":"cut carries intelligence_tier into the stage view","intent":"I want to confirm compose-cut carries the new field.","chain":[{"stage":1,"construct":"explorer","role":"gather","intelligence_tier":"cheap"},{"stage":2,"construct":"worker","role":"primary"}]}'
+    plan="$(printf '%s' "$comp" | python3 "$CUT" -)"
+    [[ "$(echo "$plan" | jq -r '.segments[0].stages[0].intelligence_tier')" == "cheap" ]] || fail "intelligence_tier not carried into the cut stage-plan"
+    [[ "$(echo "$plan" | jq -r '.segments[0].stages[1].intelligence_tier')" == "null" ]] || fail "absent intelligence_tier should carry as null"
+}
+
+@test "intel: emitted sequential .workflow.js injects model: at each agent() site" {
+    command -v node >/dev/null || skip "node not available"
+    cat > "$TMPROOT/intel-seq.yaml" <<'EOF'
+schema_version: "1.4"
+kind: workflow
+name: intel-seq-emit
+description: per-segment model routing sequential emit probe
+intent: "I want to confirm the emitter injects model: at each sequential agent() site."
+chain:
+  - {stage: 1, construct: explorer, role: gather}
+  - {stage: 2, construct: worker, role: work, intelligence_tier: deep}
+  - {stage: 3, construct: finisher, role: primary}
+EOF
+    local js; js="$(_emit_from "$TMPROOT/intel-seq.yaml" 0)"
+    run node "$SYNTAX" "$js"; [[ "$status" -eq 0 ]] || fail "syntax check failed: $output"
+    # one model: per stage (3), each a quoted alias literal next to agentType.
+    [[ "$(grep -c 'model: "' "$js")" -eq 3 ]] || fail "expected one model: per agent() site (3), got $(grep -c 'model: "' "$js")"
+    grep -q 'agentType: "construct-explorer", model: "haiku"' "$js" || fail "gather role should emit model:haiku"
+    grep -q 'agentType: "construct-worker", model: "opus"' "$js" || fail "explicit deep should emit model:opus (upgrade)"
+    grep -q 'agentType: "construct-finisher", model: "sonnet"' "$js" || fail "primary role should emit model:sonnet (conservative default)"
+}
+
+@test "intel: emitted iterating .workflow.js injects model: in preamble/work/gate — gate floored at opus" {
+    command -v node >/dev/null || skip "node not available"
+    # preamble stage (read=cheap), loop work (work=sonnet), craft-gate carrying an
+    # EXPLICIT cheap tier — which MUST still emit model:opus (the conservative guard
+    # surfaced in the emitted source, not just the resolver).
+    cat > "$TMPROOT/intel-iter.yaml" <<'EOF'
+schema_version: "1.4"
+kind: workflow
+name: intel-iter-emit
+description: per-segment model routing iterating emit probe
+intent: "I want to confirm the emitter injects model: in preamble, loop work, and the gate."
+iterate: [[2, 3]]
+max_iterations: 3
+terminate_when: gate approves
+chain:
+  - {stage: 1, construct: reader, role: read}
+  - {stage: 2, construct: worker, role: work}
+  - {stage: 3, construct: reviewer, role: craft-gate, iterates_with: 2, intelligence_tier: cheap}
+EOF
+    local js; js="$(_emit_from "$TMPROOT/intel-iter.yaml" 0)"
+    run node "$SYNTAX" "$js"; [[ "$status" -eq 0 ]] || fail "syntax check failed: $output"
+    [[ "$(grep -c 'model: "' "$js")" -eq 3 ]] || fail "expected 3 model: sites (preamble+work+gate), got $(grep -c 'model: "' "$js")"
+    grep -q 'agentType: "construct-reader", model: "haiku"' "$js" || fail "preamble read role should emit model:haiku"
+    grep -q 'agentType: "construct-worker", model: "sonnet"' "$js" || fail "loop work role should emit model:sonnet"
+    grep -q 'agentType: "construct-reviewer", model: "opus"' "$js" || fail "craft-gate+cheap MUST emit model:opus (GATE-NEVER-HAIKU in emitted source)"
+    ! grep -q 'agentType: "construct-reviewer", model: "haiku"' "$js" || fail "gate must NEVER be emitted on haiku"
+}
+
+# --- BB review on #20: token-match (no substring collisions) + invalid-tier warn ---
+# R-F002: role classification is TOKEN-EXACT, not substring. The three collision
+# classes the substring matcher produced are now GONE — every collision role matches
+# NEITHER set and falls to the conservative sonnet default.
+
+@test "intel R-F002: 'thread-merge' (no tier) -> sonnet (NOT haiku via the old 'read' substring)" {
+    # "thread-merge" tokenizes to {thread, merge}; neither is a CHEAP token. The old
+    # substring matcher saw 'read' inside 'thREAD' and wrongly downgraded to haiku —
+    # the DANGEROUS false-cheap class. Token-exact resolves it to sonnet.
+    [[ "$(_resolve_model '{"role":"thread-merge"}')" == "sonnet" ]] || fail "thread-merge must be sonnet, never haiku via 'read' substring"
+    [[ "$(_resolve_model '{"role":"thread-merge"}')" != "haiku" ]] || fail "thread-merge wrongly downgraded to haiku (substring collision)"
+}
+
+@test "intel R-F002: 'navigate-flow' (no tier) -> sonnet (NOT opus via the old 'gate' substring)" {
+    # "navigate-flow" tokenizes to {navigate, flow}; neither is a DEEP token. The old
+    # substring matcher saw 'gate' inside 'naviGATE' and over-promoted to opus.
+    # Over-promotion is merely wasteful (not unsafe), but assert the precise result.
+    [[ "$(_resolve_model '{"role":"navigate-flow"}')" == "sonnet" ]] || fail "navigate-flow must be sonnet, never opus via 'gate' substring"
+    # also the original BB phrasing "navigate-x":
+    [[ "$(_resolve_model '{"role":"navigate-x"}')" == "sonnet" ]] || fail "navigate-x must be sonnet, never opus via 'gate' substring"
+}
+
+@test "intel R-F002: 'preview-pane' (no tier) -> sonnet (NOT opus via the old 'review' substring)" {
+    # "preview-pane" tokenizes to {preview, pane}; neither is a DEEP token. The old
+    # substring matcher saw 'review' inside 'pREVIEW' and over-promoted to opus.
+    [[ "$(_resolve_model '{"role":"preview-pane"}')" == "sonnet" ]] || fail "preview-pane must be sonnet, never opus via 'review' substring"
+}
+
+@test "intel R-F004: invalid intelligence_tier on a non-deep role -> role default (sonnet) + stderr warning" {
+    # An invalid (set-but-unrecognized) tier is an authoring error: warn (naming the
+    # bad value + valid tiers) and fall through to the role default — never silently
+    # ignore, never raise.
+    run _resolve_model_stderr '{"role":"primary","intelligence_tier":"medium"}'
+    [[ "$status" -eq 0 ]] || fail "resolver errored: $output"
+    [[ "$(echo "$output" | head -1)" == "sonnet" ]] || fail "invalid tier on primary must fall to sonnet, got $(echo "$output" | head -1)"
+    echo "$output" | grep -q 'STDERR:.*invalid intelligence_tier' || fail "expected a stderr warning naming the invalid tier; got: $output"
+    echo "$output" | grep -q "medium" || fail "warning should name the invalid value 'medium'"
+    echo "$output" | grep -qE 'cheap.*standard.*deep' || fail "warning should list the valid tiers"
+}
+
+@test "intel R-F004: invalid tier does NOT lift the gate floor — craft-gate+invalid still opus + warning" {
+    # The conservative floor is unconditional: an invalid tier on a gate-class role
+    # warns but the bottom guard still floors it at opus (GATE-NEVER-HAIKU holds even
+    # for malformed tiers).
+    run _resolve_model_stderr '{"role":"craft-gate","intelligence_tier":"medium"}'
+    [[ "$status" -eq 0 ]] || fail "resolver errored: $output"
+    [[ "$(echo "$output" | head -1)" == "opus" ]] || fail "craft-gate+invalid tier must still floor at opus"
+    echo "$output" | grep -q 'STDERR:.*invalid intelligence_tier' || fail "expected a stderr warning for the invalid tier"
+}
+
+@test "intel R-F002: re-confirm GATE-NEVER-HAIKU — craft-gate + intelligence_tier cheap -> opus (unchanged by token matching)" {
+    # The token-matching refactor must NOT weaken the conservative safety floor. The
+    # canonical GATE-NEVER-HAIKU invariant still holds after R-F002/R-F003/R-F004.
+    [[ "$(_resolve_model '{"role":"craft-gate","intelligence_tier":"cheap"}')" == "opus" ]] || fail "craft-gate+cheap MUST floor at opus (GATE-NEVER-HAIKU)"
+    [[ "$(_resolve_model '{"role":"craft-gate","intelligence_tier":"cheap"}')" != "haiku" ]] || fail "GATE-NEVER-HAIKU violated"
+}
