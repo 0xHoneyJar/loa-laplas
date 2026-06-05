@@ -120,6 +120,76 @@ GATE_SCHEMA = {
 GATE_REQUIRED = ["verdict", "findings"]
 
 
+# --- per-segment intelligence routing (2026-06-03-intelligence-router-coherence) ---
+# A stage declares the INTELLIGENCE it needs (intelligence_tier: cheap|standard|deep);
+# the runtime resolves it to a Claude model ALIAS ("haiku"|"sonnet"|"opus") that the
+# Workflow tool's agent(prompt, {model}) accepts — so the segment runs on the right
+# model instead of blindly inheriting the session model. Compose-local ladder; a
+# small mirror of advisor_strategy's SHAPE (NOT its multi-provider map — segment
+# bodies are Claude-only).
+TIER_MODEL = {"cheap": "haiku", "standard": "sonnet", "deep": "opus"}
+
+# Default-by-role (when a stage carries no explicit intelligence_tier): a lowercase
+# substring match on the stage's role slug. The DEEP set is the quality/decision
+# class — gates, judges, verifiers, reviewers, synthesizers. The CHEAP set is the
+# mechanical-fan-out class — read/scan/gather/format. EVERYTHING ELSE (including any
+# unrecognized or missing role) is STANDARD — the conservative default that never
+# downgrades an unknown stage below sonnet.
+DEEP_ROLE_SUBSTRINGS = (
+    "gate", "judge", "verify", "review", "audit", "synthesize",
+    "craft", "decide", "advisor", "hard-stop",
+)
+CHEAP_ROLE_SUBSTRINGS = (
+    "explore", "read", "scan", "gather", "capture", "format", "lint", "fetch",
+)
+
+
+def _role_is_deep(role):
+    """True when the role slug names a quality/decision (gate-class) stage. These are
+    NEVER safe to downgrade — a mis-routed quality gate silently dropped to a cheap
+    model is the worst failure mode this resolver must prevent."""
+    r = (role or "").lower()
+    return any(sub in r for sub in DEEP_ROLE_SUBSTRINGS)
+
+
+def _resolve_model(stage):
+    """Resolve a stage dict to a Claude model alias ("haiku"|"sonnet"|"opus").
+
+    Precedence + the CONSERVATIVE GUARD (load-bearing):
+      1. An explicit intelligence_tier in {cheap,standard,deep} maps via TIER_MODEL.
+      2. Else default-by-role: DEEP set -> opus, CHEAP set -> haiku, else sonnet
+         (sonnet is also the floor for an unrecognized/missing role).
+      3. NEVER SILENTLY DOWNGRADE A GATE: if the role is in the DEEP set, the result
+         is floored at "opus" regardless of an explicit cheaper tier. An explicit
+         tier may UPGRADE a stage (e.g. a 'work' stage marked deep -> opus) but it
+         must NOT take a gate/judge/verify/review/audit/synthesize stage below
+         standard — concretely, a gate-class stage is never emitted on haiku. The
+         only way a DEEP-role stage runs below opus is an explicit tier of cheap or
+         standard, which we still floor UP to opus, because the conservative-fallback
+         invariant ("a quality gate is never cheaper than the work it gates") wins
+         over the author's explicit tier on the gate class.
+    """
+    role_is_deep = _role_is_deep(stage.get("role"))
+
+    tier = stage.get("intelligence_tier")
+    if tier in TIER_MODEL:
+        model = TIER_MODEL[tier]
+    elif role_is_deep:
+        model = "opus"
+    elif any(sub in (stage.get("role") or "").lower() for sub in CHEAP_ROLE_SUBSTRINGS):
+        model = "haiku"
+    else:
+        model = "sonnet"  # conservative default — unrecognized/missing role -> sonnet
+
+    # Conservative guard: floor a gate-class (DEEP-role) stage at opus. An explicit
+    # tier can only push it UP (it is already opus); it can never silently drop it to
+    # haiku/sonnet. The gate is never cheaper than the work it gates.
+    if role_is_deep:
+        model = "opus"
+
+    return model
+
+
 def _agent_type(slug):
     return f"construct-{slug}"
 
@@ -264,6 +334,7 @@ def _work_stage_js(st, var_suffix, prior_context_js, schema="WORK_SCHEMA", requi
     var = f"workOut_{var_suffix}"
     prompt_var = f"workPrompt_{var_suffix}"
     extra = f"\n      {prior_context_js}," if prior_context_js else ""
+    resolved_model = _resolve_model(st)
     return var, f"""    phase({js((st.get('name') or st['construct']))});
     const {prompt_var} = [
       {js(head)},
@@ -273,7 +344,7 @@ def _work_stage_js(st, var_suffix, prior_context_js, schema="WORK_SCHEMA", requi
       "SCOPE: " + JSON.stringify(scope),{extra}
       "Return the structured output per the WORK schema (output + rationale)."
     ].filter(Boolean).join("\\n");
-    const {var} = await withRetry({js(st['construct'])}, {required}, () => agent({prompt_var}, {{ label: {js(st['construct'])} + ":iter-" + iteration, phase: {js((st.get('name') or st['construct']))}, agentType: {js(_agent_type(st['construct']))}, schema: {schema} }}));"""
+    const {var} = await withRetry({js(st['construct'])}, {required}, () => agent({prompt_var}, {{ label: {js(st['construct'])} + ":iter-" + iteration, phase: {js((st.get('name') or st['construct']))}, agentType: {js(_agent_type(st['construct']))}, model: {js(resolved_model)}, schema: {schema} }}));"""
 
 
 def emit_iterating_body(comp, seg, cycle_id, run_id):
@@ -341,6 +412,7 @@ def emit_iterating_body(comp, seg, cycle_id, run_id):
         if preamble_ctx:
             ctx_lines.insert(0, preamble_ctx)
         ctx_js = ",\n      ".join(ctx_lines)
+        resolved_model = _resolve_model(st)
         work_blocks.append(
             f"""    phase({js((st.get('name') or st['construct']))});
     const workPrompt_{idx} = [
@@ -352,7 +424,7 @@ def emit_iterating_body(comp, seg, cycle_id, run_id):
       {ctx_js},
       "Return the structured output per the WORK schema (output + rationale [+ rejected_findings on iteration 2+])."
     ].filter(Boolean).join("\\n");
-    const workOut_{idx} = await withRetry({js(st['construct'])}, WORK_REQUIRED, () => agent(workPrompt_{idx}, {{ label: {js(st['construct'])} + ":iter-" + iteration, phase: {js((st.get('name') or st['construct']))}, agentType: {js(_agent_type(st['construct']))}, schema: WORK_SCHEMA }}));
+    const workOut_{idx} = await withRetry({js(st['construct'])}, WORK_REQUIRED, () => agent(workPrompt_{idx}, {{ label: {js(st['construct'])} + ":iter-" + iteration, phase: {js((st.get('name') or st['construct']))}, agentType: {js(_agent_type(st['construct']))}, model: {js(resolved_model)}, schema: WORK_SCHEMA }}));
     if (workOut_{idx} === null) {{ degraded = {{ reason: "operator-skip", stage: {js(st['construct'])}, iteration: iteration }}; break; }}
     if (isFailed(workOut_{idx})) {{ degraded = {{ reason: workOut_{idx}.error || "stage-failed", detail: workOut_{idx}, iteration: iteration }}; break; }}
     workState = workOut_{idx};
@@ -361,6 +433,9 @@ def emit_iterating_body(comp, seg, cycle_id, run_id):
     work_block = "\n".join(work_blocks)
 
     grv = _room_var(gate["stage"])
+    # The gate is a craft-gate (DEEP role) — _resolve_model floors it at opus; the
+    # conservative guard guarantees a quality gate is never emitted on a cheap model.
+    gate_model = _resolve_model(gate)
     gate_head = (
         _persona_clause(gate.get("persona"))
         + f"You are the craft-gate reviewer (construct: {gate['construct']}"
@@ -412,7 +487,7 @@ while (iteration < MAX_ITER) {{
     (iteration >= 2 ? "This is a RE-REVIEW. Accept reasonable declines (the work stage's context is fuller than your scoped view); raise only NEW material defects. If you keep surfacing net-new issues every pass, say so in note (signals prompt drift)." : "First pass: full adversarial scan. Anchor every finding to text (not a line number) and supply an executable fix."),
     "Return APPROVED | CHANGES_REQUIRED + findings per the GATE schema."
   ].filter(Boolean).join("\\n");
-  const gateOut = await withRetry({js(gate['construct'])}, GATE_REQUIRED, () => agent(gatePrompt, {{ label: {js(gate['construct'])} + ":iter-" + iteration, phase: {js((gate.get('name') or gate['construct']))}, agentType: {js(_agent_type(gate['construct']))}, schema: GATE_SCHEMA }}));
+  const gateOut = await withRetry({js(gate['construct'])}, GATE_REQUIRED, () => agent(gatePrompt, {{ label: {js(gate['construct'])} + ":iter-" + iteration, phase: {js((gate.get('name') or gate['construct']))}, agentType: {js(_agent_type(gate['construct']))}, model: {js(gate_model)}, schema: GATE_SCHEMA }}));
   if (gateOut === null) {{ degraded = {{ reason: "operator-skip", stage: {js(gate['construct'])}, iteration: iteration }}; break; }}
   if (isFailed(gateOut)) {{ degraded = {{ reason: gateOut.error || "stage-failed", detail: gateOut, iteration: iteration }}; break; }}
   ledger.push({{ iteration: iteration, verdict: gateOut.verdict, findings: gateOut.findings || [], note: gateOut.note || null }});
@@ -475,6 +550,7 @@ def emit_sequential_body(comp, seg, cycle_id, run_id):
             + f" (role: {st.get('role')}). Operate in ROOM AUTHORITY (room mode, not studio) per your room-activation packet below."
         )
         prior = "" if idx == 0 else '      "PRIOR STAGE OUTPUT:\\n" + JSON.stringify(prior),'
+        resolved_model = _resolve_model(st)
         blocks.append(
             f"""  phase({js((st.get('name') or st['construct']))});
   {{
@@ -486,7 +562,7 @@ def emit_sequential_body(comp, seg, cycle_id, run_id):
 {prior}
       "Return the structured output per the WORK schema."
     ].filter(Boolean).join("\\n");
-    const out = await withRetry({js(st['construct'])}, WORK_REQUIRED, () => agent(p, {{ label: {js(st['construct'])}, phase: {js((st.get('name') or st['construct']))}, agentType: {js(_agent_type(st['construct']))}, schema: WORK_SCHEMA }}));
+    const out = await withRetry({js(st['construct'])}, WORK_REQUIRED, () => agent(p, {{ label: {js(st['construct'])}, phase: {js((st.get('name') or st['construct']))}, agentType: {js(_agent_type(st['construct']))}, model: {js(resolved_model)}, schema: WORK_SCHEMA }}));
     if (out === null) {{ degraded = {{ reason: "operator-skip", stage: {js(st['construct'])} }}; }}
     else if (isFailed(out)) {{ degraded = {{ reason: out.error || "stage-failed", detail: out }}; }}
     else {{ prior = out; outputs.push(out); handoffSeeds.push({_handoff_seed_literal(st, 'out')}); }}

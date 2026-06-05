@@ -107,6 +107,7 @@ def _stage_view(st):
         "iterates_with": st.get("iterates_with"),
         "notes": st.get("notes", ""),
         "thinking_effort": st.get("thinking_effort"),
+        "intelligence_tier": st.get("intelligence_tier"),
     }
 
 
