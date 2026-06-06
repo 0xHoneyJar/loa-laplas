@@ -124,6 +124,37 @@ def _agent_type(slug):
     return f"construct-{slug}"
 
 
+# model tiers — opts.model accepts only haiku|sonnet|opus (the Workflow agent() contract).
+_TIER_TO_MODEL = {"cheap": "haiku", "standard": "sonnet", "deep": "opus"}
+
+
+def _resolve_model(stage, is_gate=False):
+    """Per-segment model routing — the consumption-gradient fix. BEFORE this, the emitted agent()
+    calls carried NO model key, so every subagent inherited the parent (Opus): a blanket-Opus fan-out,
+    exactly the overuse the cc-usage cost model named. Rule: gates run on opus (adversarial review needs
+    the strongest reader — never haiku); work stages default to sonnet (explore/read/scan → haiku); an
+    explicit stage `intelligence_tier` (cheap|standard|deep) overrides, with a gate-never-haiku floor.
+    Returns one of haiku|sonnet|opus."""
+    tier = stage.get("intelligence_tier")
+    if tier is not None:
+        model = _TIER_TO_MODEL.get(tier)
+        if model is None:
+            sys.stderr.write(
+                f"[segment-emitter] warning: invalid intelligence_tier {tier!r} "
+                f"(expected cheap|standard|deep); using role default\n"
+            )
+        elif is_gate and model == "haiku":
+            return "sonnet"  # gate-never-haiku floor
+        else:
+            return model
+    if is_gate:
+        return "opus"
+    role = ((stage.get("role") or "") + " " + (stage.get("skill") or "")).lower()
+    if any(k in role for k in ("explore", "read", "research", "scan", "browse")):
+        return "haiku"
+    return "sonnet"
+
+
 def _persona_clause(persona):
     return f"You are {persona}. " if persona else ""
 
@@ -273,7 +304,7 @@ def _work_stage_js(st, var_suffix, prior_context_js, schema="WORK_SCHEMA", requi
       "SCOPE: " + JSON.stringify(scope),{extra}
       "Return the structured output per the WORK schema (output + rationale)."
     ].filter(Boolean).join("\\n");
-    const {var} = await withRetry({js(st['construct'])}, {required}, () => agent({prompt_var}, {{ label: {js(st['construct'])} + ":iter-" + iteration, phase: {js((st.get('name') or st['construct']))}, agentType: {js(_agent_type(st['construct']))}, schema: {schema} }}));"""
+    const {var} = await withRetry({js(st['construct'])}, {required}, () => agent({prompt_var}, {{ label: {js(st['construct'])} + ":iter-" + iteration, phase: {js((st.get('name') or st['construct']))}, agentType: {js(_agent_type(st['construct']))}, model: {js(_resolve_model(st))}, schema: {schema} }}));"""
 
 
 def emit_iterating_body(comp, seg, cycle_id, run_id):
@@ -352,7 +383,7 @@ def emit_iterating_body(comp, seg, cycle_id, run_id):
       {ctx_js},
       "Return the structured output per the WORK schema (output + rationale [+ rejected_findings on iteration 2+])."
     ].filter(Boolean).join("\\n");
-    const workOut_{idx} = await withRetry({js(st['construct'])}, WORK_REQUIRED, () => agent(workPrompt_{idx}, {{ label: {js(st['construct'])} + ":iter-" + iteration, phase: {js((st.get('name') or st['construct']))}, agentType: {js(_agent_type(st['construct']))}, schema: WORK_SCHEMA }}));
+    const workOut_{idx} = await withRetry({js(st['construct'])}, WORK_REQUIRED, () => agent(workPrompt_{idx}, {{ label: {js(st['construct'])} + ":iter-" + iteration, phase: {js((st.get('name') or st['construct']))}, agentType: {js(_agent_type(st['construct']))}, model: {js(_resolve_model(st))}, schema: WORK_SCHEMA }}));
     if (workOut_{idx} === null) {{ degraded = {{ reason: "operator-skip", stage: {js(st['construct'])}, iteration: iteration }}; break; }}
     if (isFailed(workOut_{idx})) {{ degraded = {{ reason: workOut_{idx}.error || "stage-failed", detail: workOut_{idx}, iteration: iteration }}; break; }}
     workState = workOut_{idx};
@@ -412,7 +443,7 @@ while (iteration < MAX_ITER) {{
     (iteration >= 2 ? "This is a RE-REVIEW. Accept reasonable declines (the work stage's context is fuller than your scoped view); raise only NEW material defects. If you keep surfacing net-new issues every pass, say so in note (signals prompt drift)." : "First pass: full adversarial scan. Anchor every finding to text (not a line number) and supply an executable fix."),
     "Return APPROVED | CHANGES_REQUIRED + findings per the GATE schema."
   ].filter(Boolean).join("\\n");
-  const gateOut = await withRetry({js(gate['construct'])}, GATE_REQUIRED, () => agent(gatePrompt, {{ label: {js(gate['construct'])} + ":iter-" + iteration, phase: {js((gate.get('name') or gate['construct']))}, agentType: {js(_agent_type(gate['construct']))}, schema: GATE_SCHEMA }}));
+  const gateOut = await withRetry({js(gate['construct'])}, GATE_REQUIRED, () => agent(gatePrompt, {{ label: {js(gate['construct'])} + ":iter-" + iteration, phase: {js((gate.get('name') or gate['construct']))}, agentType: {js(_agent_type(gate['construct']))}, model: {js(_resolve_model(gate, is_gate=True))}, schema: GATE_SCHEMA }}));
   if (gateOut === null) {{ degraded = {{ reason: "operator-skip", stage: {js(gate['construct'])}, iteration: iteration }}; break; }}
   if (isFailed(gateOut)) {{ degraded = {{ reason: gateOut.error || "stage-failed", detail: gateOut, iteration: iteration }}; break; }}
   ledger.push({{ iteration: iteration, verdict: gateOut.verdict, findings: gateOut.findings || [], note: gateOut.note || null }});
@@ -486,7 +517,7 @@ def emit_sequential_body(comp, seg, cycle_id, run_id):
 {prior}
       "Return the structured output per the WORK schema."
     ].filter(Boolean).join("\\n");
-    const out = await withRetry({js(st['construct'])}, WORK_REQUIRED, () => agent(p, {{ label: {js(st['construct'])}, phase: {js((st.get('name') or st['construct']))}, agentType: {js(_agent_type(st['construct']))}, schema: WORK_SCHEMA }}));
+    const out = await withRetry({js(st['construct'])}, WORK_REQUIRED, () => agent(p, {{ label: {js(st['construct'])}, phase: {js((st.get('name') or st['construct']))}, agentType: {js(_agent_type(st['construct']))}, model: {js(_resolve_model(st))}, schema: WORK_SCHEMA }}));
     if (out === null) {{ degraded = {{ reason: "operator-skip", stage: {js(st['construct'])} }}; }}
     else if (isFailed(out)) {{ degraded = {{ reason: out.error || "stage-failed", detail: out }}; }}
     else {{ prior = out; outputs.push(out); handoffSeeds.push({_handoff_seed_literal(st, 'out')}); }}
