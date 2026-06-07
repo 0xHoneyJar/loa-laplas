@@ -94,15 +94,33 @@ PYEOF
 }
 
 # -----------------------------------------------------------------------------
+# Portable sha256 of stdin → bare 64-hex digest (CVR-002).
+# Prefer GNU `sha256sum`, fall back to BSD/macOS `shasum -a 256`. If NEITHER
+# exists, fail LOUDLY (return 3) so the caller never gets a silently-empty hash
+# on a host without `shasum` (e.g. Linux/CI). Conservative-by-default.
+# -----------------------------------------------------------------------------
+_construct_handoff_sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 | awk '{print $1}'
+    else
+        echo "ERROR: no sha256 hasher found (need 'sha256sum' or 'shasum')" >&2
+        return 3
+    fi
+}
+
+# -----------------------------------------------------------------------------
 # Compute content-addressable id for a packet (public API)
 # -----------------------------------------------------------------------------
 # Output: sha256:<64 hex chars>
 construct_handoff_compute_id() {
     local packet_path="$1"
-    local canonical
+    local canonical hash
     canonical="$(_construct_handoff_canonical_for_id "$packet_path")" || return $?
-    echo -n "sha256:"
-    echo -n "$canonical" | shasum -a 256 | awk '{print $1}'
+    hash="$(printf '%s' "$canonical" | _construct_handoff_sha256)" || return $?
+    [[ -n "$hash" ]] || return 3
+    echo "sha256:$hash"
 }
 
 # -----------------------------------------------------------------------------
