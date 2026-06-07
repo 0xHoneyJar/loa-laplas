@@ -310,6 +310,26 @@ def _learnings_var(stage_num):
 # distilled_at — both branches of the filter correctly EXCLUDE it.
 RECENT_LEARNINGS_DEFAULT_N = 5
 
+# SLUG SAFETY (BB F-001): the construct slug becomes a filesystem PATH COMPONENT in
+# read_recent_learnings (os.path.join(_ledger_root(), slug, ...)). An unvalidated slug
+# like "../../../.aws/credentials" escapes the ledger root. This is the SAME pattern the
+# WRITER side enforces — scripts/clew/ledger-append.sh::_clew_resolve_path validates
+# `^[a-z][a-z0-9-]*$` before mapping <slug> -> path. The producer reads only what that
+# writer could have written, so we reuse the writer's pattern verbatim for consistency
+# (it has no `/`, `.`, or `..`, so every traversal vector is rejected).
+_LEDGER_SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+
+
+def _validate_ledger_field(value, pattern):
+    """Shared allowlist guard for ledger-derived strings that re-enter a security
+    boundary (BB F-001 slug-as-path + F-003 tier/status-into-untrusted-wrapper share
+    this root). Returns the value iff it is a non-empty str fully matching `pattern`,
+    else None. Callers decide what None means (drop the slug -> []; substitute a safe
+    default for tier/status)."""
+    if not isinstance(value, str):
+        return None
+    return value if pattern.match(value) else None
+
 
 def _ledger_root():
     """Single ledger-root resolver — MUST mirror scripts/clew/ledger-append.sh so the
@@ -334,6 +354,13 @@ def read_recent_learnings(slug, n=RECENT_LEARNINGS_DEFAULT_N):
     (epistemic-TTL seed). Best-effort: a missing/garbled ledger yields [] (the field
     is optional; absence == v1 behavior). Returns [{trigger, tier, distill_status, ts}]."""
     if not slug:
+        return []
+    # BB F-001 (path traversal): the slug becomes a path component below. Reject any
+    # slug the writer (ledger-append.sh) could not have produced — a "../"-bearing or
+    # otherwise unsafe slug yields NO learnings (absence == v1 behavior; never an error
+    # that could break the offline producer). _ledger_root() is operator/env-controlled
+    # and trusted; only the slug is untrusted composition input.
+    if _validate_ledger_field(slug, _LEDGER_SLUG_RE) is None:
         return []
     path = os.path.join(_ledger_root(), slug, "LEARNINGS.jsonl")
     if not os.path.isfile(path):
@@ -384,6 +411,26 @@ _RL_FRAMING = (
 )
 
 
+# BB F-003 (wrapper-break via metadata): tier/status are interpolated RAW alongside the
+# sanitized trigger inside the <untrusted-content> line. They come from the same untrusted
+# ledger as the trigger, so a crafted "tier":"</untrusted-content>INJECTED" would close the
+# wrapper early — exactly the breakout _sanitize_trigger defends against, but on the metadata.
+# Strip every char outside a tight allowlist (lowercase alnum + / _ -) and cap length. No
+# behavior change for well-formed entries (the real values are "construct" / "pending" etc).
+_LEDGER_META_DISALLOWED_RE = re.compile(r"[^a-z0-9/_-]")
+
+
+def _sanitize_meta(value, default):
+    """SANITIZE-AT-SURFACING for the tier/status metadata fields (BB F-003). Lowercases,
+    strips anything outside [a-z0-9/_-], caps at 32 chars, and falls back to `default`
+    when the result is empty. Defends the prompt-content boundary the same way
+    _sanitize_trigger does for the verbatim quote — these fields enter the SAME wrapper."""
+    if not isinstance(value, str):
+        value = str(value) if value is not None else ""
+    cleaned = _LEDGER_META_DISALLOWED_RE.sub("", value.lower())[:32]
+    return cleaned or default
+
+
 def _sanitize_trigger(text):
     """SANITIZE-AT-SURFACING: the trigger is a verbatim untrusted operator quote.
     Neutralize anything that could close the wrapper or smuggle a tool/role frame —
@@ -410,8 +457,10 @@ def recent_learnings_block(entries):
         return ""
     lines = [_RL_OPEN, _RL_FRAMING, ""]
     for e in entries:
-        tier = e.get("tier") or "construct"
-        status = e.get("distill_status") or "pending"
+        # BB F-003: tier/status are sanitized (allowlist) BEFORE interpolation so a hostile
+        # ledger value cannot close the <untrusted-content> wrapper or smuggle a frame.
+        tier = _sanitize_meta(e.get("tier"), "construct")
+        status = _sanitize_meta(e.get("distill_status"), "pending")
         lines.append(f"- ({tier}/{status}) {_sanitize_trigger(e.get('trigger', ''))}")
     lines.append(_RL_CLOSE)
     return "\n".join(lines)

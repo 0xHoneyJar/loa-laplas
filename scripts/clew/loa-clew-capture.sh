@@ -13,10 +13,21 @@
 # Registration (DEFERRED System-Zone step, not done by this script): add to
 # .claude/settings.json under hooks.UserPromptSubmit. See scripts/clew/README.md.
 set -euo pipefail
+# BB F-002 (sibling, same root): this is a UserPromptSubmit hook; a non-zero exit blocks
+# the operator's prompt. clew_capture() already `return 0`s on every in-function path, but
+# the top-level `source` of ledger-append.sh (line below) and the dispatch tail run under
+# `set -e` BEFORE that careful guarding — a failed source would exit non-zero and block the
+# prompt. The ERR trap makes the "never block the operator's prompt" contract uniform with
+# the Stop-hook twin; the explicit `|| exit 0` on the source covers the bash quirk where the
+# ERR trap does NOT fire for a missing/failed `source` builtin (see the Stop-hook twin note).
+# (When sourced as a library, this hardening would propagate to the caller's shell; this
+# script is invoked, not sourced — its own `[[ BASH_SOURCE == 0 ]]` dispatch confirms
+# run-as-script is the contract.)
+trap 'exit 0' ERR
 
-CLEW_HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CLEW_HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 0
 # shellcheck source=scripts/clew/ledger-append.sh
-source "${CLEW_HOOK_DIR}/ledger-append.sh"
+source "${CLEW_HOOK_DIR}/ledger-append.sh" || exit 0
 
 CLEW_GRIMOIRE_DIR="${LOA_GRIMOIRE_DIR:-grimoires/loa}"
 

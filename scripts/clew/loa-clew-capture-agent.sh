@@ -13,10 +13,23 @@
 # lowercase slugs, so `<construct>` placeholders in explanatory prose are ignored (same contract
 # as the operator hook). Silent hot path; NEVER blocks (Stop must exit 0); requestId-deduped.
 set -euo pipefail
+# BB F-002 (Stop must exit 0): with `set -e`, ANY early failure — a python3 parse error,
+# the `cd` in DIR resolution, a failed `source` of ledger-append.sh — would propagate a
+# non-zero exit and could BLOCK Claude Code's Stop event. The file contract is "NEVER
+# blocks". This trap makes the must-exit-0 guarantee uniform across early-failure paths
+# (capture is best-effort; a hook failure must never block the session). The happy path
+# still reaches the explicit `exit 0` at the end.
+#
+# NB (bash quirk): the ERR trap does NOT fire for a `source`/`.` builtin that fails to find
+# its file — bash exits via `set -e` BEFORE the trap evaluates. So the source below is also
+# guarded explicitly with `|| exit 0`. (The later ledger_append call already runs under a
+# local `set +e`, so a never-defined ledger_append cannot itself block.) Together the trap +
+# the explicit guard make EVERY early path exit 0. Verified: missing/broken source -> exit 0.
+trap 'exit 0' ERR
 
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 0
 # shellcheck source=scripts/clew/ledger-append.sh
-source "${DIR}/ledger-append.sh"
+source "${DIR}/ledger-append.sh" || exit 0
 STATE="${LOA_CLEW_AGENT_STATE:-${HOME}/.claude/laboratory/clew-agent-last.txt}"
 
 input="$(cat)"
