@@ -44,6 +44,7 @@ CLI:
 """
 import argparse
 import json
+import os
 import re
 import sys
 
@@ -124,29 +125,68 @@ def _agent_type(slug):
     return f"construct-{slug}"
 
 
-# model tiers — opts.model accepts only haiku|sonnet|opus (the Workflow agent() contract).
-_TIER_TO_MODEL = {"cheap": "haiku", "standard": "sonnet", "deep": "opus"}
+# Model tier vocabulary — SoT: loa-hounfour (the schema/contract library that owns
+# model tiers + capabilities). opts.model for Workflow agent() accepts only the 3
+# native models haiku|sonnet|opus, so every canonical tier name collapses to one.
+# RECONCILED 2026-06-07 (ensure hounfour is SoT): `cheap` ≡ sonnet — the runtime
+# meaning (.claude/defaults/model-config.yaml `cheap: claude-sonnet-4-6`), NOT haiku.
+# To route the cheapest native model, declare `haiku` or `tiny` explicitly.
+_TIER_TO_MODEL = {
+    # concrete families (unambiguous, accepted directly)
+    "haiku": "haiku", "sonnet": "sonnet", "opus": "opus",
+    # cheval/hounfour routing tiers (model-config.yaml aliases + tier_groups)
+    "tiny": "haiku", "cheap": "sonnet", "mid": "sonnet", "max": "opus",
+    # deprecated emitter-local aliases (back-compat; cheap is no longer haiku)
+    "standard": "sonnet", "deep": "opus",
+}
+_PACKS_DIR = os.path.expanduser("~/.loa/constructs/packs")
+
+
+def _construct_caps(slug):
+    """THE SEAM: a construct's declared (model_tier, downgrade_allowed) from its manifest. Connects what
+    a construct ASKS the runtime for to what the emitter ROUTES. model_tier is a canonical tier name
+    (SoT: loa-hounfour) validated against _TIER_TO_MODEL; downgrade_allowed governs whether the
+    cost-heuristic may route cheaper than that tier."""
+    if not slug:
+        return (None, None)
+    try:
+        import yaml
+        with open(os.path.join(_PACKS_DIR, slug, "construct.yaml")) as f:
+            caps = (yaml.safe_load(f) or {}).get("capabilities") or {}
+        tier = str(caps.get("model_tier", "")).lower() or None
+        return (tier if tier in _TIER_TO_MODEL else None, caps.get("downgrade_allowed"))
+    except Exception:
+        return (None, None)
+
+
+def _gate_floor(model, is_gate):
+    return "sonnet" if (is_gate and model == "haiku") else model  # gates never run on haiku
 
 
 def _resolve_model(stage, is_gate=False):
-    """Per-segment model routing — the consumption-gradient fix. BEFORE this, the emitted agent()
-    calls carried NO model key, so every subagent inherited the parent (Opus): a blanket-Opus fan-out,
-    exactly the overuse the cc-usage cost model named. Rule: gates run on opus (adversarial review needs
-    the strongest reader — never haiku); work stages default to sonnet (explore/read/scan → haiku); an
-    explicit stage `intelligence_tier` (cheap|standard|deep) overrides, with a gate-never-haiku floor.
-    Returns one of haiku|sonnet|opus."""
-    tier = stage.get("intelligence_tier")
-    if tier is not None:
-        model = _TIER_TO_MODEL.get(tier)
-        if model is None:
-            sys.stderr.write(
-                f"[segment-emitter] warning: invalid intelligence_tier {tier!r} "
-                f"(expected cheap|standard|deep); using role default\n"
-            )
-        elif is_gate and model == "haiku":
-            return "sonnet"  # gate-never-haiku floor
-        else:
-            return model
+    """Per-segment model routing — the consumption-gradient fix + the SEAM connection. BEFORE this, every
+    emitted agent() inherited Opus (a blanket-Opus fan-out). Priority, honoring the construct's declared
+    capabilities (2026-06-06):
+      1. explicit stage `intelligence_tier` (per-use operator override)
+      2. construct PIN — capabilities.model_tier when downgrade_allowed is False (the construct needs it)
+      3. gate stages → opus (adversarial review needs the strongest reader)
+      4. role/skill heuristic (explore/read/research/scan/browse → haiku) — cost-optimal default
+      5. sonnet
+    A downgrade_allowed:True construct's model_tier is a CEILING the heuristic naturally respects (it
+    routes ≤ that), NOT a floor — so cost-optimal routing holds. Canonical tier names (SoT: loa-hounfour)
+    are accepted — concrete haiku|sonnet|opus + tiers tiny|cheap|mid|max — all collapse to a native
+    model; `cheap` ≡ sonnet (runtime meaning), not haiku. Gates never run on haiku."""
+    explicit = stage.get("intelligence_tier")
+    if explicit is not None:
+        tier = str(explicit).lower()
+        if tier in _TIER_TO_MODEL:
+            return _gate_floor(_TIER_TO_MODEL[tier], is_gate)
+        sys.stderr.write(
+            f"[segment-emitter] warning: unknown intelligence_tier {explicit!r} "
+            f"(expected a canonical tier — SoT loa-hounfour: haiku|sonnet|opus | tiny|cheap|mid|max); using role default\n")
+    ctier, downgrade = _construct_caps(stage.get("construct"))
+    if ctier is not None and downgrade is False:
+        return _gate_floor(_TIER_TO_MODEL[ctier], is_gate)  # PINNED — honor the construct's declared tier
     if is_gate:
         return "opus"
     role = ((stage.get("role") or "") + " " + (stage.get("skill") or "")).lower()
