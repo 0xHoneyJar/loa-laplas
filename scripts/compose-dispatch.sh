@@ -168,6 +168,17 @@ if [[ -z "$RUN_ID" ]]; then
     RUN_ID="$(date -u +%Y%m%d)-$(openssl rand -hex 3)"
 fi
 
+# Validate run_id (CC-injection + path-traversal defense; mirrors
+# compose-verify-run.sh CVR-001). RUN_ID is concatenated into RUN_DIR (and, in
+# Form C, into the terminal_gate command handed to the operator), so an
+# unvalidated run_id with shell metacharacters, '/', or '..' could escape the run
+# base on mkdir OR be emitted as an "exact" command that runs when followed.
+# Default-deny a single-path-component allowlist BEFORE any path access.
+if [[ ! "$RUN_ID" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]] || [[ "$RUN_ID" == *".."* ]]; then
+    echo "ERROR: invalid --run-id '$RUN_ID' (must match ^[0-9A-Za-z][0-9A-Za-z._-]*\$ with no '..')" >&2
+    exit 1
+fi
+
 RUN_DIR="$PROJECT_ROOT/.run/compose/$RUN_ID"
 ORCHESTRATOR_LOG="$RUN_DIR/orchestrator.jsonl"
 ROOMS_DIR="$PROJECT_ROOT/.run/rooms"
@@ -377,12 +388,37 @@ _run_form_c() {
     log_event "form_c.manifest" "$(jq -n --arg m "$manifest" --argjson segs "$n_segs" --argjson seams "$n_seams" '{manifest: $m, segments: $segs, seams: $seams}')"
     log_event "compose.awaiting_main_loop" "$(jq -n --argjson segs "$n_segs" '{segments: $segs, runner: "Claude Code Workflow tool"}')"
 
+    # Terminal proof-of-run gate (bd-26x): the executor's NON-optional final step
+    # after running every segment is `compose-verify-run.sh <run_id>
+    # --require-executed`. --require-executed makes a compile-only run (no executed
+    # envelopes) fail as `compiled_run`, so "compiled" cannot masquerade as
+    # "completed". We hand the agent the exact command (run_id baked + validated
+    # above, so it is injection-safe) — the governed path is the path of least
+    # resistance — plus a structured `argv` for machine consumers, and breadcrumb
+    # the expectation into the orchestrator trail so the gate is machine-visible.
+    # NOTE (BB-23 F-004): verify_script is the ABSOLUTE path of compose-verify-run.sh
+    # on the compiling host (so the handed command is copy-paste-runnable HERE).
+    # Compositions are same-machine (per the L6 same-machine guardrail), so a
+    # cross-host consumer must re-resolve the script via its own $RT, not exec the
+    # baked path verbatim.
+    local verify_script="$SCRIPT_DIR/compose-verify-run.sh"
+    local verify_cmd="$verify_script $RUN_ID --require-executed --json"
+    local verify_argv
+    verify_argv="$(jq -nc --arg s "$verify_script" --arg r "$RUN_ID" '[$s, $r, "--require-executed", "--json"]')"
+    log_event "form_c.terminal_gate_pending" "$(jq -n --arg s "$verify_script" --arg r "$RUN_ID" \
+        '{gate: "compose-verify-run", script: $s, run_id: $r, require_executed: true, required: true}')"
+
     # 5. OUTPUT.
     if [[ "$OUTPUT_JSON" == "1" ]]; then
-        jq -n --arg run_id "$RUN_ID" --arg comp "$comp_name" --argjson segs "$n_segs" --argjson seams "$n_seams" --arg manifest "$manifest" \
-            '{run_id: $run_id, composition: $comp, mode: "workflow", segments: $segs, seams: $seams, manifest: $manifest, awaiting_main_loop: true, exit_code: 3}'
+        jq -n --arg run_id "$RUN_ID" --arg comp "$comp_name" --argjson segs "$n_segs" --argjson seams "$n_seams" \
+            --arg manifest "$manifest" --arg vscript "$verify_script" --arg vcmd "$verify_cmd" --argjson vargv "$verify_argv" \
+            '{run_id: $run_id, composition: $comp, mode: "workflow", segments: $segs, seams: $seams, manifest: $manifest,
+              awaiting_main_loop: true,
+              terminal_gate: {gate: "compose-verify-run", script: $vscript, run_id: $run_id, argv: $vargv, cmd: $vcmd, require_executed: true, required: true},
+              exit_code: 3}'
     else
         echo "[compose-dispatch] Form C compiled — run each segment via the Workflow tool per: $manifest"
+        echo "[compose-dispatch] TERMINAL GATE — after running all segments, PROVE the run: $verify_cmd"
     fi
     return 3
 }

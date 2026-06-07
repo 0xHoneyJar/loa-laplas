@@ -14,7 +14,7 @@ subagent spawn via the Claude Code **Workflow tool**, with `/workflows` visibili
 | Role | Who | What |
 |---|---|---|
 | **Compiler** | `compose-dispatch.sh --form-c` (bash) | validate (offline-robust, **before spend**) → cut at seams → emit one `.workflow.js` per autonomous segment + per-stage room packets + a run manifest. Cannot run agents (it is bash); the emitted JS cannot touch the filesystem (Workflow runtime). |
-| **Executor** | the Claude Code **main loop** (you) | run each segment via `Workflow({scriptPath, args})`; wrap+validate its handoffs; at each seam run the **seam protocol** (`AskUserQuestion` + clew capture); fire the next segment with an explicit JSON handoff. |
+| **Executor** | the Claude Code **main loop** (you) | run each segment via `Workflow({scriptPath, args})`; wrap+validate its handoffs; at each seam run the **seam protocol** (`AskUserQuestion` + clew capture); fire the next segment with an explicit JSON handoff; **prove the run with the terminal gate** (`compose-verify-run.sh`) as the non-optional final step. |
 
 The seam protocol **cannot** live inside a workflow: a CC workflow run cannot take
 mid-run human input. Every human decision point is therefore a **workflow boundary**,
@@ -81,7 +81,10 @@ for segment in manifest.segments (in order):
         if steer contains '>>clew@...':
             printf '%s' "$steer" | scripts/compose-seam-clew.sh --stdin   # capture (stdin, never interpolated)
         carry := explicit JSON handoff built from result.context_carry + steer
-surface(final result)
+# TERMINAL GATE — prove the run before surfacing it as done (see below):
+verdict := scripts/compose-verify-run.sh <run_id> --json
+require verdict.verdict == "valid_run"         # else: role-play, not a run — label it (warn-first)
+surface(final result, verdict)
 ```
 
 ### Surfacing a seam (`AskUserQuestion`, smol-comms / pair-point register)
@@ -109,6 +112,42 @@ pre-fills the candidate `@construct/skill`; the operator may retarget.
 **Invariant:** there is **no clew hook inside an autonomous workflow body**. A
 seamless composition gathers zero learnings, by construction. Gate = guidance + clew;
 no gate = no clew.
+
+### The terminal proof-of-run gate (the run is *proven*, not asserted)
+
+After the last segment, the seam protocol's **final, non-optional step** is the
+proof-of-run gate, in TERMINAL mode (`--require-executed`):
+
+```sh
+scripts/compose-verify-run.sh <run_id> --require-executed --json
+```
+
+It reads the run dir and returns a machine-gateable verdict (`compose-verify-run.sh`):
+
+| `verdict` | exit | meaning |
+|---|---|---|
+| `valid_run` | 0 | manifest + emitted segment(s) + orchestrator trail + **≥1 executed handoff envelope** all present and self-consistent — **the segments actually ran.** |
+| `not_a_run` | 2 | no manifest / no emit dir — **no runtime provenance**. An inline-approximated composition (segments role-played in the main loop instead of dispatched) mints *none* of these artifacts, so it lands here. |
+| `compiled_run` | 4 | (`--require-executed`) the compile is real but **zero segments executed** — the composition was *compiled*, not *run*. Closes the subtler defection: dispatch the compile to mint provenance, skip the work, gate it as done. Distinct exit code from `not_a_run` (2) so an exit-code-only consumer can tell "re-run the segments" from "re-dispatch". Without `--require-executed` a compile-only run is `valid_run` (the compile is provably real). |
+| `broken_run` | 3 | provenance is present but forged/inconsistent (manifest run_id mismatch, missing segment file, tampered envelope, …). |
+
+**Why this is the gate, not a nicety.** The seam protocol above is executed by
+the main loop — it is *defectable*: an agent can skip `compose-dispatch` entirely
+and emit composition-looking prose. The terminal gate is what makes that
+defection *worthless*: inline role-play leaves no `run_id` / manifest / segment /
+orchestrator trail, so it verifies as `not_a_run`. **A composition is run by the
+runtime — `compose-dispatch` → Workflow segments → handoff-validate → seam → this
+gate — or it did not happen.** The proof is the artifact trail, not the agent's
+word. `compose-dispatch --form-c` hands you the exact gate command (run_id baked)
+in its completion output (`terminal_gate` in `--json`), so running it is one
+copy-paste — the governed path is the path of least resistance.
+
+**Gate strength (first land = warn-first).** Report a non-`valid_run` verdict
+*loudly* and label the output **role-play, not a run** — but the gate's exit code
+is the lever: warn-first surfaces the failure and lets the operator decide;
+fail-block (flip once the gate has earned trust on real runs) refuses to present
+any result without a `valid_run` verdict. The *mechanism* (honest verdict + exit
+code) supports both; the *policy* lives in the executor (`/compose` SKILL), not here.
 
 ## Hardening & verification (cycle-053 adversarial review)
 

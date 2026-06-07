@@ -49,18 +49,32 @@
 # audit_verify_chain.
 #
 # Usage:
-#   compose-verify-run.sh <run_id> [--json] [--base-dir DIR]
+#   compose-verify-run.sh <run_id> [--json] [--base-dir DIR] [--require-executed]
+#
+# --require-executed (the TERMINAL gate mode): a COMPILED-only run — a real
+#   manifest + segment(s) + orchestrator trail but ZERO executed handoff envelopes
+#   — is NOT a completed composition (the segments were never run). Without this
+#   flag a compile-only run is `valid_run` exit 0 (back-compat: the compile is
+#   provably real). WITH it, a compile-only run is `compiled_run` exit 2, so the
+#   executor cannot dispatch-the-compile, skip execution, and claim completion.
+#   Closes the subtler defection: "mint provenance, skip the work, gate it."
+#   (Evidence bar is >=1 executed handoff envelope — enough to prove the segments
+#   ran; per-manifest-segment completeness is a future refinement, see bd-mlw.)
 #
 # Exit codes:
 #   0  valid governed run — proof-of-run holds
-#   2  NOT a real run — no manifest / no emit dir (inline-fake or fabricated id)
+#   2  NOT a real run — no manifest / no emit dir (inline-fake or fabricated id) →
+#      verdict not_a_run
 #   3  broken / forged run — manifest, segments, orchestrator, or an envelope is
 #      missing, unparseable, or internally inconsistent
+#   4  (--require-executed) real compile but ZERO segments executed → verdict
+#      compiled_run (DISTINCT from not_a_run's 2: different remediation — re-run the
+#      segments, don't re-dispatch)
 #   1  usage error
 #
 # --json verdict (machine-gateable):
-#   {"verdict":"valid_run"|"not_a_run"|"broken_run", "run_id":..., "reason":...,
-#    "checks":{manifest,segments_present,orchestrator,envelopes},
+#   {"verdict":"valid_run"|"not_a_run"|"compiled_run"|"broken_run", "run_id":...,
+#    "reason":..., "checks":{manifest,segments_present,orchestrator,envelopes},
 #    "segment_count":N, "envelope_count":N, "envelope_digest":"sha256:..."|null}
 # =============================================================================
 set -euo pipefail
@@ -127,24 +141,30 @@ Verify that <run_id> is a real governed Form C composition run (proof-of-run),
 not an inline-approximated fake. READ-ONLY.
 
 Options:
-  --json            Emit a structured verdict on stdout (gateable).
-  --base-dir DIR    Override the compose run base dir (default: <root>/.run/compose).
-  -h, --help        Show this help.
+  --json              Emit a structured verdict on stdout (gateable).
+  --base-dir DIR      Override the compose run base dir (default: <root>/.run/compose).
+  --require-executed  TERMINAL gate: a compile-only run (zero executed envelopes)
+                      is compiled_run (exit 2), not valid_run. Demands execution
+                      evidence so "compiled" cannot masquerade as "completed".
+  -h, --help          Show this help.
 
 Exit codes:
-  0  valid_run    — proof-of-run holds
-  2  not_a_run    — no manifest / no emit dir (inline-fake or fabricated id)
-  3  broken_run   — present but missing/forged/inconsistent provenance
+  0  valid_run     — proof-of-run holds (executed; or compiled, sans --require-executed)
+  2  not_a_run     — no manifest / no emit dir (inline-fake or fabricated id)
+  3  broken_run    — present but missing/forged/inconsistent provenance
+  4  compiled_run  — (--require-executed) real compile but segments never executed
   1  usage error
 EOF
 }
 
 RUN_ID=""
 OUTPUT_JSON=0
+REQUIRE_EXECUTED=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --json) OUTPUT_JSON=1; shift ;;
         --base-dir) BASE_DIR="$2"; shift 2 ;;
+        --require-executed) REQUIRE_EXECUTED=1; shift ;;
         -h|--help) usage; exit 0 ;;
         -*) echo "ERROR: unknown flag '$1'" >&2; usage >&2; exit 1 ;;
         *) if [[ -z "$RUN_ID" ]]; then RUN_ID="$1"; else echo "ERROR: extra arg '$1'" >&2; exit 1; fi; shift ;;
@@ -438,6 +458,14 @@ fi
 # -----------------------------------------------------------------------------
 if [[ "$ENVELOPE_COUNT" -gt 0 ]]; then
     _verdict "valid_run" 0 "manifest + $SEGMENT_COUNT segment(s) + orchestrator trail + $ENVELOPE_COUNT executed handoff envelope(s) verified"
+elif [[ "$REQUIRE_EXECUTED" == "1" ]]; then
+    # TERMINAL gate: the compile is provably real, but ZERO segments executed —
+    # not a completed composition. Distinct from valid_run (default) so an
+    # executor cannot dispatch-the-compile, skip the work, and gate it as done.
+    # Exit 4 (NOT 2): an exit-code-only consumer must be able to tell
+    # `compiled_run` (re-run the segments) from `not_a_run` (re-dispatch) without
+    # parsing JSON — they have different remediations (BB-23 F-001).
+    _verdict "compiled_run" 4 "manifest + $SEGMENT_COUNT segment(s) + orchestrator trail verified, but ZERO executed handoff envelopes — COMPILED, not RUN (segments never executed). --require-executed demands execution evidence."
 else
     _verdict "valid_run" 0 "manifest + $SEGMENT_COUNT segment(s) + orchestrator trail verified (compiled run; segments not yet executed)"
 fi
