@@ -124,7 +124,7 @@ RT="$HOME/.loa/runtime/construct-rooms-substrate"
    ```
    - `valid_run` (exit 0) → segments executed + handoffs verified → present the result as
      a **completed composition**; cite the `run_id` + `envelope_digest` as the proof.
-   - `compiled_run` (exit 2) → the compile is real but **no segments executed** — the work
+   - `compiled_run` (exit 4) → the compile is real but **no segments executed** — the work
      was skipped. NOT a completed composition; go run the segments (step 3), then re-gate.
    - `not_a_run` (exit 2) / `broken_run` (exit 3) → no / forged provenance → **do NOT
      present as completed.** Labelled **role-play, not a run**.

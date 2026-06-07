@@ -63,11 +63,13 @@
 #
 # Exit codes:
 #   0  valid governed run — proof-of-run holds
-#   2  NOT a (completed) run — no manifest / no emit dir (inline-fake or fabricated
-#      id) → verdict not_a_run; OR (--require-executed) a compile-only run with no
-#      executed envelopes → verdict compiled_run
+#   2  NOT a real run — no manifest / no emit dir (inline-fake or fabricated id) →
+#      verdict not_a_run
 #   3  broken / forged run — manifest, segments, orchestrator, or an envelope is
 #      missing, unparseable, or internally inconsistent
+#   4  (--require-executed) real compile but ZERO segments executed → verdict
+#      compiled_run (DISTINCT from not_a_run's 2: different remediation — re-run the
+#      segments, don't re-dispatch)
 #   1  usage error
 #
 # --json verdict (machine-gateable):
@@ -149,8 +151,8 @@ Options:
 Exit codes:
   0  valid_run     — proof-of-run holds (executed; or compiled, sans --require-executed)
   2  not_a_run     — no manifest / no emit dir (inline-fake or fabricated id)
-     compiled_run  — (--require-executed) real compile but segments never executed
   3  broken_run    — present but missing/forged/inconsistent provenance
+  4  compiled_run  — (--require-executed) real compile but segments never executed
   1  usage error
 EOF
 }
@@ -460,7 +462,10 @@ elif [[ "$REQUIRE_EXECUTED" == "1" ]]; then
     # TERMINAL gate: the compile is provably real, but ZERO segments executed —
     # not a completed composition. Distinct from valid_run (default) so an
     # executor cannot dispatch-the-compile, skip the work, and gate it as done.
-    _verdict "compiled_run" 2 "manifest + $SEGMENT_COUNT segment(s) + orchestrator trail verified, but ZERO executed handoff envelopes — COMPILED, not RUN (segments never executed). --require-executed demands execution evidence."
+    # Exit 4 (NOT 2): an exit-code-only consumer must be able to tell
+    # `compiled_run` (re-run the segments) from `not_a_run` (re-dispatch) without
+    # parsing JSON — they have different remediations (BB-23 F-001).
+    _verdict "compiled_run" 4 "manifest + $SEGMENT_COUNT segment(s) + orchestrator trail verified, but ZERO executed handoff envelopes — COMPILED, not RUN (segments never executed). --require-executed demands execution evidence."
 else
     _verdict "valid_run" 0 "manifest + $SEGMENT_COUNT segment(s) + orchestrator trail verified (compiled run; segments not yet executed)"
 fi

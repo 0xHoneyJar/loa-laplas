@@ -37,6 +37,7 @@ setup() {
 
     [[ -f "$DISPATCH" ]] || skip "compose-dispatch.sh not found"
     [[ -f "$VERIFY" ]] || skip "compose-verify-run.sh not found"
+    [[ -f "$HWRAP" ]] || skip "compose-handoff-wrap.sh not found"
     [[ -f "$PILOT" ]] || skip "pilot composition missing"
 
     # Resolve the bridge composition schema: env override, then sibling host repo.
@@ -67,9 +68,17 @@ teardown() {
 # test failure (the same reason the sibling helper ends on `echo`).
 _compile_json() {
     local run_id="${1:-tg1}"
-    bash "$DISPATCH" "$PILOT" --form-c --run-id "$run_id" --json >"$TMPROOT/dispatch.json" 2>/dev/null \
+    # Capture stderr (not /dev/null) so an UNEXPECTED dispatch failure (missing
+    # dep, schema load, perms) is diagnosable rather than surfacing as an empty
+    # COMPOSE_OUT (BB-23 F-003). Callers assert COMPOSE_RC == 3 (the success code).
+    bash "$DISPATCH" "$PILOT" --form-c --run-id "$run_id" --json \
+        >"$TMPROOT/dispatch.json" 2>"$TMPROOT/dispatch.err" \
         && COMPOSE_RC=0 || COMPOSE_RC=$?
     COMPOSE_OUT="$(cat "$TMPROOT/dispatch.json")"
+    if [[ "$COMPOSE_RC" -ne 3 ]]; then
+        echo "FAIL: unexpected dispatch exit $COMPOSE_RC (expected 3). stderr:" >&2
+        cat "$TMPROOT/dispatch.err" >&2
+    fi
     return 0
 }
 
@@ -141,7 +150,7 @@ _wrap_envelope() {
     # this complete: it is compiled, not run. This is the closure of the subtler
     # defection (mint the compile, skip the work, claim done).
     run bash -c "$cmd"
-    [[ "$status" -eq 2 ]] || fail "compile-only must be compiled_run (exit 2), got $status: $output"
+    [[ "$status" -eq 4 ]] || fail "compile-only must be compiled_run (exit 4, distinct from not_a_run's 2), got $status: $output"
     echo "$output" | jq -e '.verdict == "compiled_run"' >/dev/null \
         || fail "compile-only should verify compiled_run: $output"
 
@@ -151,6 +160,17 @@ _wrap_envelope() {
     [[ "$status" -eq 0 ]] || fail "executed run must be valid_run (exit 0), got $status: $output"
     echo "$output" | jq -e '.verdict == "valid_run"' >/dev/null \
         || fail "executed run should verify valid_run: $output"
+}
+
+@test "compiled_run (exit 4) and not_a_run (exit 2) are distinguishable by exit code alone (BB-23 F-001)" {
+    # A real compile with --require-executed → compiled_run, exit 4.
+    _compile_json tg-codes
+    run bash "$VERIFY" tg-codes --require-executed --json
+    [[ "$status" -eq 4 ]] || fail "compiled_run must be exit 4, got $status: $output"
+    # A fabricated run_id with --require-executed → not_a_run, exit 2 (NOT 4).
+    run bash "$VERIFY" tg-never-existed --require-executed --json
+    [[ "$status" -eq 2 ]] || fail "not_a_run must be exit 2 (distinct from compiled_run's 4), got $status: $output"
+    echo "$output" | jq -e '.verdict == "not_a_run"' >/dev/null || fail "expected not_a_run: $output"
 }
 
 # -----------------------------------------------------------------------------

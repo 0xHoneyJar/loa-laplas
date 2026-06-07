@@ -127,8 +127,8 @@ It reads the run dir and returns a machine-gateable verdict (`compose-verify-run
 | `verdict` | exit | meaning |
 |---|---|---|
 | `valid_run` | 0 | manifest + emitted segment(s) + orchestrator trail + **≥1 executed handoff envelope** all present and self-consistent — **the segments actually ran.** |
-| `compiled_run` | 2 | (`--require-executed`) the compile is real but **zero segments executed** — the composition was *compiled*, not *run*. Closes the subtler defection: dispatch the compile to mint provenance, skip the work, gate it as done. Without `--require-executed` a compile-only run is `valid_run` (the compile is provably real). |
 | `not_a_run` | 2 | no manifest / no emit dir — **no runtime provenance**. An inline-approximated composition (segments role-played in the main loop instead of dispatched) mints *none* of these artifacts, so it lands here. |
+| `compiled_run` | 4 | (`--require-executed`) the compile is real but **zero segments executed** — the composition was *compiled*, not *run*. Closes the subtler defection: dispatch the compile to mint provenance, skip the work, gate it as done. Distinct exit code from `not_a_run` (2) so an exit-code-only consumer can tell "re-run the segments" from "re-dispatch". Without `--require-executed` a compile-only run is `valid_run` (the compile is provably real). |
 | `broken_run` | 3 | provenance is present but forged/inconsistent (manifest run_id mismatch, missing segment file, tampered envelope, …). |
 
 **Why this is the gate, not a nicety.** The seam protocol above is executed by

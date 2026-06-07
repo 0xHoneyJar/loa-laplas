@@ -396,6 +396,11 @@ _run_form_c() {
     # above, so it is injection-safe) — the governed path is the path of least
     # resistance — plus a structured `argv` for machine consumers, and breadcrumb
     # the expectation into the orchestrator trail so the gate is machine-visible.
+    # NOTE (BB-23 F-004): verify_script is the ABSOLUTE path of compose-verify-run.sh
+    # on the compiling host (so the handed command is copy-paste-runnable HERE).
+    # Compositions are same-machine (per the L6 same-machine guardrail), so a
+    # cross-host consumer must re-resolve the script via its own $RT, not exec the
+    # baked path verbatim.
     local verify_script="$SCRIPT_DIR/compose-verify-run.sh"
     local verify_cmd="$verify_script $RUN_ID --require-executed --json"
     local verify_argv
