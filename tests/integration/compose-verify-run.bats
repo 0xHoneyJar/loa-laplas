@@ -218,3 +218,195 @@ _wrap_envelope() {
     [[ "$status" -ne 0 ]] || fail "an envelope for an unknown stage must fail"
     echo "$output" | jq -e '.reason | test("stage")' >/dev/null || fail "expected a stage reason: $output"
 }
+
+# -----------------------------------------------------------------------------
+# CVR-001 — run_id path traversal (HIGH). An unvalidated run_id is concatenated
+# into .run/compose/<run_id>/... — a `../`-bearing run_id would escape the run
+# base and let an attacker steer the verifier at an arbitrary directory. The
+# verifier MUST reject a malformed run_id BEFORE constructing any path, and MUST
+# NOT accept a planted manifest reached via traversal.
+# -----------------------------------------------------------------------------
+
+@test "verify: a ../-bearing run_id is rejected and never escapes the run base (CVR-001)" {
+    # Compile a FULLY VALID run, then forge its manifest+orchestrator run_id field
+    # to MATCH a traversal string. `.run/compose/../compose/<run>` resolves back to
+    # the real valid dir, and the forged run_id field defeats the manifest/orch
+    # run_id-match checks — so WITHOUT run_id validation the verifier returns
+    # valid_run for a path containing `..` (the escape: an attacker can steer the
+    # verifier at any directory on disk). With validation, the malformed run_id is
+    # refused before any path is built.
+    local good; good="$(_compile_run rr-traversal-target)" || fail "could not compile target run"
+    local traversal="../compose/rr-traversal-target"
+    local m="$TMPROOT/.run/compose/rr-traversal-target/form-c-manifest.json"
+    local o="$TMPROOT/.run/compose/rr-traversal-target/orchestrator.jsonl"
+    jq --arg r "$traversal" '.run_id = $r' "$m" > "$m.tmp" && mv "$m.tmp" "$m"
+    jq -c --arg r "$traversal" '.run_id = $r' "$o" > "$o.tmp" && mv "$o.tmp" "$o"
+    run bash "$VERIFY" "$traversal" --json
+    [[ "$status" -ne 0 ]] || fail "a ../-bearing run_id must NOT verify (path traversal escape): $output"
+    echo "$output" | jq -e '.verdict != "valid_run"' >/dev/null \
+        || fail "traversal run_id must NOT be accepted as valid_run: $output"
+    echo "$output" | jq -e '.verdict == "not_a_run" or .verdict == "broken_run"' >/dev/null \
+        || fail "expected not_a_run/broken_run for a traversal run_id: $output"
+    echo "$output" | jq -e '.reason | test("run_id|invalid|traversal")' >/dev/null \
+        || fail "expected an invalid-run_id reason: $output"
+}
+
+@test "verify: assorted malformed run_ids (slash, leading dash, absolute) are rejected (CVR-001)" {
+    for bad in "a/b" "-rf" "/etc/passwd" "x/../../y" "..//x"; do
+        run bash "$VERIFY" "$bad" --json
+        [[ "$status" -ne 0 ]] || fail "malformed run_id '$bad' must be rejected: $output"
+    done
+}
+
+@test "verify: a legit generated-shape run_id (YYYYMMDD-hex) still passes the allowlist (CVR-001 no false-positive)" {
+    # compose-dispatch generates run_id as $(date -u +%Y%m%d)-$(openssl rand -hex 3).
+    local rid="20260607-abab39"
+    rid="$(_compile_run "$rid")" || fail "could not compile run with generated-shape run_id"
+    run bash "$VERIFY" "$rid"
+    [[ "$status" -eq 0 ]] || fail "a date-hash run_id must verify clean (allowlist false-positive), got $status: $output"
+}
+
+# -----------------------------------------------------------------------------
+# CVR-003 — handoff-validate exit-code corridor (HIGH, worst). The validator's
+# contract is 0=OK, 1=FAIL, 2=BLOCKER. Previously only exit 1 failed the gate;
+# any other non-zero (2 BLOCKER, 127 missing, ...) silently passed. The verifier
+# must be conservative-by-default: ANY non-zero from the validator → broken_run.
+# We stub the host-install validator path so the verifier picks it up first.
+# -----------------------------------------------------------------------------
+
+_stub_validator() {
+    # $1 = exit code the stub should return for every envelope.
+    local code="$1"
+    mkdir -p "$TMPROOT/.claude/scripts"
+    cat > "$TMPROOT/.claude/scripts/handoff-validate.sh" <<EOF
+#!/usr/bin/env bash
+exit $code
+EOF
+    chmod +x "$TMPROOT/.claude/scripts/handoff-validate.sh"
+}
+
+@test "verify: a handoff-validate exit code of 2 (BLOCKER) fails the gate, not a silent pass (CVR-003)" {
+    local rid; rid="$(_compile_run rr-vexit2)" || fail "could not compile run"
+    _wrap_envelope "rr-vexit2" "codex-rescue" 1 || fail "could not wrap envelope"
+    _stub_validator 2
+    run bash "$VERIFY" "rr-vexit2" --json
+    [[ "$status" -ne 0 ]] || fail "validator exit 2 must NOT silently pass: $output"
+    echo "$output" | jq -e '.verdict == "broken_run"' >/dev/null || fail "expected broken_run: $output"
+    echo "$output" | jq -e '.reason | test("valid|envelope")' >/dev/null || fail "expected a validation reason: $output"
+}
+
+@test "verify: a handoff-validate exit code of 3 (undefined) fails the gate, not a silent pass (CVR-003)" {
+    local rid; rid="$(_compile_run rr-vexit3)" || fail "could not compile run"
+    _wrap_envelope "rr-vexit3" "codex-rescue" 1 || fail "could not wrap envelope"
+    _stub_validator 3
+    run bash "$VERIFY" "rr-vexit3" --json
+    [[ "$status" -ne 0 ]] || fail "validator exit 3 must NOT silently pass: $output"
+    echo "$output" | jq -e '.verdict == "broken_run"' >/dev/null || fail "expected broken_run: $output"
+}
+
+@test "verify: a handoff-validate exit code of 127 (not found) fails the gate (CVR-003)" {
+    local rid; rid="$(_compile_run rr-vexit127)" || fail "could not compile run"
+    _wrap_envelope "rr-vexit127" "codex-rescue" 1 || fail "could not wrap envelope"
+    _stub_validator 127
+    run bash "$VERIFY" "rr-vexit127" --json
+    [[ "$status" -ne 0 ]] || fail "validator exit 127 must NOT silently pass: $output"
+    echo "$output" | jq -e '.verdict == "broken_run"' >/dev/null || fail "expected broken_run: $output"
+}
+
+@test "verify: a handoff-validate exit code of 0 (OK) still passes (CVR-003 no false-negative)" {
+    local rid; rid="$(_compile_run rr-vexit0)" || fail "could not compile run"
+    _wrap_envelope "rr-vexit0" "codex-rescue" 1 || fail "could not wrap envelope"
+    _stub_validator 0
+    run bash "$VERIFY" "rr-vexit0" --json
+    [[ "$status" -eq 0 ]] || fail "validator exit 0 must pass, got $status: $output"
+    echo "$output" | jq -e '.verdict == "valid_run"' >/dev/null || fail "expected valid_run: $output"
+}
+
+# -----------------------------------------------------------------------------
+# CVR-002 — hasher portability (HIGH, silent CI failure). The fallback hash used
+# `shasum -a 256` (macOS-only). On Linux/CI without shasum it fails silently.
+# Must prefer sha256sum, fall back to shasum, and FAIL LOUDLY if neither exists.
+# We constrain PATH to a minimal dir we populate so we can hide a hasher.
+# -----------------------------------------------------------------------------
+
+# Build a minimal bin dir symlinking the core tools the verifier needs, then
+# optionally a single hasher. Echoes the bin dir path.
+_minimal_bin() {
+    local want_hasher="$1"   # sha256sum | shasum | none
+    local bindir="$TMPROOT/minbin-$want_hasher"
+    mkdir -p "$bindir"
+    local t
+    for t in bash jq awk sort sed grep find basename dirname cat printf cut tr head tail mktemp realpath python3 openssl env date chmod mkdir rm cp mv ls wc; do
+        local p; p="$(command -v "$t" 2>/dev/null || true)"
+        [[ -n "$p" ]] && ln -sf "$p" "$bindir/$t" 2>/dev/null || true
+    done
+    case "$want_hasher" in
+        sha256sum) local p; p="$(command -v sha256sum || true)"; [[ -n "$p" ]] && ln -sf "$p" "$bindir/sha256sum" ;;
+        shasum)    local p; p="$(command -v shasum || true)";    [[ -n "$p" ]] && ln -sf "$p" "$bindir/shasum" ;;
+        none)      : ;;  # neither hasher linked
+    esac
+    echo "$bindir"
+}
+
+@test "verify: hashing works when only sha256sum is on PATH (CVR-002)" {
+    command -v sha256sum >/dev/null || skip "sha256sum not installed on this host"
+    local rid; rid="$(_compile_run rr-only256)" || fail "could not compile run"
+    _wrap_envelope "rr-only256" "codex-rescue" 1 || fail "could not wrap envelope"
+    local bindir; bindir="$(_minimal_bin sha256sum)"
+    run env PATH="$bindir" LOA_PROJECT_ROOT="$TMPROOT" LOA_COMPOSE_SCHEMA="${LOA_COMPOSE_SCHEMA:-}" \
+        bash "$VERIFY" "rr-only256" --json
+    [[ "$status" -eq 0 ]] || fail "verify must work with only sha256sum, got $status: $output"
+    echo "$output" | jq -e '.verdict == "valid_run"' >/dev/null || fail "expected valid_run: $output"
+    echo "$output" | jq -e '.envelope_count == 1' >/dev/null || fail "expected the envelope to be found+checked: $output"
+    echo "$output" | jq -e '.envelope_digest | test("^sha256:")' >/dev/null \
+        || fail "expected an sha256 envelope_digest: $output"
+}
+
+@test "verify: hashing works when only shasum is on PATH (CVR-002 fallback)" {
+    command -v shasum >/dev/null || skip "shasum not installed on this host"
+    local rid; rid="$(_compile_run rr-onlyshasum)" || fail "could not compile run"
+    _wrap_envelope "rr-onlyshasum" "codex-rescue" 1 || fail "could not wrap envelope"
+    local bindir; bindir="$(_minimal_bin shasum)"
+    run env PATH="$bindir" LOA_PROJECT_ROOT="$TMPROOT" LOA_COMPOSE_SCHEMA="${LOA_COMPOSE_SCHEMA:-}" \
+        bash "$VERIFY" "rr-onlyshasum" --json
+    [[ "$status" -eq 0 ]] || fail "verify must work with only shasum, got $status: $output"
+    echo "$output" | jq -e '.verdict == "valid_run"' >/dev/null || fail "expected valid_run: $output"
+    echo "$output" | jq -e '.envelope_digest | test("^sha256:")' >/dev/null \
+        || fail "expected an sha256 envelope_digest: $output"
+}
+
+@test "verify: hashing FAILS LOUDLY when neither sha256sum nor shasum is on PATH (CVR-002)" {
+    local rid; rid="$(_compile_run rr-nohasher)" || fail "could not compile run"
+    _wrap_envelope "rr-nohasher" "codex-rescue" 1 || fail "could not wrap envelope"
+    local bindir; bindir="$(_minimal_bin none)"
+    run env PATH="$bindir" LOA_PROJECT_ROOT="$TMPROOT" LOA_COMPOSE_SCHEMA="${LOA_COMPOSE_SCHEMA:-}" \
+        bash "$VERIFY" "rr-nohasher" --json
+    # MUST NOT silently pass: a missing hasher means integrity is uncheckable.
+    [[ "$status" -ne 0 ]] || fail "verify must FAIL LOUDLY with no hasher, got exit 0: $output"
+    echo "$output" | jq -e '.verdict == "broken_run"' >/dev/null \
+        || fail "expected broken_run with no hasher: $output"
+    # The envelope WAS found (find present) — the failure is the hasher, surfaced.
+    echo "$output" | jq -e '.envelope_count == 1' >/dev/null \
+        || fail "envelope should have been enumerated; failure must be the hasher: $output"
+    echo "$output" | jq -e '.reason | test("sha256|hasher|integrity")' >/dev/null \
+        || fail "expected a loud hasher/integrity reason (not a silent pass): $output"
+}
+
+# -----------------------------------------------------------------------------
+# CVR-005 — envelopes-present but no manifest stages (MED, silent-pass). The
+# stage_index check was silently skipped when the manifest declared no stages,
+# so an envelope with any stage_index passed unchecked. Envelopes present + no
+# manifest stages to validate against is an inconsistency → broken_run.
+# -----------------------------------------------------------------------------
+
+@test "verify: envelopes present but manifest has no stages is broken_run, not a silent pass (CVR-005)" {
+    local rid; rid="$(_compile_run rr-nostages)" || fail "could not compile run"
+    _wrap_envelope "rr-nostages" "codex-rescue" 1 || fail "could not wrap envelope"
+    # Strip every segment's stages so there are NO manifest stages to validate against.
+    local manifest="$TMPROOT/.run/compose/rr-nostages/form-c-manifest.json"
+    jq '(.segments[]?.stages) = []' "$manifest" > "$manifest.tmp" && mv "$manifest.tmp" "$manifest"
+    run bash "$VERIFY" "rr-nostages" --json
+    [[ "$status" -ne 0 ]] || fail "envelopes + no manifest stages must NOT silently pass: $output"
+    echo "$output" | jq -e '.verdict == "broken_run"' >/dev/null || fail "expected broken_run: $output"
+    echo "$output" | jq -e '.reason | test("stage|manifest")' >/dev/null || fail "expected a stage/manifest reason: $output"
+}

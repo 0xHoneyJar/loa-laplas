@@ -95,6 +95,30 @@ else
     BASE_DIR="$LOA_COMPOSE_BASE_DIR"
 fi
 
+# -----------------------------------------------------------------------------
+# Portable sha256 (CVR-002). The previous fallback hardcoded `shasum -a 256`,
+# which is macOS-only — on Linux/CI without shasum it would fail SILENTLY and the
+# verifier could pass without a real digest. Resolve a hasher ONCE: prefer the
+# GNU `sha256sum`, fall back to BSD/macOS `shasum -a 256`. If NEITHER exists we
+# do NOT silently continue — `_sha256` returns non-zero so every call site can
+# fail LOUDLY (broken_run / explicit error). Conservative-by-default.
+# -----------------------------------------------------------------------------
+SHA256_CMD=""
+if command -v sha256sum >/dev/null 2>&1; then
+    SHA256_CMD="sha256sum"
+elif command -v shasum >/dev/null 2>&1; then
+    SHA256_CMD="shasum -a 256"
+fi
+# Read stdin → echo the bare 64-hex digest. Returns 3 (no hasher) loudly if
+# neither tool is present, so callers can route it to a broken_run verdict.
+_sha256() {
+    if [[ -z "$SHA256_CMD" ]]; then
+        echo "ERROR: no sha256 hasher found (need 'sha256sum' or 'shasum') — cannot prove run integrity" >&2
+        return 3
+    fi
+    $SHA256_CMD | awk '{print $1}'
+}
+
 usage() {
     cat <<EOF
 Usage: compose-verify-run.sh <run_id> [options]
@@ -185,6 +209,22 @@ _verdict() {
     fi
     exit "$code"
 }
+
+# -----------------------------------------------------------------------------
+# Check 0: RUN_ID is well-formed (CVR-001 — path-traversal defense).
+# RUN_ID is concatenated into BASE_DIR/<run_id> and used to read manifest /
+# orchestrator / envelopes. An unvalidated run_id with `..` or `/` escapes the
+# run base and lets a caller steer the verifier at ARBITRARY directories on disk
+# (and, with a forged manifest run_id field, even coerce a valid_run verdict).
+# compose-dispatch.sh generates run_id as `$(date -u +%Y%m%d)-$(openssl rand
+# -hex 3)` → a YYYYMMDD-hex shape; operators MAY pass `--run-id` with their own
+# label. We allow a conservative single-path-component charset and reject `..`
+# explicitly. NO filesystem access has happened yet — we refuse before touching
+# anything. Default-deny: an unrecognizable run_id is not_a_run.
+# -----------------------------------------------------------------------------
+if [[ ! "$RUN_ID" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]] || [[ "$RUN_ID" == *".."* ]]; then
+    _verdict "not_a_run" 2 "invalid run_id '$RUN_ID' (must be a single path component matching ^[0-9A-Za-z][0-9A-Za-z._-]*\$ with no '..' — rejected before any path access; possible path traversal)"
+fi
 
 # -----------------------------------------------------------------------------
 # Check 1: MANIFEST exists, parses, run_id matches.
@@ -286,6 +326,16 @@ fi
 ENVELOPE_COUNT=${#ENV_FILES[@]}
 
 if [[ "$ENVELOPE_COUNT" -gt 0 ]]; then
+    # CVR-005 (silent-pass): if executed envelopes exist but the manifest declares
+    # NO stages, there is nothing to validate stage_index against — the per-envelope
+    # stage membership check below would be silently skipped and ANY stage_index
+    # would pass unchecked. A manifest with segments but zero stages alongside
+    # executed envelopes is internally inconsistent (the runtime cannot have
+    # executed a stage the manifest never declared). Default-deny: surface it as
+    # broken_run rather than silently accepting unverifiable stage indexes.
+    if [[ -z "$MANIFEST_STAGES" ]]; then
+        _verdict "broken_run" 3 "executed envelopes present but manifest declares no stages — stage_index is unverifiable (inconsistent run: cannot validate which stages the envelopes belong to)"
+    fi
     # Build a stage-ordered list of "stage_index<TAB>id" lines for the digest.
     digest_lines=""
     for env in "${ENV_FILES[@]}"; do
@@ -294,7 +344,16 @@ if [[ "$ENVELOPE_COUNT" -gt 0 ]]; then
         if ! jq -e 'type == "object"' "$env" >/dev/null 2>&1; then
             _verdict "broken_run" 3 "handoff envelope does not parse as JSON: $bn (corrupt — cannot prove the executed handoff)"
         fi
-        # Schema/required-field gate (reuse the canonical validator; exit 1 = FAIL).
+        # Schema/required-field gate (reuse the canonical validator).
+        # CVR-003 (silent-pass corridor): handoff-validate.sh's contract is
+        #   0 = OK (incl. recommended-field warning ≤ threshold)
+        #   1 = FAIL (required field missing or schema violation)
+        #   2 = BLOCKER (recommended-field overage > threshold)
+        # The previous code only treated exit 1 as failure — exit 2 (BLOCKER) and
+        # any other non-zero (e.g. 127 validator-missing, 126 not-executable) would
+        # SILENTLY PASS. Conservative-by-default: ONLY exit 0 is a pass; ANY other
+        # exit code → broken_run, with the code carried in the reason. Default-deny
+        # closes the corridor where an unrecognized failure mode looked like success.
         if [[ -x "$HANDOFF_VALIDATOR" ]]; then
             schema_arg=()
             [[ -n "$HANDOFF_SCHEMA" ]] && schema_arg=(--schema "$HANDOFF_SCHEMA")
@@ -302,8 +361,12 @@ if [[ "$ENVELOPE_COUNT" -gt 0 ]]; then
             "$HANDOFF_VALIDATOR" "$env" "${schema_arg[@]}" --json >/dev/null 2>&1
             vrc=$?
             set -e
-            if [[ "$vrc" -eq 1 ]]; then
-                _verdict "broken_run" 3 "handoff envelope failed validation (required field/schema): $bn"
+            if [[ "$vrc" -ne 0 ]]; then
+                case "$vrc" in
+                    1) _verdict "broken_run" 3 "handoff envelope failed validation (required field/schema, validator exit 1): $bn" ;;
+                    2) _verdict "broken_run" 3 "handoff envelope is a BLOCKER (recommended-field overage, validator exit 2): $bn" ;;
+                    *) _verdict "broken_run" 3 "handoff envelope validation returned unrecognized exit $vrc (validator missing/errored — cannot prove validity): $bn" ;;
+                esac
             fi
         fi
         # composition_run_id linkage.
@@ -321,14 +384,35 @@ if [[ "$ENVELOPE_COUNT" -gt 0 ]]; then
         # Content-addressable id via the EXISTING core (never reinvented).
         if [[ -f "$HANDOFF_LIB" ]]; then
             set +e
-            env_id="$(bash "$HANDOFF_LIB" compute-id "$env" 2>/dev/null)"
+            id_err_file="$(mktemp)"
+            env_id="$(bash "$HANDOFF_LIB" compute-id "$env" 2>"$id_err_file")"
             idrc=$?
+            id_err="$(cat "$id_err_file")"; rm -f "$id_err_file"
             set -e
             if [[ "$idrc" -ne 0 || -z "$env_id" ]]; then
+                # The lib returns exit 3 specifically when no sha256 hasher is
+                # available (CVR-002) — surface that cause loudly rather than a
+                # generic message. Any failure here is broken_run, never a pass.
+                if [[ "$idrc" -eq 3 || "$id_err" == *"sha256"* || "$id_err" == *"hasher"* ]]; then
+                    _verdict "broken_run" 3 "could not compute content-addressable id for envelope: $bn — no sha256 hasher available (need 'sha256sum' or 'shasum'); integrity uncheckable, failing loudly"
+                fi
                 _verdict "broken_run" 3 "could not compute content-addressable id for envelope: $bn (integrity uncheckable)"
             fi
         else
-            env_id="sha256:$(jq -cS . "$env" | shasum -a 256 | awk '{print $1}')"
+            # Fallback id (lib absent): JCS-ish canonical via `jq -cS` then a
+            # PORTABLE sha256 (CVR-002). `jq -cS` sorts keys but is NOT full RFC
+            # 8785 JCS (no number/whitespace canonicalization) — adequate only as a
+            # last-resort fallback when the JCS-backed compute-id core is missing;
+            # the lib path above is the canonical one. The hasher must fail loudly
+            # if neither sha256sum nor shasum exists, never silently pass.
+            set +e
+            fb_hash="$(jq -cS . "$env" | _sha256)"
+            fbrc=$?
+            set -e
+            if [[ "$fbrc" -ne 0 || -z "$fb_hash" ]]; then
+                _verdict "broken_run" 3 "no sha256 hasher available to compute envelope id (need sha256sum or shasum): $bn (integrity uncheckable — failing loudly)"
+            fi
+            env_id="sha256:$fb_hash"
         fi
         sort_key="${env_stage:-0}"
         digest_lines+="${sort_key}	${env_id}"$'\n'
@@ -336,7 +420,16 @@ if [[ "$ENVELOPE_COUNT" -gt 0 ]]; then
     # Fold the per-envelope ids (stage-ordered) into a single set digest a
     # downstream consumer can pin. This is a content-addressable SET digest, NOT
     # an inter-envelope prev_hash chain (this repo's envelope format has none).
-    ENVELOPE_DIGEST="sha256:$(printf '%s' "$digest_lines" | LC_ALL=C sort -n | shasum -a 256 | awk '{print $1}')"
+    # Portable sha256 (CVR-002): fail loudly if no hasher rather than emit a
+    # silently-empty digest.
+    set +e
+    fold_hash="$(printf '%s' "$digest_lines" | LC_ALL=C sort -n | _sha256)"
+    foldrc=$?
+    set -e
+    if [[ "$foldrc" -ne 0 || -z "$fold_hash" ]]; then
+        _verdict "broken_run" 3 "no sha256 hasher available to fold the envelope digest (need sha256sum or shasum) — integrity uncheckable, failing loudly"
+    fi
+    ENVELOPE_DIGEST="sha256:$fold_hash"
     CHK_ENVELOPES=true
 fi
 
