@@ -28,7 +28,7 @@
     },
     "tags":          { "type": "array", "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" } },
     "verified":      { "type": "boolean", "default": false },
-    "captured_by":   { "type": "string", "enum": ["clew-marker", "reaction-classifier"], "default": "clew-marker" },
+    "captured_by":   { "type": "string", "enum": ["clew-marker", "reaction-classifier", "agent-reflex"], "default": "clew-marker" },
     "captured_at":   { "type": "string", "format": "date-time" },
     "distilled_at":  { "type": ["string", "null"], "format": "date-time", "default": null,
                        "description": "Idempotency stamp — non-null = already reduced, skip on re-run" },
