@@ -21,6 +21,8 @@
 #   loa-clew-distill.sh <construct> [--show]         pending clews + source repo + target SKILL paths
 #   loa-clew-distill.sh <construct> --mark-proposed <clew-id> [--pr <url>]
 set -uo pipefail
+DRAIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SUBSTRATE_ROOT="$(cd "$DRAIN_DIR/../.." && pwd)"
 PACKS="${LOA_CONSTRUCTS_PACKS:-$HOME/.loa/constructs/packs}"
 SRC_ROOT="${LOA_CONSTRUCT_SRC:-$HOME/Documents/GitHub}"
 
@@ -52,12 +54,14 @@ PY
     ;;
   *)
     construct="$sub"; shift || true
-    action="show"; clewid=""; prurl=""
+    action="show"; clewid=""; prurl=""; CBD=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --show) action="show"; shift ;;
         --mark-proposed) action="mark"; clewid="${2:-}"; shift 2 || shift $# ;;
+        --mark-distilled) action="distill"; clewid="${2:-}"; shift 2 || shift $# ;;
         --pr) prurl="${2:-}"; shift 2 || shift $# ;;
+        --compose-base-dir) CBD="${2:-}"; shift 2 || shift $# ;;
         *) shift ;;
       esac
     done
@@ -88,6 +92,41 @@ PY
       rc=$?
       if [ "$rc" -eq 0 ]; then mv "$tmp" "$ledger"; echo "  ✓ $construct/$clewid → proposed${prurl:+ (pr: $prurl)}"; else rm -f "$tmp"; echo "  ✗ clew-id '$clewid' not found in $construct ledger" >&2; exit 1; fi
       exit 0
+    fi
+
+    # --mark-distilled (bd-uze A2/A3): the GENOME ADMISSION transition. On operator
+    # merge of a teaching PR, admit the clew to the construct's genome IFF it carries
+    # a run_id with a valid_run verdict (else quarantine to SUSPECTS.jsonl). Admission
+    # computes the next genome_hash and writes it to the SOURCE construct.yaml. The
+    # heavy lifting is in clew-genome-admit.py (testable); this branch resolves paths.
+    if [ "$action" = "distill" ]; then
+      [ -n "$clewid" ] || { echo "usage: loa-clew-distill.sh $construct --mark-distilled <clew-id> [--pr <url>] [--compose-base-dir <dir>]" >&2; exit 1; }
+      admit="$DRAIN_DIR/clew-genome-admit.py"
+      schema="$DRAIN_DIR/learnings-construct.schema.json"
+      verify_run="$SUBSTRATE_ROOT/scripts/compose-verify-run.sh"
+      # genome-chain.py lives in loa-constructs (home of the chain core). Resolve:
+      # explicit env → SRC_ROOT/loa-constructs → fail loud (cannot compute without it).
+      genome_chain="${LOA_GENOME_CHAIN:-$SRC_ROOT/loa-constructs/.claude/scripts/genome-chain.py}"
+      src="$SRC_ROOT/construct-$construct"
+      construct_yaml="$src/construct.yaml"
+      suspects="$PACKS/$construct/SUSPECTS.jsonl"
+      for f in "$admit:genome-admit helper" "$genome_chain:genome-chain.py (loa-constructs)" "$verify_run:compose-verify-run.sh" "$construct_yaml:source construct.yaml"; do
+        p="${f%%:*}"; what="${f#*:}"
+        [ -f "$p" ] || { echo "  ✗ cannot distill: missing $what at $p" >&2; exit 1; }
+      done
+      cbd_args=()
+      [ -n "$CBD" ] && cbd_args+=(--compose-base-dir "$CBD")
+      python3 "$admit" \
+        --clew-id "$clewid" \
+        --ledger "$ledger" \
+        --construct-yaml "$construct_yaml" \
+        --schema "$schema" \
+        --genome-chain "$genome_chain" \
+        --verify-run "$verify_run" \
+        --suspects "$suspects" \
+        ${prurl:+--pr "$prurl"} \
+        "${cbd_args[@]}"
+      exit $?
     fi
 
     # show

@@ -60,6 +60,23 @@ rec={"timestamp":datetime.datetime.now(datetime.timezone.utc).isoformat(),
 sys.stdout.write(json.dumps(rec))' >> "${dir}/construct-clew-${date}.jsonl" 2>/dev/null || true
 }
 
+# Resolve the genome-admission run_id (bd-uze). The compose run_id active at
+# capture time is surfaced by the run-aware seam protocol via LOA_COMPOSE_RUN_ID.
+# Empty (→ ledger null) for an AMBIENT capture outside a governed run, or if the
+# value is malformed. The binding is SOFT here on purpose; it is HARDENED at
+# genome admission (loa-clew-distill.sh --mark-distilled verifies the run_id has
+# a `valid_run` verdict from compose-verify-run). A fabricated id never admits.
+_clew_resolve_run_id() {
+  local rid="${LOA_COMPOSE_RUN_ID:-}"
+  [[ -z "$rid" ]] && { printf ''; return 0; }
+  if [[ "$rid" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]] && [[ "$rid" != *".."* ]]; then
+    printf '%s' "$rid"
+  else
+    echo "clew: ignoring malformed LOA_COMPOSE_RUN_ID '$rid' (recording ambient capture)." >&2
+    printf ''
+  fi
+}
+
 clew_capture() {
   local prompt; prompt="$(_clew_read_prompt "$@")"
 
@@ -94,17 +111,19 @@ clew_capture() {
   fi
 
   # Assemble the ledger line in python so the verbatim quote can contain any character.
+  local clew_run_id; clew_run_id="$(_clew_resolve_run_id)"
   local json line_id
-  json="$(CLEW_CONSTRUCT="$construct" CLEW_SKILL="$skill" CLEW_WHY="$why" python3 -c '
+  json="$(CLEW_CONSTRUCT="$construct" CLEW_SKILL="$skill" CLEW_WHY="$why" CLEW_RUN_ID="$clew_run_id" python3 -c '
 import json,os,sys,datetime,hashlib
 now=datetime.datetime.now(datetime.timezone.utc)
 construct=os.environ["CLEW_CONSTRUCT"]; skill=os.environ["CLEW_SKILL"]; why=os.environ["CLEW_WHY"]
+run_id=os.environ.get("CLEW_RUN_ID") or None
 h=hashlib.sha1((why+now.isoformat()).encode()).hexdigest()[:6]
 line={"id":f"lrn-{now:%Y%m%d}-{construct}-{h}","tier":"construct","type":"correction",
       "trigger":why,
       "target":{"skill_slug":skill,"construct":construct,"confirmed":True},
       "tags":[construct],"verified":False,"captured_by":"clew-marker",
-      "captured_at":now.isoformat(),"distilled_at":None,"distill_status":"pending"}
+      "captured_at":now.isoformat(),"run_id":run_id,"distilled_at":None,"distill_status":"pending"}
 sys.stdout.write(json.dumps(line,separators=(",",":"),ensure_ascii=False))')"
   line_id="$(printf '%s' "$json" | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')"
 
