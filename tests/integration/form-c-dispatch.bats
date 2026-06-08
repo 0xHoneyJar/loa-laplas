@@ -44,6 +44,13 @@ setup() {
     # so the seam-clew tests never write into the repo (grimoires/, ~/.loa/).
     export LOA_GRIMOIRE_DIR="$TMPROOT/grimoires"
     export LOA_CLEW_LEDGER_ROOT="$TMPROOT/ledger"
+
+    # Hermetic adapters dir for the construct-resolution validator (bd-ii1m).
+    # The pilot's review stage uses the real `fagan` construct; stub its adapter
+    # here so resolution doesn't depend on the operator's ~/.claude/agents.
+    export LOA_COMPOSE_AGENTS_DIR="$TMPROOT/agents"
+    mkdir -p "$LOA_COMPOSE_AGENTS_DIR"
+    printf 'name: construct-fagan\n' > "$LOA_COMPOSE_AGENTS_DIR/construct-fagan.md"
 }
 
 teardown() {
@@ -174,11 +181,47 @@ _emit_pilot_seg0() {
     [[ "$status" -eq 0 ]] || fail "syntax/determinism check failed: $output"
 }
 
-@test "emit: agentType is construct-<slug> for both stages" {
+@test "emit: agentType resolves both stages — built-in passthrough + first-class construct (bd-ii1m)" {
     [[ -f "$PILOT" ]] || skip "pilot missing"
     local js; js="$(_emit_pilot_seg0)"
-    grep -q 'agentType: "construct-codex-rescue"' "$js" || fail "missing construct-codex-rescue agentType"
-    grep -q 'agentType: "construct-codex-review"' "$js" || fail "missing construct-codex-review agentType"
+    grep -q 'agentType: "general-purpose"' "$js" || fail "implement stage should pass through general-purpose"
+    grep -q 'agentType: "construct-fagan"' "$js" || fail "review stage should resolve to the real construct-fagan"
+    ! grep -q 'construct-codex' "$js" || fail "retired ghost construct-codex-* must never be emitted"
+}
+
+@test "validate: ghost construct (codex-rescue) is flagged before spend, not emitted (bd-ii1m)" {
+    # A chain referencing a retired construct must FAIL the emit (validate-before-spend),
+    # not silently mint a dead agentType that dies at agent() dispatch.
+    cat > "$TMPROOT/ghost-seg.json" <<'JSON'
+{"segment_name":"ghost","index":0,"kind":"sequential","stages":[{"stage":1,"name":"x","construct":"codex-rescue","skill":"implement","role":"primary"}]}
+JSON
+    printf '{"name":"ghost-test","description":"d"}' > "$TMPROOT/ghost-comp.json"
+    run python3 "$EMIT" --segment "$TMPROOT/ghost-seg.json" --composition "$TMPROOT/ghost-comp.json" --validate-constructs
+    [[ "$status" -ne 0 ]] || fail "ghost construct should fail emit (got exit 0): $output"
+    grep -q 'GHOST-CONSTRUCT' <<<"$output" || fail "missing GHOST-CONSTRUCT flag: $output"
+    grep -q 'codex-rescue' <<<"$output" || fail "error should name the ghost: $output"
+}
+
+@test "emit: built-in agent types pass through unprefixed; constructs stay prefixed (bd-ii1m)" {
+    run python3 - "$EMIT" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("se", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+cases = {
+    "general-purpose": "general-purpose",  # plain implementer/reviewer — the bd-ii1m migration target
+    "explore": "Explore",                  # case-insensitive in, canonical Claude Code casing out
+    "Plan": "Plan",
+    "claude": "claude",
+    "k-hole": "construct-k-hole",           # construct slugs still prefix (regression guard)
+    "codex-review": "construct-codex-review",
+}
+for slug, want in cases.items():
+    got = m._agent_type(slug)
+    assert got == want, f"{slug!r} -> {got!r}, want {want!r}"
+print("OK")
+PY
+    [[ "$status" -eq 0 ]] || fail "agent-type passthrough wrong: $output"
+    grep -q OK <<<"$output" || fail "no OK marker: $output"
 }
 
 @test "emit: room packet is baked in-prompt (room authority, not studio)" {
@@ -339,7 +382,7 @@ EOF
     [[ -f "$HARNESS" ]] || skip "harness missing"
     local js; js="$(_emit_pilot_seg0)"
     # work stage returns {} (incomplete), gate APPROVES — the old bug surfaced converged+empty.
-    run node "$HARNESS" "$js" '{"construct-codex-rescue":{},"construct-codex-review":{"verdict":"APPROVED","findings":[]}}'
+    run node "$HARNESS" "$js" '{"general-purpose":{},"construct-fagan":{"verdict":"APPROVED","findings":[]}}'
     [[ "$status" -eq 0 ]] || fail "harness error: $output"
     local outcome; outcome="$(echo "$output" | jq -r '.outcome')"
     [[ "$outcome" == "degraded" ]] || fail "expected degraded, got $outcome (StructuredOutput miss masked as $outcome)"
@@ -350,7 +393,7 @@ EOF
     command -v node >/dev/null || skip "node not available"
     [[ -f "$HARNESS" ]] || skip "harness missing"
     local js; js="$(_emit_pilot_seg0)"
-    run node "$HARNESS" "$js" '{"construct-codex-rescue":"__THROW__","construct-codex-review":{"verdict":"APPROVED","findings":[]}}'
+    run node "$HARNESS" "$js" '{"general-purpose":"__THROW__","construct-fagan":{"verdict":"APPROVED","findings":[]}}'
     [[ "$status" -eq 0 ]] || fail "a thrown stage crashed the workflow (should be caught): $output"
     [[ "$(echo "$output" | jq -r '.outcome')" == "degraded" ]] || fail "thrown stage should degrade, got $(echo "$output" | jq -r '.outcome')"
 }
@@ -359,7 +402,7 @@ EOF
     command -v node >/dev/null || skip "node not available"
     [[ -f "$HARNESS" ]] || skip "harness missing"
     local js; js="$(_emit_pilot_seg0)"
-    run node "$HARNESS" "$js" '{"construct-codex-rescue":{"output":"d","rationale":"w"},"construct-codex-review":{"verdict":"CHANGES_REQUIRED","findings":[]}}'
+    run node "$HARNESS" "$js" '{"general-purpose":{"output":"d","rationale":"w"},"construct-fagan":{"verdict":"CHANGES_REQUIRED","findings":[]}}'
     [[ "$status" -eq 0 ]] || fail "harness error: $output"
     [[ "$(echo "$output" | jq -r '.outcome')" == "cap_reached" ]] || fail "expected cap_reached"
     [[ "$(echo "$output" | jq -r '.converged')" == "false" ]] || fail "cap_reached must not be converged"
@@ -371,7 +414,7 @@ EOF
     [[ -f "$HARNESS" ]] || skip "harness missing"
     local js; js="$(_emit_pilot_seg0)"
     # no scripted response for the work stage -> agent() returns null -> operator-skip
-    run node "$HARNESS" "$js" '{"construct-codex-review":{"verdict":"APPROVED","findings":[]}}'
+    run node "$HARNESS" "$js" '{"construct-fagan":{"verdict":"APPROVED","findings":[]}}'
     [[ "$status" -eq 0 ]] || fail "harness error: $output"
     [[ "$(echo "$output" | jq -r '.degraded.reason')" == "operator-skip" ]] || fail "null should be operator-skip, got $(echo "$output" | jq -r '.degraded.reason')"
 }
@@ -391,9 +434,9 @@ EOF
     [[ -f "$rd/form-c-manifest.json" ]] || fail "manifest missing"
     [[ -f "$rd/workflows/code-implement-and-review.segment-1.workflow.js" ]] || fail "segment workflow missing"
     # manifest contract
-    jq -e '.segments[0].agent_types == ["construct-codex-rescue","construct-codex-review"]' "$rd/form-c-manifest.json" >/dev/null || fail "bad agent_types in manifest"
+    jq -e '.segments[0].agent_types == ["general-purpose","construct-fagan"]' "$rd/form-c-manifest.json" >/dev/null || fail "bad agent_types in manifest (expected general-purpose + first-class construct-fagan)"
     jq -e '.seams[0].kind == "craft-gate" and .seams[0].terminal == true' "$rd/form-c-manifest.json" >/dev/null || fail "bad seam in manifest"
-    jq -e '.seams[0].clew_targets[0].construct == "codex-review"' "$rd/form-c-manifest.json" >/dev/null || fail "missing clew target"
+    jq -e '.seams[0].clew_targets[0].construct == "fagan"' "$rd/form-c-manifest.json" >/dev/null || fail "missing clew target"
 }
 
 @test "form-c: emitted room packets use agent_call + room mode and validate" {
