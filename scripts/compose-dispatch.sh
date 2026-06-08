@@ -348,6 +348,7 @@ _run_form_c() {
                 --composition "$RUN_DIR/composition.json" \
                 --room-packets "$rooms_map" \
                 --cycle-id "$cycle_id" --run-id "$RUN_ID" --authored-at "$authored_at" \
+                --validate-constructs \
                 > "$out_file"; then
             echo "ERROR: Form C emit failed for segment $si ($seg_name)" >&2
             log_event "form_c.emit_failed" "$(jq -n --argjson idx "$si" --arg name "$seg_name" '{index: $idx, segment: $name}')"
@@ -378,7 +379,7 @@ _run_form_c() {
             run_id: $run_id, composition: $comp, cycle_id: $cycle, mode: "workflow",
             schema_version: .composition.schema_version, seam_roles: .composition.seam_roles,
             segments: [ .segments[] as $s | $s + { workflow_file: $files[$s.index],
-                agent_types: [ $s.stages[] | "construct-" + .construct ] } ],
+                agent_types: [ $s.stages[] | .construct as $c | ({"general-purpose":"general-purpose","explore":"Explore","plan":"Plan","claude":"claude"}[($c|ascii_downcase)] // ("construct-" + $c)) ] } ],
             seams: [ .seams[] | . + { clew_targets: ( if .seam_stage then
                 [ { construct: .seam_stage.construct, skill: (.seam_stage.skill // "") } ] else [] end ) } ],
             room_packets: $rooms,

@@ -254,8 +254,65 @@ def _resolve_model(stage):
     return model
 
 
+# Built-in Claude Code agent types pass through unprefixed; every other slug
+# resolves to a construct-* pack adapter. Without the passthrough, a stage that
+# wants a plain implementer/reviewer (general-purpose) or a read-only scout
+# (Explore/Plan) is unreachable: the emitter would mint construct-general-purpose,
+# not a registered adapter, and the agent() dispatch dies. Case-insensitive in,
+# canonical Claude Code casing out. (bd-ii1m)
+_BUILTIN_AGENT_TYPES = {
+    "general-purpose": "general-purpose",
+    "explore": "Explore",
+    "plan": "Plan",
+    "claude": "claude",
+}
+
+
 def _agent_type(slug):
+    builtin = _BUILTIN_AGENT_TYPES.get(slug.lower())
+    if builtin is not None:
+        return builtin
     return f"construct-{slug}"
+
+
+def _agents_dir():
+    """Directory of installed construct adapters — the dispatch-time source of
+    truth for 'does this agentType resolve'. Overridable for hermetic tests."""
+    return os.path.expanduser(
+        os.environ.get("LOA_COMPOSE_AGENTS_DIR", "~/.claude/agents")
+    )
+
+
+def _construct_resolves(slug, agents_dir=None):
+    """A construct reference resolves iff it is a built-in agent type OR an
+    installed construct-<slug>.md adapter exists in the agents dir."""
+    if slug.lower() in _BUILTIN_AGENT_TYPES:
+        return True
+    adir = _agents_dir() if agents_dir is None else agents_dir
+    return os.path.isfile(os.path.join(adir, f"construct-{slug}.md"))
+
+
+def _validate_constructs(stages):
+    """Validate-before-spend (bd-ii1m): every chain construct must resolve to a
+    built-in agent type OR an installed adapter. A reference to neither — e.g. a
+    retired construct like codex-rescue / codex-review — is a GHOST: the emitter
+    would otherwise mint an agentType that silently dies at agent() dispatch.
+    Fail loudly here, before any segment runs (no tokens spent)."""
+    adir = _agents_dir()
+    bad = [s["construct"] for s in stages if not _construct_resolves(s["construct"], adir)]
+    if bad:
+        lines = [
+            "GHOST-CONSTRUCT: composition chain references construct(s) that resolve "
+            "to neither a built-in agent type nor an installed adapter:",
+        ]
+        for slug in bad:
+            lines.append(f"  - {slug!r}  (not a built-in; missing {adir}/construct-{slug}.md)")
+        lines.append(
+            "Fix: install a current construct (construct-ensure.sh <slug>), migrate to "
+            "one, or use a built-in (general-purpose/Explore/Plan/claude). Retired ghosts "
+            "(codex-rescue, codex-review) are not constructs — remove the reference."
+        )
+        sys.exit("\n".join(lines))
 
 
 def _persona_clause(persona):
@@ -936,12 +993,22 @@ def main(argv=None):
     ap.add_argument("--cycle-id", default="cycle-053")
     ap.add_argument("--run-id", default="unknown-run")
     ap.add_argument("--authored-at", default="", help="ISO timestamp baked as literal")
+    ap.add_argument(
+        "--validate-constructs",
+        action="store_true",
+        help="validate-before-spend: fail if a chain construct resolves to neither a "
+        "built-in agent type nor an installed adapter (bd-ii1m). The dispatch path sets "
+        "this; raw emitter-mechanics callers do not.",
+    )
     args = ap.parse_args(argv)
 
     seg_raw = sys.stdin.read() if args.segment == "-" else open(args.segment).read()
     seg = json.loads(seg_raw)
     comp = json.loads(open(args.composition).read())
     room_packets = json.loads(args.room_packets) if args.room_packets else {}
+
+    if args.validate_constructs:
+        _validate_constructs(seg["stages"])
 
     sys.stdout.write(emit(comp, seg, room_packets, args.cycle_id, args.run_id, args.authored_at))
     return 0

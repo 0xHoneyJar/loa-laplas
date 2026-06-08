@@ -87,7 +87,7 @@ terminate_when: >
 chain:
   - stage: 1
     name: implement
-    construct: codex-rescue
+    construct: general-purpose   # was codex-rescue (retired, not a construct); built-in implementer (bd-ii1m)
     skill: implement
     persona: CODEX-RESCUE
     mode: persistent
@@ -109,7 +109,7 @@ chain:
 
   - stage: 2
     name: review
-    construct: codex-review
+    construct: fagan             # was codex-review (retired); FAGAN is the real reviewer construct (bd-ii1m)
     skill: reviewing-diffs
     persona: FAGAN
     mode: fresh                          # fresh context per iteration — no memory of previous reviews
