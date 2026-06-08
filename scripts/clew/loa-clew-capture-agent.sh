@@ -78,13 +78,20 @@ if last_rid:
     try:
         os.makedirs(os.path.dirname(state),exist_ok=True); open(state,"w").write(last_rid)
     except Exception: pass
+# Genome-admission run_id (bd-uze): the compose run_id active when the agent
+# emitted the marker (LOA_COMPOSE_RUN_ID), or None for an ambient capture. Soft
+# here; HARDENED at admission (--mark-distilled verifies valid_run). agent-reflex
+# captures are already confirmed:false CANDIDATES — the run_id is a second,
+# independent gate (a roleplayed self-correction has no real run_id → SUSPECTS).
+_rid=os.environ.get("LOA_COMPOSE_RUN_ID") or ""
+run_id=_rid if (re.match(r"^[0-9A-Za-z][0-9A-Za-z._-]*$",_rid) and ".." not in _rid) else None
 for construct,skill,why in out:
     now=datetime.datetime.now(datetime.timezone.utc)
     h=hashlib.sha1((why+now.isoformat()).encode()).hexdigest()[:6]
     rec={"id":f"lrn-{now:%Y%m%d}-{construct}-{h}","tier":"construct","type":"correction",
          "trigger":why,"target":{"skill_slug":skill,"construct":construct,"confirmed":False},
          "tags":[construct],"verified":False,"captured_by":"agent-reflex",
-         "captured_at":now.isoformat(),"distilled_at":None,"distill_status":"pending"}
+         "captured_at":now.isoformat(),"run_id":run_id,"distilled_at":None,"distill_status":"pending"}
     sys.stdout.write(construct+"\t"+json.dumps(rec,separators=(",",":"),ensure_ascii=False)+"\n")
 PY
 )"

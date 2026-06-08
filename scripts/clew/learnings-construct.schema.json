@@ -30,10 +30,19 @@
     "verified":      { "type": "boolean", "default": false },
     "captured_by":   { "type": "string", "enum": ["clew-marker", "reaction-classifier", "agent-reflex"], "default": "clew-marker" },
     "captured_at":   { "type": "string", "format": "date-time" },
+    "run_id":        { "type": ["string", "null"], "pattern": "^[0-9A-Za-z][0-9A-Za-z._-]*$", "default": null,
+                       "description": "GENOME ADMISSION BACKLINK (bd-uze). The compose run_id active when this clew was captured (LOA_COMPOSE_RUN_ID), or null for an ambient capture outside a governed run. A clew is admissible to the construct's genome ONLY if run_id is non-null AND compose-verify-run returns `valid_run` for it; otherwise it is quarantined to SUSPECTS.jsonl. This is the incorruptible-by-roleplay invariant: a correction made outside a real run teaches nothing." },
     "distilled_at":  { "type": ["string", "null"], "format": "date-time", "default": null,
                        "description": "Idempotency stamp — non-null = already reduced, skip on re-run" },
     "distill_status":{ "type": "string",
-                       "enum": ["pending", "proposed", "skipped_archived", "rejected_generality", "rejected_redaction"],
-                       "default": "pending" }
+                       "enum": ["pending", "proposed", "distilled", "suspect", "skipped_archived", "rejected_generality", "rejected_redaction"],
+                       "default": "pending",
+                       "description": "Lifecycle. pending→proposed (teaching PR drafted)→distilled (operator-merged + genome-admitted). suspect = failed genome admission (no/invalid run_id), quarantined to SUSPECTS.jsonl. The rejected_* / skipped_* states are generality/redaction gate outcomes." },
+    "genome_hash":   { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$",
+                       "description": "GENOME LINK (bd-uze). For a distilled clew, the genome_hash this clew PRODUCED — its link in the construct's genome-hash-chain, computed by genome-chain.py as sha256(jcs({parent, entry})). The chain head is mirrored to the construct.yaml genome_hash; the genome-integrity eval recomputes the whole chain from these entries. Present only on distill_status=distilled entries." },
+    "genome_seq":    { "type": "integer", "minimum": 1,
+                       "description": "GENOME CHAIN INDEX (bd-uze). The 1-based distillation order = the depth this clew produced. Stamped at admission; the genome-integrity verifier orders the chain by genome_seq (AUTHORITATIVE), never by the mutable distilled_at timestamp (which clock-skew / same-second ties could reorder). Present only on distill_status=distilled entries." },
+    "proposed_pr":   { "type": "string", "maxLength": 500,
+                       "description": "The teaching-PR URL recorded by --mark-proposed / --mark-distilled. (Added to the schema to close the pre-existing second-mutation-path drift: the in-place distill rewrite wrote this field while validation only ran on append — the crucible validation-coverage clew. --mark-distilled now re-validates the rewritten entry against this schema.)" }
   }
 }
