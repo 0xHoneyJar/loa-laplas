@@ -26,7 +26,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 JSON=0; [[ "${1:-}" == "--json" ]] && JSON=1
 
-RUNTIME="${LOA_ROOMS_RUNTIME:-$HOME/.loa/runtime/construct-rooms-substrate}"
+RUNTIME="${LOA_ROOMS_RUNTIME:-$REPO_ROOT}"
 SKILL="$HOME/.claude/skills/compose/SKILL.md"
 SCHEMA="${LOA_COMPOSE_SCHEMA:-$HOME/Documents/GitHub/loa-constructs/.claude/schemas/runtime/composition.schema.json}"
 AGENTS_DIR="$HOME/.claude/agents"
@@ -42,7 +42,7 @@ row() { ROWS+=("$1|$2|$3"); }   # status|name|detail
 if [[ -x "$RUNTIME/scripts/compose-dispatch.sh" ]]; then
     row "$green" "runtime" "$RUNTIME"
 else
-    row "$red" "runtime" "compose-dispatch.sh not reachable at $RUNTIME (set LOA_ROOMS_RUNTIME or fix the ~/.loa/runtime symlink)"
+    row "$red" "runtime" "compose-dispatch.sh not reachable at $RUNTIME (set LOA_ROOMS_RUNTIME to the runtime install root)"
     hard_fail=1
 fi
 
