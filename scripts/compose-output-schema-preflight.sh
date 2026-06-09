@@ -13,21 +13,38 @@
 #   L4 the COMPOSITION being dispatched    (informational — declares output_schema or not)
 #
 # Usage:
-#   compose-output-schema-preflight.sh <emitter.py> <composition.yaml|.json> [--json]
+#   compose-output-schema-preflight.sh <emitter.py> [composition.yaml|.json] [--json]
 # Defaults: emitter = this runtime's scripts/lib/segment-emitter.py.
+# Env overrides:
+#   LOA_COMPOSE_SCHEMA           canonical schema path (default: operator-local loa-constructs checkout)
+#   LOA_COMPOSE_SCHEMA_INSTALLED installed schema path (default: ~/.claude/schemas/runtime/...)
+# Portability: when the canonical schema is absent (CI / fresh clone with no override) the
+# gate SKIPs loudly (exit 0) rather than hard-failing L1 — it cannot assess coherence without it.
 set -euo pipefail
 
 CANON="${LOA_COMPOSE_SCHEMA:-$HOME/Documents/GitHub/loa-constructs/.claude/schemas/runtime/composition.schema.json}"
 INSTALLED="${LOA_COMPOSE_SCHEMA_INSTALLED:-$HOME/.claude/schemas/runtime/composition.schema.json}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EMITTER="${1:-$SCRIPT_DIR/lib/segment-emitter.py}"
-COMP="${2:-}"
-JSON=0; [[ "${3:-}" == "--json" || "${2:-}" == "--json" ]] && JSON=1
+
+# Flag-first parse of args 2+ : --json sets JSON; the first non-flag positional is the composition.
+# (Without this, `preflight.sh <emitter> --json` captured "--json" as the composition path. F-005.)
+COMP=""
+JSON=0
+for _arg in "${@:2}"; do
+  case "$_arg" in
+    --json) JSON=1 ;;
+    *) [[ -z "$COMP" ]] && COMP="$_arg" ;;
+  esac
+done
 
 fail() { echo "PREFLIGHT-FAIL [$1]: $2" >&2; exit 1; }
+skip() { echo "PREFLIGHT-SKIP [$1]: $2" >&2; exit 0; }
 
-# L1: canonical schema declares output_schema on the Stage shape
-grep -q '"output_schema"' "$CANON" 2>/dev/null || fail L1 "canonical schema missing output_schema ($CANON)"
+# L1: canonical schema declares output_schema on the Stage shape.
+# Absent canonical (CI / fresh clone, no LOA_COMPOSE_SCHEMA) -> loud SKIP, not a silent FAIL (F-002).
+[[ -f "$CANON" ]] || skip L1 "canonical schema not found at '$CANON' (set LOA_COMPOSE_SCHEMA). Cannot assess coherence; skipping."
+grep -q '"output_schema"' "$CANON" || fail L1 "canonical schema missing output_schema ($CANON)"
 
 # L2: installed schema is byte-identical to canonical (the schema-copy-drift SMELL)
 [[ -f "$INSTALLED" ]] || fail L2 "installed schema not found ($INSTALLED)"

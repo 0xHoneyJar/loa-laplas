@@ -824,16 +824,15 @@ def _return_instruction(stage, legacy_text):
     return "Return the structured output conforming to this stage's DECLARED output_schema" + named + "."
 
 
-def _work_stage_js(st, var_suffix, prior_context_js, schema=None, required=None):
+def _work_stage_js(st, var_suffix, prior_context_js):
     """Emit one work/preamble stage call. prior_context_js is a JS expression
     (string) appended to the prompt array, or '' for none. All literals via js().
-    `schema`/`required` default to the stage's declared output_schema (pinned + det-escaped)
-    and its required-key set — or the WORK_SCHEMA/WORK_REQUIRED constants. They MUST move
-    together: the conformance check has to match the schema actually handed to agent()."""
-    if schema is None:
-        schema = _emit_stage_schema(st)
-    if required is None:
-        required = _emit_stage_required(st)
+    schema, required, AND the prompt instruction are ALL derived from the stage's declared
+    output_schema (else the WORK_SCHEMA/WORK_REQUIRED constants) so the three legs cannot
+    desync. No override parameters: an escape hatch that bypasses the derivation chain is a
+    coherence leak (a caller could pass a schema that disagrees with _return_instruction). [F-003]"""
+    schema = _emit_stage_schema(st)
+    required = _emit_stage_required(st)
     rv = _room_var(st["stage"])
     head = (
         _persona_clause(st.get("persona"))

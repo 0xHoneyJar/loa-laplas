@@ -908,3 +908,16 @@ JSON
     [[ "$status" -ne 0 ]] || fail "__proto__ property must fail loud, got exit 0"
     [[ "$output" == *"OUTPUT-SCHEMA-INVALID"* && "$output" != *"Traceback"* ]] || fail "expected clean OUTPUT-SCHEMA-INVALID: $output"
 }
+
+@test "emit: __proto__ as an output_schema.required ELEMENT FAILS LOUD (pollution guard, required path)" {
+    # The pollution guard also rejects prototype-magic keys listed in required[] — those
+    # collide with JS Object.prototype members and would pass conforms() vacuously. The
+    # property-name test above does not exercise this path. [BB F-006, 2026-06-09]
+    printf '{"name":"probe-proto-req","description":"d","intent":"i"}' > "$TMPROOT/_protoreq-comp.json"
+    cat > "$TMPROOT/_protoreq-seg.json" <<'JSON'
+{"index":0,"segment_name":"probe-proto-req.segment-1","kind":"sequential","stages":[{"stage":1,"construct":"the-mint","role":"primary","output_schema":{"type":"object","required":["__proto__"],"properties":{}}}]}
+JSON
+    run python3 "$EMIT" --segment "$TMPROOT/_protoreq-seg.json" --composition "$TMPROOT/_protoreq-comp.json" --cycle-id c --run-id r
+    [[ "$status" -ne 0 ]] || fail "__proto__ in required must fail loud, got exit 0"
+    [[ "$output" == *"OUTPUT-SCHEMA-INVALID"* && "$output" != *"Traceback"* ]] || fail "expected clean OUTPUT-SCHEMA-INVALID: $output"
+}
