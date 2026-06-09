@@ -677,9 +677,162 @@ def _handoff_seed_literal(stage, payload_var):
     )
 
 
-def _work_stage_js(st, var_suffix, prior_context_js, schema="WORK_SCHEMA", required="WORK_REQUIRED"):
+# --- pinned serialization for the declared typed-handoff envelope ---
+# json.dumps(sort_keys=True, ensure_ascii=True, separators=(",", ":")) + _det_escape:
+# sort_keys closes cross-Python key-ordering non-determinism (the bats determinism test
+# can pass locally while a deployed emitter diverges); ensure_ascii + compact separators
+# + the existing escape close object-value injection (a description/default carrying
+# quotes/newlines) and the Date/Math.random source-grep guard. This IS the byte-for-byte
+# invariant. (Distinct from js(), which is NOT sort_keys-pinned and serves the v1 emit
+# sites that must stay byte-stable.)
+def _pin(value):
+    return _det_escape(json.dumps(value, sort_keys=True, ensure_ascii=True, separators=(",", ":")))
+
+
+# Prototype-pollution / object-literal-magic key names. `__proto__` has SPECIAL semantics
+# in a JS OBJECT LITERAL — `{"__proto__": x}` sets [[Prototype]] instead of an own key, so a
+# schema property literally named __proto__ would be SILENTLY re-shaped when the pinned JSON
+# is emitted as a JS literal (emitted-JS != declared-JSON — the exact silent-wrong this
+# chapter kills). `constructor`/`prototype` complete the classic pollution trio. We reject
+# them in the declared schema (anywhere) and in required[] — fail-loud, at the source. The
+# emitter does NOT instead rewrite the shared conforms() helper to hasOwnProperty: that lives
+# in emit_preamble and would break the byte-identical-backwards-compat invariant for every
+# legacy segment. [FAGAN council, 2026-06-08]
+_UNSAFE_SCHEMA_KEYS = frozenset({"__proto__", "constructor", "prototype"})
+
+
+def _assert_safe_schema_keys(value, stage, path="output_schema"):
+    """Recursively reject prototype-magic key names anywhere in the declared schema, so the
+    emitted JS object literal is semantically identical to the declared JSON."""
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if k in _UNSAFE_SCHEMA_KEYS:
+                sys.exit(
+                    "OUTPUT-SCHEMA-INVALID: stage %r output_schema contains unsafe key %r at "
+                    "%s — it has special JS object-literal/prototype semantics and would "
+                    "silently re-shape the emitted schema. Fix: rename the property."
+                    % (stage.get("construct") or stage.get("name") or stage.get("stage"), k, path)
+                )
+            _assert_safe_schema_keys(v, stage, path + "." + k)
+    elif isinstance(value, list):
+        for i, item in enumerate(value):
+            _assert_safe_schema_keys(item, stage, "%s[%d]" % (path, i))
+
+
+def _validated_output_schema(stage):
+    """Return the stage's declared output_schema as a dict, or None when absent — the
+    SINGLE source of the V1 type guard, shared by _emit_stage_schema (the `schema:` arg)
+    and _emit_stage_required (the withRetry conformance arg) so the two can never disagree.
+
+    V1 is INLINE-OBJECT-ONLY. A `$ref` path is valid YAML (`output_schema: "./x.json"`
+    parses as a str), so a present-but-non-object value FAILS LOUD (sys.exit) — never
+    coerced/stringified into a schema ($ref resolution is V2). A manifest that declares
+    one type and emits another is the exact lie this chapter killed."""
+    schema = stage.get("output_schema")
+    if schema is None:
+        return None
+    if not isinstance(schema, dict):
+        sys.exit(
+            "OUTPUT-SCHEMA-INVALID: stage %r declares output_schema of type %s; V1 "
+            "requires an INLINE JSON-schema OBJECT (a `$ref` string is V2 and is "
+            "rejected, never coerced). Fix: inline the schema object, or remove "
+            "output_schema to fall back to WORK_SCHEMA."
+            % (stage.get("construct") or stage.get("name") or stage.get("stage"),
+               type(schema).__name__)
+        )
+    # The Form C handoff path wraps a NAMED-FIELD OBJECT — conforms(r, required) reads
+    # r[key], and handoffSeeds/context_carry carry the object forward. A non-object schema
+    # (type: string|array|...) would satisfy isinstance(dict) yet silently degrade at
+    # runtime (the exact silent-failure class this chapter kills). V1 says "inline OBJECT";
+    # enforce it so the validator is honest to its own contract. [FAGAN council, 2026-06-08]
+    if schema.get("type") != "object":
+        sys.exit(
+            "OUTPUT-SCHEMA-INVALID: stage %r output_schema must be an OBJECT-typed JSON "
+            "schema (type: object) — the Form C handoff path reads named object keys, so a "
+            "%r-typed schema would silently degrade at runtime. Fix: declare `type: object` "
+            "with named properties."
+            % (stage.get("construct") or stage.get("name") or stage.get("stage"), schema.get("type"))
+        )
+    _assert_safe_schema_keys(schema, stage)
+    return schema
+
+
+def _emit_stage_schema(stage):
+    """The JS `schema:` argument for a work-stage agent() call — the typed handoff
+    envelope this stage emits. The-weaver invariant: the emitted schema MUST equal the
+    stage's DECLARED output_schema, byte-for-byte. Falls back to the WORK_SCHEMA JS
+    constant (byte-identical to v1) when no output_schema is declared."""
+    schema = _validated_output_schema(stage)
+    return "WORK_SCHEMA" if schema is None else _pin(schema)
+
+
+def _emit_stage_required(stage):
+    """The JS `required` argument for withRetry — the required-KEY set the retry/conformance
+    layer enforces (conforms(r, required) === required.every(k => r[k] !== undefined)). It
+    MUST track the schema ACTUALLY passed to agent(): for a declared output_schema that is
+    the schema's own `required` array; else the WORK_REQUIRED constant.
+
+    Load-bearing [FAGAN council finding, 2026-06-08]: without this, a typed handoff (which
+    carries the schema's keys, NOT output/rationale) fails conforms() against WORK_REQUIRED
+    and is wrongly degraded to structured-output-miss — the typed path is generated
+    correctly, then rejected. The PoC dodged this by calling agent() raw (no withRetry);
+    the governed emitter wraps every call, so schema AND required must move together."""
+    schema = _validated_output_schema(stage)
+    if schema is None:
+        return "WORK_REQUIRED"
+    return _pin(_validated_output_required(stage, schema))
+
+
+def _validated_output_required(stage, schema):
+    """The stage's output_schema.required as a validated string list (or [] when omitted —
+    an object with no required keys conforms vacuously). FAIL LOUD on a non-string-array.
+    SINGLE source so the withRetry conformance arg (_emit_stage_required) AND the prompt
+    instruction (_return_instruction) agree, and BOTH surface the loud OUTPUT-SCHEMA-INVALID
+    rather than letting a `", ".join([123])` raise a raw TypeError first. [FAGAN council
+    finding, 2026-06-08]"""
+    required = schema.get("required", [])
+    if not isinstance(required, list) or not all(isinstance(k, str) for k in required):
+        sys.exit(
+            "OUTPUT-SCHEMA-INVALID: stage %r declares output_schema.required that is not a "
+            "JSON-schema string array (got %r). Fix: set `required` to an array of property "
+            "names, or omit it (an object with no required keys conforms vacuously)."
+            % (stage.get("construct") or stage.get("name") or stage.get("stage"), required)
+        )
+    unsafe = [k for k in required if k in _UNSAFE_SCHEMA_KEYS]
+    if unsafe:
+        sys.exit(
+            "OUTPUT-SCHEMA-INVALID: stage %r output_schema.required lists prototype-magic "
+            "key(s) %r — they collide with JS Object.prototype members and would pass the "
+            "conforms() check even when the model omits them. Fix: rename the field(s)."
+            % (stage.get("construct") or stage.get("name") or stage.get("stage"), unsafe)
+        )
+    return required
+
+
+def _return_instruction(stage, legacy_text):
+    """The 'Return ...' prompt line. It MUST describe the schema the stage actually
+    emits: a legacy stage keeps its exact WORK-schema wording (byte-identical to v1);
+    a typed stage is told to satisfy its DECLARED output_schema (its required keys
+    named). Third leg of the the-weaver coherence — instruction, the `schema:` arg, and
+    the withRetry conformance must all carry the same declared type, or the model gets a
+    prompt that contradicts its enforced StructuredOutput. [FAGAN council finding, 2026-06-08]"""
+    schema = _validated_output_schema(stage)
+    if schema is None:
+        return legacy_text
+    req = _validated_output_required(stage, schema)
+    named = (" (required keys: " + ", ".join(req) + ")") if req else ""
+    return "Return the structured output conforming to this stage's DECLARED output_schema" + named + "."
+
+
+def _work_stage_js(st, var_suffix, prior_context_js):
     """Emit one work/preamble stage call. prior_context_js is a JS expression
-    (string) appended to the prompt array, or '' for none. All literals via js()."""
+    (string) appended to the prompt array, or '' for none. All literals via js().
+    schema, required, AND the prompt instruction are ALL derived from the stage's declared
+    output_schema (else the WORK_SCHEMA/WORK_REQUIRED constants) so the three legs cannot
+    desync. No override parameters: an escape hatch that bypasses the derivation chain is a
+    coherence leak (a caller could pass a schema that disagrees with _return_instruction). [F-003]"""
+    schema = _emit_stage_schema(st)
+    required = _emit_stage_required(st)
     rv = _room_var(st["stage"])
     head = (
         _persona_clause(st.get("persona"))
@@ -700,7 +853,7 @@ def _work_stage_js(st, var_suffix, prior_context_js, schema="WORK_SCHEMA", requi
       {lrn},
       "TASK: " + JSON.stringify(task),
       "SCOPE: " + JSON.stringify(scope),{extra}
-      "Return the structured output per the WORK schema (output + rationale)."
+      {js(_return_instruction(st, "Return the structured output per the WORK schema (output + rationale)."))}
     ].filter(Boolean).join("\\n");
     const {var} = await withRetry({js(st['construct'])}, {required}, () => agent({prompt_var}, {{ label: {js(st['construct'])} + ":iter-" + iteration, phase: {js((st.get('name') or st['construct']))}, agentType: {js(_agent_type(st['construct']))}, model: {js(resolved_model)}, schema: {schema} }}));"""
 
@@ -782,9 +935,9 @@ def emit_iterating_body(comp, seg, cycle_id, run_id):
       "TASK: " + JSON.stringify(task),
       "SCOPE: " + JSON.stringify(scope),
       {ctx_js},
-      "Return the structured output per the WORK schema (output + rationale [+ rejected_findings on iteration 2+])."
+      {js(_return_instruction(st, "Return the structured output per the WORK schema (output + rationale [+ rejected_findings on iteration 2+])."))}
     ].filter(Boolean).join("\\n");
-    const workOut_{idx} = await withRetry({js(st['construct'])}, WORK_REQUIRED, () => agent(workPrompt_{idx}, {{ label: {js(st['construct'])} + ":iter-" + iteration, phase: {js((st.get('name') or st['construct']))}, agentType: {js(_agent_type(st['construct']))}, model: {js(resolved_model)}, schema: WORK_SCHEMA }}));
+    const workOut_{idx} = await withRetry({js(st['construct'])}, {_emit_stage_required(st)}, () => agent(workPrompt_{idx}, {{ label: {js(st['construct'])} + ":iter-" + iteration, phase: {js((st.get('name') or st['construct']))}, agentType: {js(_agent_type(st['construct']))}, model: {js(resolved_model)}, schema: {_emit_stage_schema(st)} }}));
     if (workOut_{idx} === null) {{ degraded = {{ reason: "operator-skip", stage: {js(st['construct'])}, iteration: iteration }}; break; }}
     if (isFailed(workOut_{idx})) {{ degraded = {{ reason: workOut_{idx}.error || "stage-failed", detail: workOut_{idx}, iteration: iteration }}; break; }}
     workState = workOut_{idx};
@@ -923,9 +1076,9 @@ def emit_sequential_body(comp, seg, cycle_id, run_id):
       {lrn},
       "TASK: " + JSON.stringify(task),
 {prior}
-      "Return the structured output per the WORK schema."
+      {js(_return_instruction(st, "Return the structured output per the WORK schema."))}
     ].filter(Boolean).join("\\n");
-    const out = await withRetry({js(st['construct'])}, WORK_REQUIRED, () => agent(p, {{ label: {js(st['construct'])}, phase: {js((st.get('name') or st['construct']))}, agentType: {js(_agent_type(st['construct']))}, model: {js(resolved_model)}, schema: WORK_SCHEMA }}));
+    const out = await withRetry({js(st['construct'])}, {_emit_stage_required(st)}, () => agent(p, {{ label: {js(st['construct'])}, phase: {js((st.get('name') or st['construct']))}, agentType: {js(_agent_type(st['construct']))}, model: {js(resolved_model)}, schema: {_emit_stage_schema(st)} }}));
     if (out === null) {{ degraded = {{ reason: "operator-skip", stage: {js(st['construct'])} }}; }}
     else if (isFailed(out)) {{ degraded = {{ reason: out.error || "stage-failed", detail: out }}; }}
     else {{ prior = out; outputs.push(out); handoffSeeds.push({_handoff_seed_literal(st, 'out')}); }}

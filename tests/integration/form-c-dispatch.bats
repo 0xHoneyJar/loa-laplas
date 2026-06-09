@@ -739,3 +739,185 @@ EOF
     [[ "$(_resolve_model '{"role":"craft-gate","intelligence_tier":"cheap"}')" == "opus" ]] || fail "craft-gate+cheap MUST floor at opus (GATE-NEVER-HAIKU)"
     [[ "$(_resolve_model '{"role":"craft-gate","intelligence_tier":"cheap"}')" != "haiku" ]] || fail "GATE-NEVER-HAIKU violated"
 }
+
+
+@test "emit: output_schema is emitted instead of WORK_SCHEMA when defined" {
+    command -v node >/dev/null || skip "node not available"
+    cat > "$TMPROOT/custom-schema.yaml" <<'EOY'
+schema_version: "1.4"
+kind: workflow
+name: probe-custom-schema
+description: 'test'
+intent: "test"
+chain:
+  - stage: 1
+    construct: the-mint
+    role: primary
+    output_schema: {"type": "object", "properties": {"hello": {"type": "string"}}}
+EOY
+    local js; js="$(_emit_from "$TMPROOT/custom-schema.yaml" 0)"
+    run node "$SYNTAX" "$js"
+    [[ "$status" -eq 0 ]] || fail "custom schema injection broke syntax: $output"
+    # BYTE-EXACT pinned fixture [blocker-5 / IMP-002]: the declared output_schema is
+    # serialized via json.dumps(sort_keys=True, ensure_ascii=True, separators=(",",":")),
+    # so keys sort alphabetically (properties < type) and there are NO separator spaces.
+    grep -qF 'schema: {"properties":{"hello":{"type":"string"}},"type":"object"}' "$js" || fail "output_schema not emitted in pinned byte-exact form"
+    ! grep -q "schema: WORK_SCHEMA" "$js" || fail "WORK_SCHEMA still emitted"
+}
+
+@test "emit: WORK_SCHEMA fallback used when output_schema is undefined" {
+    command -v node >/dev/null || skip "node not available"
+    cat > "$TMPROOT/fallback-schema.yaml" <<'EOY'
+schema_version: "1.4"
+kind: workflow
+name: probe-fallback-schema
+description: 'test'
+intent: "test"
+chain:
+  - stage: 1
+    construct: the-mint
+    role: primary
+EOY
+    local js; js="$(_emit_from "$TMPROOT/fallback-schema.yaml" 0)"
+    run node "$SYNTAX" "$js"
+    [[ "$status" -eq 0 ]] || fail "fallback schema broke syntax: $output"
+    grep -q 'schema: WORK_SCHEMA' "$js" || fail "WORK_SCHEMA not emitted"
+}
+
+@test "emit: output_schema string (\$ref) FAILS LOUD — never coerced (V1 inline-only)" {
+    # V1 is inline-object-only. A $ref path is valid YAML (parses as a str), so the
+    # emitter MUST type-check and refuse it with a non-zero exit, never stringify it
+    # into a schema (the silent-wrong outcome this chapter killed). $ref is V2.
+    cat > "$TMPROOT/_ref-comp.json" <<'JSON'
+{"name":"probe-ref","description":"d","intent":"i"}
+JSON
+    cat > "$TMPROOT/_ref-seg.json" <<'JSON'
+{"index":0,"segment_name":"probe-ref.segment-1","kind":"sequential","stages":[{"stage":1,"construct":"the-mint","role":"primary","output_schema":"./external-schema.json"}]}
+JSON
+    run python3 "$EMIT" --segment "$TMPROOT/_ref-seg.json" --composition "$TMPROOT/_ref-comp.json" --cycle-id c --run-id r
+    [[ "$status" -ne 0 ]] || fail "string output_schema must fail loud, got exit 0"
+    [[ "$output" == *"OUTPUT-SCHEMA-INVALID"* ]] || fail "missing OUTPUT-SCHEMA-INVALID marker: $output"
+}
+
+@test "emit: declared output_schema is DETERMINISTIC + byte-pinned (sort_keys, compact)" {
+    # Emit the same composition twice -> byte-identical (sort_keys closes cross-Python
+    # key-order drift). And the emitted literal equals the pinned json.dumps form.
+    cat > "$TMPROOT/det-schema.yaml" <<'EOY'
+schema_version: "1.4"
+kind: workflow
+name: probe-det-schema
+description: 'test'
+intent: "test"
+chain:
+  - stage: 1
+    construct: the-mint
+    role: primary
+    output_schema: {"type": "object", "zeta": {"a": 1}, "alpha": {"b": 2}}
+EOY
+    local a b; a="$(_emit_from "$TMPROOT/det-schema.yaml" 0)"
+    cp "$a" "$TMPROOT/_det-a.js"
+    b="$(_emit_from "$TMPROOT/det-schema.yaml" 0)"
+    diff -q "$TMPROOT/_det-a.js" "$b" || fail "emitted output_schema is not deterministic across runs"
+    # alpha sorts before type before zeta -> proves sort_keys, compact separators
+    grep -qF 'schema: {"alpha":{"b":2},"type":"object","zeta":{"a":1}}' "$b" || fail "schema not in pinned sorted/compact form"
+}
+
+@test "emit: withRetry 'required' tracks declared output_schema.required (FAGAN regression)" {
+    # A typed handoff carries the SCHEMA's keys, never output/rationale. The retry/conformance
+    # layer (conforms(r, required)) MUST check those keys — else it rejects every valid typed
+    # handoff against WORK_REQUIRED and degrades it to structured-output-miss. The schema: arg
+    # and the withRetry required arg MUST move together. [FAGAN council finding, 2026-06-08]
+    cat > "$TMPROOT/req-schema.yaml" <<'EOY'
+schema_version: "1.4"
+kind: workflow
+name: probe-required-tracks
+description: 'test'
+intent: "test"
+chain:
+  - stage: 1
+    construct: the-mint
+    role: primary
+    output_schema: {"type": "object", "required": ["seams", "verdict"], "properties": {"seams": {"type": "array"}, "verdict": {"type": "string"}}}
+EOY
+    local js; js="$(_emit_from "$TMPROOT/req-schema.yaml" 0)"
+    run node "$SYNTAX" "$js"
+    [[ "$status" -eq 0 ]] || fail "required-tracks broke syntax: $output"
+    grep -qF 'withRetry("the-mint", ["seams","verdict"],' "$js" || fail "withRetry required does not track output_schema.required (still WORK_REQUIRED?)"
+    ! grep -qF 'withRetry("the-mint", WORK_REQUIRED' "$js" || fail "typed stage still validated against WORK_REQUIRED — FAGAN bug regressed"
+    # third leg: the prompt instruction must also describe the declared schema, not WORK
+    grep -qF "DECLARED output_schema (required keys: seams, verdict)" "$js" || fail "prompt instruction does not name the declared schema"
+    ! grep -qF 'per the WORK schema' "$js" || fail "typed stage prompt still says 'per the WORK schema'"
+}
+
+@test "emit: withRetry falls back to WORK_REQUIRED when output_schema absent" {
+    cat > "$TMPROOT/req-fallback.yaml" <<'EOY'
+schema_version: "1.4"
+kind: workflow
+name: probe-required-fallback
+description: 'test'
+intent: "test"
+chain:
+  - stage: 1
+    construct: the-mint
+    role: primary
+EOY
+    local js; js="$(_emit_from "$TMPROOT/req-fallback.yaml" 0)"
+    grep -qF 'withRetry("the-mint", WORK_REQUIRED,' "$js" || fail "absent output_schema must fall back to WORK_REQUIRED"
+}
+
+@test "emit: malformed output_schema.required (non-string array) FAILS LOUD, not a TypeError" {
+    # The prompt instruction joins required[] before the conformance arg validates it; a
+    # malformed array (e.g. [123]) must surface OUTPUT-SCHEMA-INVALID, never a raw Python
+    # TypeError traceback. One shared validator guarantees the loud error. [FAGAN, 2026-06-08]
+    cat > "$TMPROOT/_badreq-comp.json" <<'JSON'
+{"name":"probe-badreq","description":"d","intent":"i"}
+JSON
+    cat > "$TMPROOT/_badreq-seg.json" <<'JSON'
+{"index":0,"segment_name":"probe-badreq.segment-1","kind":"sequential","stages":[{"stage":1,"construct":"the-mint","role":"primary","output_schema":{"type":"object","required":[123],"properties":{}}}]}
+JSON
+    run python3 "$EMIT" --segment "$TMPROOT/_badreq-seg.json" --composition "$TMPROOT/_badreq-comp.json" --cycle-id c --run-id r
+    [[ "$status" -ne 0 ]] || fail "malformed required must fail loud, got exit 0"
+    [[ "$output" == *"OUTPUT-SCHEMA-INVALID"* ]] || fail "missing OUTPUT-SCHEMA-INVALID marker: $output"
+    [[ "$output" != *"Traceback"* ]] || fail "raw Python traceback leaked instead of clean error"
+}
+
+@test "emit: non-object output_schema (type != object) FAILS LOUD (handoff path needs an object)" {
+    # isinstance(dict) is not enough — a {"type":"array"} schema is a dict but the Form C
+    # handoff path reads named object keys, so it would silently degrade. V1 = inline OBJECT;
+    # enforce type: object so the validator matches its own contract. [FAGAN, 2026-06-08]
+    cat > "$TMPROOT/_nonobj-comp.json" <<'JSON'
+{"name":"probe-nonobj","description":"d","intent":"i"}
+JSON
+    cat > "$TMPROOT/_nonobj-seg.json" <<'JSON'
+{"index":0,"segment_name":"probe-nonobj.segment-1","kind":"sequential","stages":[{"stage":1,"construct":"the-mint","role":"primary","output_schema":{"type":"array","items":{"type":"string"}}}]}
+JSON
+    run python3 "$EMIT" --segment "$TMPROOT/_nonobj-seg.json" --composition "$TMPROOT/_nonobj-comp.json" --cycle-id c --run-id r
+    [[ "$status" -ne 0 ]] || fail "non-object output_schema must fail loud, got exit 0"
+    [[ "$output" == *"OUTPUT-SCHEMA-INVALID"* && "$output" == *"type: object"* ]] || fail "missing object-type guidance: $output"
+}
+
+@test "emit: __proto__ in output_schema property/required FAILS LOUD (prototype-pollution guard)" {
+    # __proto__ has special JS object-literal semantics — emitted as a literal it would
+    # silently re-shape the schema (emitted-JS != declared-JSON). Reject the pollution trio
+    # at the source, fail-loud, never silently. [FAGAN, 2026-06-08]
+    printf '{"name":"probe-proto","description":"d","intent":"i"}' > "$TMPROOT/_proto-comp.json"
+    cat > "$TMPROOT/_proto-seg.json" <<'JSON'
+{"index":0,"segment_name":"probe-proto.segment-1","kind":"sequential","stages":[{"stage":1,"construct":"the-mint","role":"primary","output_schema":{"type":"object","properties":{"__proto__":{"type":"string"}}}}]}
+JSON
+    run python3 "$EMIT" --segment "$TMPROOT/_proto-seg.json" --composition "$TMPROOT/_proto-comp.json" --cycle-id c --run-id r
+    [[ "$status" -ne 0 ]] || fail "__proto__ property must fail loud, got exit 0"
+    [[ "$output" == *"OUTPUT-SCHEMA-INVALID"* && "$output" != *"Traceback"* ]] || fail "expected clean OUTPUT-SCHEMA-INVALID: $output"
+}
+
+@test "emit: __proto__ as an output_schema.required ELEMENT FAILS LOUD (pollution guard, required path)" {
+    # The pollution guard also rejects prototype-magic keys listed in required[] — those
+    # collide with JS Object.prototype members and would pass conforms() vacuously. The
+    # property-name test above does not exercise this path. [BB F-006, 2026-06-09]
+    printf '{"name":"probe-proto-req","description":"d","intent":"i"}' > "$TMPROOT/_protoreq-comp.json"
+    cat > "$TMPROOT/_protoreq-seg.json" <<'JSON'
+{"index":0,"segment_name":"probe-proto-req.segment-1","kind":"sequential","stages":[{"stage":1,"construct":"the-mint","role":"primary","output_schema":{"type":"object","required":["__proto__"],"properties":{}}}]}
+JSON
+    run python3 "$EMIT" --segment "$TMPROOT/_protoreq-seg.json" --composition "$TMPROOT/_protoreq-comp.json" --cycle-id c --run-id r
+    [[ "$status" -ne 0 ]] || fail "__proto__ in required must fail loud, got exit 0"
+    [[ "$output" == *"OUTPUT-SCHEMA-INVALID"* && "$output" != *"Traceback"* ]] || fail "expected clean OUTPUT-SCHEMA-INVALID: $output"
+}
