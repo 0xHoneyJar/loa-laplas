@@ -101,6 +101,7 @@ def _stage_view(st):
         "persona": st.get("persona"),
         "mode": st.get("mode", "fresh"),
         "role": st.get("role", "primary"),
+        "output_schema": st.get("output_schema"),
         "reads": st.get("reads", []),
         "writes": st.get("writes", []),
         "hitl_by_nature": bool(st.get("hitl_by_nature", False)),
