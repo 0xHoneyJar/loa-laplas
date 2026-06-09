@@ -53,17 +53,17 @@ composition.yaml
                                          compose-verify-run  →  valid_run  (TERMINAL GATE)
 ```
 
-Stable runtime: **`~/.loa/runtime/construct-rooms-substrate`** (`RT` below). Authority for
+Stable runtime: **`~/.loa/constructs/substrates/construct-rooms-substrate`** (`RT` below). Authority for
 the seam protocol + terminal gate: `$RT/docs/compose-as-cc-workflow.md`. Readiness check:
 `$RT/scripts/compose-doctor.sh`.
 
 ## Registry (the deck)
 
-Canonical registry: **`~/bonfire/construct-compositions/compositions/**/<name>.yaml`** (23
+Canonical registry: **`~/.loa/constructs/substrates/construct-compositions/compositions/**/<name>.yaml`** (23
 compositions across `delivery/ discovery/ experimentation/ persona/ sorry-for-ur-loss/`).
 Also check the current repo's `compositions/` for local overrides.
 
-- **Browse / "what compositions exist":** `ls ~/bonfire/construct-compositions/compositions/**/*.yaml` — list by folder; surface name + the composition's `intent`/`description`.
+- **Browse / "what compositions exist":** `ls ~/.loa/constructs/substrates/construct-compositions/compositions/**/*.yaml` — list by folder; surface name + the composition's `intent`/`description`.
 - **Inspect a recipe:** read the YAML; summarize the chain (stages, roles, gates, `iterate`).
 - If the operator names a chain inline, author a minimal YAML (kind: workflow; chain[] of `{stage, construct, skill, persona, mode, role}`; add `iterate` + `max_iterations` + `terminate_when` if it loops).
 
@@ -75,7 +75,7 @@ the one defection this surface forbids: it produces no `run_id`, so the terminal
 (step 6) labels the result `not_a_run`.
 
 ```sh
-RT="$HOME/.loa/runtime/construct-rooms-substrate"
+RT="$HOME/.loa/constructs/substrates/construct-rooms-substrate"
 ```
 
 1. **COMPILE** (`compose-dispatch.sh --form-c`). Validates BEFORE spending tokens, cuts
