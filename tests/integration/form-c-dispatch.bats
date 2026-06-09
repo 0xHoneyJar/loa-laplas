@@ -592,10 +592,13 @@ sys.stdout.write("STDERR:" + buf.getvalue().replace("\n", " ").strip() + "\n")
 PY
 }
 
-@test "intel: explicit intelligence_tier cheap->haiku, standard->sonnet, deep->opus" {
-    [[ "$(_resolve_model '{"intelligence_tier":"cheap","role":"primary"}')" == "haiku" ]] || fail "cheap should map to haiku"
+@test "intel: explicit intelligence_tier cheap->sonnet (SoT), standard->sonnet, deep->opus, tiny->haiku" {
+    # cheap ≡ sonnet per the hounfour SoT reconciliation (2026-06-07, arrakis-d72w);
+    # tiny is the explicit haiku route (home vocabulary).
+    [[ "$(_resolve_model '{"intelligence_tier":"cheap","role":"primary"}')" == "sonnet" ]] || fail "cheap must map to sonnet (hounfour SoT)"
     [[ "$(_resolve_model '{"intelligence_tier":"standard","role":"primary"}')" == "sonnet" ]] || fail "standard should map to sonnet"
     [[ "$(_resolve_model '{"intelligence_tier":"deep","role":"primary"}')" == "opus" ]] || fail "deep should map to opus"
+    [[ "$(_resolve_model '{"intelligence_tier":"tiny","role":"primary"}')" == "haiku" ]] || fail "tiny should map to haiku"
 }
 
 @test "intel: default-by-role — gather/explore->haiku, gate/craft-gate/judge->opus, primary/work->sonnet" {
