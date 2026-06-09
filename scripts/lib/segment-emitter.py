@@ -145,7 +145,11 @@ GATE_REQUIRED = ["verdict", "findings"]
 # TODO (R-F001): close the runtime-dispatch verification gap with a live
 # MODELINV-envelope probe — assert each emitted alias actually routes to the
 # intended model class at agent() invocation, not merely that the literal is emitted.
-TIER_MODEL = {"cheap": "haiku", "standard": "sonnet", "deep": "opus"}
+# RECONCILED to the hounfour SoT (2026-06-07, landed 2026-06-09 / arrakis-d72w):
+# `cheap` ≡ sonnet (model-config.yaml: cheap -> anthropic:claude-sonnet-4-6) — the
+# pre-reconciliation cheap≡haiku mapping silently mis-routed every `cheap` stage.
+# To route the cheapest native model, declare `tiny` explicitly (home vocabulary).
+TIER_MODEL = {"cheap": "sonnet", "standard": "sonnet", "deep": "opus", "tiny": "haiku"}
 
 # Default-by-role (when a stage carries no explicit intelligence_tier): a TOKEN-EXACT
 # match on the stage's role slug. The DEEP set is the quality/decision class — gates,
@@ -206,7 +210,8 @@ def _resolve_model(stage):
     """Resolve a stage dict to a Claude model alias ("haiku"|"sonnet"|"opus").
 
     Precedence + the CONSERVATIVE GUARD (load-bearing):
-      1. An explicit intelligence_tier in {cheap,standard,deep} maps via TIER_MODEL.
+      1. An explicit intelligence_tier in {cheap,standard,deep,tiny} maps via
+         TIER_MODEL (cheap ≡ sonnet per the hounfour SoT; tiny is the haiku route).
       2. Else default-by-role: DEEP set -> opus, CHEAP set -> haiku, else sonnet
          (sonnet is also the floor for an unrecognized/missing role).
       3. NEVER SILENTLY DOWNGRADE A GATE: if the role is in the DEEP set, the result
@@ -231,7 +236,7 @@ def _resolve_model(stage):
         # raise; the role default + conservative floor still produce a safe model.
         if tier:
             sys.stderr.write(
-                "segment-emitter: invalid intelligence_tier %r (valid: cheap, standard, deep); "
+                "segment-emitter: invalid intelligence_tier %r (valid: cheap, standard, deep, tiny); "
                 "falling back to role-based default\n" % (tier,)
             )
         # Default-by-role: DEEP-token set -> opus, CHEAP-token set -> haiku, else sonnet.
