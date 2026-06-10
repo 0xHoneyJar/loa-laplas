@@ -924,3 +924,87 @@ JSON
     [[ "$status" -ne 0 ]] || fail "__proto__ in required must fail loud, got exit 0"
     [[ "$output" == *"OUTPUT-SCHEMA-INVALID"* && "$output" != *"Traceback"* ]] || fail "expected clean OUTPUT-SCHEMA-INVALID: $output"
 }
+
+# =============================================================================
+# PR #32 regression block — args guard + conformance gate (issues #28/#29 +
+# council findings). The preamble tests EXECUTE the emitted JS under each args
+# shape; static greps cover the gate prompt contract.
+# =============================================================================
+
+_run_preamble() {
+    # $1 = JS expression bound to `args`. Extracts the emitted args preamble
+    # and executes it, printing {task, scope, warned}.
+    local js; js="$(_emit_pilot_seg0)"
+    local pre="$TMPROOT/preamble.js"
+    sed -n '/@preamble-start/,/@preamble-end/p' "$js" > "$pre"
+    [[ -s "$pre" ]] || fail "could not extract args preamble from emitted segment"
+    node -e "
+        const logs = [];
+        const log = (m) => logs.push(m);
+        const args = $1;
+        $(cat "$pre")
+        console.log(JSON.stringify({ task, scope, warned: logs.length > 0 }));
+    "
+}
+
+@test "args guard: object args — task and scope honored (issue #28)" {
+    command -v node >/dev/null || skip "node not available"
+    run _run_preamble '({ task: "T-OBJ", scope: "S-OBJ" })'
+    [[ "$status" -eq 0 ]] || fail "preamble exec failed: $output"
+    grep -q '"task":"T-OBJ"' <<<"$output" || fail "object task lost: $output"
+    grep -q '"scope":"S-OBJ"' <<<"$output" || fail "object scope lost: $output"
+}
+
+@test "args guard: stringified args are parsed — task survives (issue #28 root cause)" {
+    command -v node >/dev/null || skip "node not available"
+    run _run_preamble 'JSON.stringify({ task: "T-STR" })'
+    [[ "$status" -eq 0 ]] || fail "preamble exec failed: $output"
+    grep -q '"task":"T-STR"' <<<"$output" || fail "stringified task fell to placeholder: $output"
+}
+
+@test "args guard: DOUBLE-encoded args are unwrapped — task survives (council: cursor)" {
+    command -v node >/dev/null || skip "node not available"
+    run _run_preamble 'JSON.stringify(JSON.stringify({ task: "T-DBL" }))'
+    [[ "$status" -eq 0 ]] || fail "preamble exec failed: $output"
+    grep -q '"task":"T-DBL"' <<<"$output" || fail "double-encoded task fell to placeholder: $output"
+}
+
+@test "args guard: array-shaped args rejected, loud warning fires (council: cursor+claude)" {
+    command -v node >/dev/null || skip "node not available"
+    run _run_preamble '["not","an","object"]'
+    [[ "$status" -eq 0 ]] || fail "preamble exec failed: $output"
+    grep -q '"warned":true' <<<"$output" || fail "array args must warn loudly: $output"
+    ! grep -q '"task":"not"' <<<"$output" || fail "array leaked into input"
+}
+
+@test "args guard: unparseable string warns and falls back, never throws (issue #28)" {
+    command -v node >/dev/null || skip "node not available"
+    run _run_preamble '"{not json"'
+    [[ "$status" -eq 0 ]] || fail "unparseable args must not throw: $output"
+    grep -q '"warned":true' <<<"$output" || fail "unparseable args must warn: $output"
+}
+
+@test "gate prompt: carries TASK + SCOPE and conformance supersedes re-review relaxation (issue #29)" {
+    local js; js="$(_emit_pilot_seg0)"
+    grep -q 'TASK the work stage was asked to implement' "$js" || fail "gate prompt missing TASK"
+    grep -q '"SCOPE: " + JSON.stringify(scope)' "$js" || fail "gate prompt missing SCOPE"
+    grep -q 'CONFORMANCE — supersedes the re-review relaxation' "$js" || fail "conformance must supersede the iteration>=2 relaxation"
+    grep -q 'does not age into acceptance across iterations' "$js" || fail "standing-miss clause missing"
+}
+
+@test "sequential segment: scope extracted and threaded into stage prompts (council: gemini)" {
+    cat > "$TMPROOT/seq-seg.json" <<'JSON'
+{"segment_name":"seq","index":0,"kind":"sequential","stages":[{"stage":1,"name":"x","construct":"general-purpose","skill":"implement","role":"primary"}]}
+JSON
+    printf '{"name":"seq-test","description":"d","intent":"seq intent"}' > "$TMPROOT/seq-comp.json"
+    run python3 "$EMIT" --segment "$TMPROOT/seq-seg.json" --composition "$TMPROOT/seq-comp.json"
+    [[ "$status" -eq 0 ]] || fail "sequential emit failed: $output"
+    grep -q 'const scope = input.scope' <<<"$output" || fail "sequential body missing scope extraction"
+    grep -q '"SCOPE: " + JSON.stringify(scope)' <<<"$output" || fail "sequential stage prompt missing SCOPE"
+    grep -q 'Array.isArray' <<<"$output" || fail "sequential body missing array guard (shared preamble drifted)"
+}
+
+@test "emitted segments carry no issue-tracker literals (council: claude — strings rot when issues close)" {
+    local js; js="$(_emit_pilot_seg0)"
+    ! grep -q 'issue #2[89]' "$js" || fail "emitted JS embeds tracker IDs: $(grep -n 'issue #2' "$js")"
+}

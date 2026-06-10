@@ -1,13 +1,13 @@
 # Composition · code-implement-and-review
 # ================================================================
-# Implementer ↔ reviewer loop. codex-rescue ships a diff, codex-review
+# Implementer ↔ reviewer loop. general-purpose ships a diff, fagan
 # (FAGAN) audits it, returns line-anchored findings with executable
 # fixes, implementer applies fixes, reviewer re-reads, converges.
 # Operator gets reviewed code, not raw output.
 #
 # Authored 2026-04-26 from the henlo-monorepo perf pass aftermath:
-# yesterday's codex-rescue session shipped real changes with no
-# adversarial review gate. This composition fills the gap. codex-review
+# yesterday's codex-rescue (retired) session shipped real changes with no
+# adversarial review gate. This composition fills the gap. fagan
 # (FAGAN) is a NEW lean construct that occupies a clean responsibility
 # seam below Flatline (which owns PRD/SDD/Sprint review).
 #
@@ -40,14 +40,14 @@ hivemind_labels:
 
 depends_on:
   constructs:
-    - codex-rescue        # Anthropic's codex MCP — primary implementer
-    - codex-review        # FAGAN — the new lean reviewer (this composition's reason for existing)
+    - fagan               # FAGAN — the lean reviewer. renamed from: codex-review (bd-ii1m);
+                          # implementer is the built-in general-purpose passthrough, not a registry construct
   tools:
     - codex               # codex CLI (gpt-5.5 backend by default); both stages depend on it
   upstream_compositions:
     - compositions/discovery/audit-feel.yaml   # MAY produce findings that motivate a code-implement-and-review pass
   registry_entries:
-    - codex-review: https://github.com/0xHoneyJar/loa-constructs/blob/main/registry.yaml
+    - fagan: https://github.com/0xHoneyJar/loa-constructs/blob/main/registry.yaml
 
 inputs:
   - type: Intent
@@ -75,7 +75,7 @@ iterate:
 # gate can settle the cap WITHOUT a runner-side default. Made explicit here.
 max_iterations: 3
 terminate_when: >
-  Stage-2 (codex-review / FAGAN) Verdict is APPROVED on merit. If the cap is
+  Stage-2 (fagan / FAGAN) Verdict is APPROVED on merit. If the cap is
   reached first the reviewer auto-approves at the wrapper level — that is
   cap_reached (auto_approved_at_cap), surfaced at the operator seam, NEVER
   folded into converged.
@@ -89,7 +89,6 @@ chain:
     name: implement
     construct: general-purpose   # was codex-rescue (retired, not a construct); built-in implementer (bd-ii1m)
     skill: implement
-    persona: CODEX-RESCUE
     mode: persistent
     reads: [Intent, Artifact, Verdict]   # Verdict from previous review iteration
     writes: [Artifact, Signal]           # Diff + trajectory
@@ -140,19 +139,19 @@ outputs:
       artifact_type: product-spec
       learning_status: strongly-validated
   - type: Verdict
-    destination: .run/compose/<run_id>/codex-review-trail.jsonl
+    destination: .run/compose/<run_id>/fagan-trail.jsonl
     description: Per-iteration review verdicts + findings
-    schema: https://0xhoneyjar.github.io/construct-codex-review/schemas/codex-review-finding.schema.json
+    schema: https://raw.githubusercontent.com/0xHoneyJar/construct-fagan/main/schemas/codex-review-finding.schema.json
   - type: Signal
     destination: .run/compose/<run_id>/orchestrator.jsonl
     description: Orchestrator trajectory (stage transitions, iteration counts)
 
 compose_with:
-  - codex-rescue
-  - codex-review
+  - general-purpose
+  - fagan
 
 composes_symmetrically_with:
-  - codex-rescue ↔ codex-review   # implement ↔ review — the load-bearing pair
+  - general-purpose ↔ fagan   # implement ↔ review — the load-bearing pair
 
 # ================================================================
 # Surface Class (canonical def in outage-triage.yaml; stub here)
@@ -208,20 +207,20 @@ when_to_use: >
 
 known_limitations:
   - "Iteration cap of 3 is advisory on culturetech-loose surfaces (operator halts dictate progress); enforced on defi-strict per surface_class. The reviewer's API auto-approves past the cap — Verdict carries `auto_approved: true` and the orchestrator MUST surface this rather than treating as clean approval."
-  - "Reviewer has no memory of previous reviews (mode: fresh per iteration). Convergence relies on the re-review prompt's discipline. If the reviewer keeps finding NEW issues post-iteration-1, that's a prompt drift bug — file against construct-codex-review."
-  - "Implementer (codex-rescue) requires the Anthropic codex MCP plugin installed. For environments without the plugin, swap stage 1's construct with a CLI-based implementer (one that uses `codex exec` directly). The composition is structured so the implementer is replaceable; the reviewer is not."
+  - "Reviewer has no memory of previous reviews (mode: fresh per iteration). Convergence relies on the re-review prompt's discipline. If the reviewer keeps finding NEW issues post-iteration-1, that's a prompt drift bug — file against construct-fagan."
+  - "Stage 1 runs the built-in Claude general-purpose implementer (the codex CLI is the documented alternative — wiring it requires emitter support). The composition is structured so the implementer is replaceable; the reviewer is not."
   - "Out of scope for this composition: lint, type-check, test execution. The implementer is expected to run those itself before emitting Diff. The reviewer reads Diff content; it does not orchestrate the test runner."
   - "Diff size is bounded by CODEX_REVIEW_MAX_TOKENS (default 30000). For very large diffs, the reviewer's `prepare_content` truncates with priority sort (P0 security/.claude/ first, P3 docs/tests last). Operator should be aware that large diffs may not be reviewed in full."
 
 # ================================================================
 
 references:
-  - skill_implement: construct-codex-rescue/skills/implement/SKILL.md
-  - skill_reviewing_diffs: construct-codex-review/skills/reviewing-diffs/SKILL.md
-  - skill_reviewing_files: construct-codex-review/skills/reviewing-files/SKILL.md
-  - schema_codex_review_finding: https://0xhoneyjar.github.io/construct-codex-review/schemas/codex-review-finding.schema.json
-  - construct_codex_review_repo: https://github.com/0xHoneyJar/construct-codex-review
-  - arch_spec: loa-constructs/grimoires/loa/specs/arch-codex-review.md
+  - skill_implement: built-in `general-purpose` agent passthrough (bd-ii1m) — no SKILL.md; replaced codex-rescue (retired)
+  - skill_reviewing_diffs: construct-fagan/skills/reviewing-diffs/SKILL.md
+  - skill_reviewing_files: construct-fagan/skills/reviewing-files/SKILL.md
+  - schema_review_finding: https://raw.githubusercontent.com/0xHoneyJar/construct-fagan/main/schemas/codex-review-finding.schema.json
+  - construct_fagan_repo: https://github.com/0xHoneyJar/construct-fagan   # renamed from: construct-codex-review
+  - arch_spec: loa-constructs/grimoires/loa/specs/arch-codex-review.md   # pre-rename filename — spec not renamed (BB F-005: file verified on disk)
   - companion_implementer_alternative: codex CLI direct (no MCP plugin) — V2 work, see arch spec build sequence
 
 # ================================================================
@@ -262,6 +261,6 @@ operator_note: |
 
 version: "1.0.0"
 authored_at: "2026-04-26"
-authored_by: kickoff session 2 — codex-review build
+authored_by: kickoff session 2 — codex-review build (construct since renamed fagan)
 changelog:
   - "1.0.0 (2026-04-26): Initial canonical spec. Pairs codex-rescue (Anthropic codex MCP implementer) with codex-review (FAGAN reviewer) in an iterate [[1,2]] loop. Inherits convergence discipline from the reviewer's re-review prompt; iteration cap default 3, surfaced auto-approval past cap. Surface_class + thinking_effort use stub-pointing pattern (canonical defs live in outage-triage.yaml and feel-iterate.yaml respectively)."
