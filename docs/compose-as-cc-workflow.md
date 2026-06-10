@@ -70,7 +70,7 @@ Hardening baked into every emit (flatline mandates):
 
 ```
 manifest := read .run/compose/<run_id>/form-c-manifest.json
-carry    := args from the operator (e.g. { task, scope })
+carry    := args from the operator (e.g. { task, scope[, items] })
 for segment in manifest.segments (in order):
     result := Workflow({ scriptPath: segment.workflow_file, args: carry })
     for seed in result.handoff_seeds:                       # typed handoff
@@ -175,6 +175,35 @@ code) supports both; the *policy* lives in the executor (`/compose` SKILL), not 
   machine-checkable "gate verdict === APPROVED"; the original prose is preserved in
   `meta.metadata.terminate_when` for operator legibility.
 - **Dry-run harness:** `scripts/lib/run-emitted-segment.js <emitted.js> '<responsesByAgentType>' ['<args>']`
+
+## DAG-parallel work — `args.items` (RFC #35)
+
+When an iterating segment has exactly ONE work stage, the executor MAY pass an
+explicit task DAG and iteration 1 fans out instead of running one serial
+mega-context:
+
+```json
+{ "task": "...", "scope": "...",
+  "items": [
+    { "id": "item5", "task": "...", "acceptance": "...", "depends_on": [],
+      "intelligence_tier": "cheap", "isolation": "worktree" },
+    { "id": "item7", "task": "...", "depends_on": ["item5"] } ] }
+```
+
+- **The executor resolves topology** (beads epic edges, a sprint plan, or an
+  enumerated task) into `items[]` at invocation — the emitter stays
+  deterministic and never shells out to `br`.
+- Waves are Kahn layers over `depends_on`, dispatched through
+  `boundedParallel`; leaves default to the cheap tier (sonnet) unless an item
+  declares its own `intelligence_tier`; `isolation: "worktree"` isolates leaves
+  that touch overlapping files.
+- Validation fails LOUD before any token is spent (duplicate/unknown ids,
+  dependency cycles → `degraded` with the offending id named).
+- Iterations ≥ 2 stay the single fixer context: the convergence loop wraps
+  WAVES, not items, so review cost does not multiply. The gate reviews the
+  merged output and anchors findings to `[item-id]`.
+- Segments with multiple work stages ignore `items` loudly (a logged warning),
+  never silently.
   drives an emitted segment with scripted agent responses (no token spend) and prints the
   return — used by the bats runtime tests (converged / cap_reached / degraded / skip / throw)
   and handy for local verification.

@@ -940,6 +940,18 @@ def emit_iterating_body(comp, seg, cycle_id, run_id):
     gate = loop_stages[-1]
     cap = _coerce_cap(seg.get("max_iterations"))
 
+    # DAG-parallel work (RFC #35): args.items = [{id, task, acceptance?,
+    # depends_on?, intelligence_tier?, isolation?}] turns ITERATION 1 of the
+    # work stage into a wave-scheduled fan-out of bounded task-monkey agents
+    # (Kahn layers over depends_on, dispatched through boundedParallel).
+    # Iterations >= 2 stay the single fixer context — the convergence loop
+    # wraps WAVES, not items, so review cost does not multiply. The DAG is
+    # EXPLICIT at invocation (the executor resolves beads/sprint topology to
+    # items[]; the emitter stays deterministic and never shells out to br).
+    # Requires exactly ONE work stage in the iterate pair; multi-work-stage
+    # segments ignore items LOUDLY, never silently.
+    dag_capable = len(work_stages) == 1
+
     # clew marker assembled in Python, then js()'d (C fix — never raw-interpolated).
     clew_marker = (
         ">>clew@" + gate["construct"]
@@ -1010,6 +1022,58 @@ def emit_iterating_body(comp, seg, cycle_id, run_id):
         )
     work_block = "\n".join(work_blocks)
 
+    if dag_capable:
+        wst = work_stages[0]
+        w_name = wst.get("name") or wst["construct"]
+        w_head = (
+            _persona_clause(wst.get("persona"))
+            + f"You are the work stage (construct: {wst['construct']}"
+            + (f", skill: {wst['skill']}" if wst.get("skill") else "")
+            + f", role: {wst.get('role')}). Operate in ROOM AUTHORITY (room mode, not studio) per your room-activation packet below."
+        )
+        w_rv = _room_var(wst["stage"])
+        w_lrn = _learnings_prompt_expr(wst)
+        dag_branch = f"""    phase({js(w_name)});
+    const leafPrompt = (it, done) => [
+      {js(w_head)},
+      "ROOM ACTIVATION PACKET (establishes room authority — invocation_mode:room):",
+      JSON.stringify({w_rv}),
+      {w_lrn},
+      {(preamble_ctx + ",") if preamble_ctx else ""}
+      "TASK (composition-level): " + JSON.stringify(task),
+      "SCOPE: " + JSON.stringify(scope),
+      "YOUR ITEM — implement EXACTLY this one item. Sibling agents handle the other items in parallel waves; do NOT touch their scope: " + JSON.stringify({{ id: it.id, task: it.task, acceptance: it.acceptance || null }}),
+      ((it.depends_on || []).length ? "COMPLETED UPSTREAM DEPENDENCIES (build on these, do not redo them):\\n" + JSON.stringify(Object.fromEntries((it.depends_on || []).map((d) => [d, done[d]]))) : ""),
+      {js(_return_instruction(wst, "Return the structured output per the WORK schema (output + rationale)."))}
+    ].filter(Boolean).join("\\n");
+    const itemResults = {{}};
+    let dagFailed = null;
+    for (let w = 0; w < dagWavesResolved.length && !dagFailed; w++) {{
+      const wave = dagWavesResolved[w];
+      log("DAG wave " + (w + 1) + "/" + dagWavesResolved.length + " (" + wave.length + " item(s)): " + wave.map((i) => i.id).join(", "));
+      const results = await boundedParallel(wave.map((it) => () =>
+        withRetry({js(wst['construct'])} + ":" + it.id, {_emit_stage_required(wst)}, () =>
+          agent(leafPrompt(it, itemResults), Object.assign({{ label: {js(wst['construct'])} + ":item-" + it.id, phase: {js(w_name)}, agentType: {js(_agent_type(wst['construct']))}, model: leafModel(it), schema: {_emit_stage_schema(wst)} }}, it.isolation === "worktree" ? {{ isolation: "worktree" }} : {{}})))));
+      for (let i = 0; i < wave.length; i++) {{
+        const r = results[i];
+        if (r === null) {{ dagFailed = {{ reason: "operator-skip", stage: {js(wst['construct'])}, item: wave[i].id, iteration: iteration }}; break; }}
+        if (isFailed(r)) {{ dagFailed = {{ reason: "dag-leaf-failed", detail: r, item: wave[i].id, iteration: iteration }}; break; }}
+        itemResults[wave[i].id] = r;
+      }}
+    }}
+    if (dagFailed) {{ degraded = dagFailed; break; }}
+    workState = {{
+      dag: true, waves: dagWavesResolved.length, items: itemResults,
+      output: Object.entries(itemResults).map(([id, r]) => "[" + id + "] " + ((r && r.output) || "")).join("\\n\\n"),
+      rationale: "DAG fan-out merge: " + Object.keys(itemResults).length + " item(s) across " + dagWavesResolved.length + " wave(s)"
+    }};
+    handoffSeeds.push({_handoff_seed_literal(wst, 'workState')});"""
+        work_block = f"""    if (iteration === 1 && dagWavesResolved) {{
+{dag_branch}
+    }} else {{
+{work_block}
+    }}"""
+
     grv = _room_var(gate["stage"])
     # The gate is a craft-gate (DEEP role) — _resolve_model floors it at opus; the
     # conservative guard guarantees a quality gate is never emitted on a cheap model.
@@ -1020,6 +1084,52 @@ def emit_iterating_body(comp, seg, cycle_id, run_id):
         + (f", skill: {gate['skill']}" if gate.get("skill") else "")
         + "). Operate in ROOM AUTHORITY (room mode, not studio) per your room-activation packet below. Run an adversarial review of the work output."
     )
+
+    if dag_capable:
+        dag_setup = """\
+// --- DAG-parallel work (RFC #35) ---
+// args.items turns iteration 1 into a wave-scheduled fan-out; leaves are
+// cheap-tier task monkeys (hounfour: cheap ≡ sonnet) unless the item declares
+// its own intelligence_tier. Validation FAILS LOUD before any token is spent.
+const TIER_MODEL_JS = {"tiny":"haiku","cheap":"sonnet","mid":"sonnet","standard":"sonnet","deep":"opus","max":"fable"};
+const leafModel = (it) => TIER_MODEL_JS[it.intelligence_tier] || "sonnet";
+const dagValidate = (items) => {
+  const ids = new Set();
+  for (const it of items) {
+    if (!it || typeof it !== "object" || !it.id || !it.task) return "every item needs {id, task}";
+    if (ids.has(it.id)) return "duplicate item id: " + it.id;
+    ids.add(it.id);
+  }
+  for (const it of items) for (const d of (it.depends_on || []))
+    if (!ids.has(d)) return "item " + it.id + " depends on unknown id: " + d;
+  return null;
+};
+const dagWaves = (items) => {
+  const byId = new Map(items.map((it) => [it.id, it]));
+  const pending = new Map(items.map((it) => [it.id, new Set(it.depends_on || [])]));
+  const done = new Set(); const waves = [];
+  while (pending.size) {
+    const ready = [...pending.keys()].filter((id) => [...pending.get(id)].every((d) => done.has(d)));
+    if (!ready.length) return null; // dependency cycle
+    waves.push(ready.map((id) => byId.get(id)));
+    for (const id of ready) { pending.delete(id); done.add(id); }
+  }
+  return waves;
+};
+const dagItems = (Array.isArray(input.items) && input.items.length) ? input.items : null;
+let dagWavesResolved = null;
+if (dagItems) {
+  const dagErr = dagValidate(dagItems);
+  if (dagErr) return preambleDegraded({ error: "dag-invalid: " + dagErr });
+  dagWavesResolved = dagWaves(dagItems);
+  if (!dagWavesResolved) return preambleDegraded({ error: "dag-invalid: dependency cycle" });
+  log("DAG mode: " + dagItems.length + " item(s) in " + dagWavesResolved.length + " wave(s)");
+}"""
+    else:
+        dag_setup = """\
+// DAG fan-out (RFC #35) requires exactly ONE work stage in the iterate pair —
+// this segment has several, so args.items is ignored (loudly, not silently).
+if (Array.isArray(input.items) && input.items.length) { log("WARNING: args.items ignored — DAG fan-out requires exactly one work stage in the iterate pair (RFC #35)"); }"""
 
     return f"""\
 {_emit_args_preamble(comp.get('intent') or 'No task provided — pass { task, scope } as args.')}
@@ -1043,6 +1153,8 @@ const preambleDegraded = (r) => ({{ outcome: "degraded", converged: false,
   degraded: {{ reason: (r && r.error) || "stage-failed", detail: r, iteration: 0 }}, handoff_seeds: handoffSeeds,
   seam: {{ kind: "operator_gate", clew_capable: true, surface: "preamble stage failed — operator decides", options: ["retry-segment", "abort"] }} }});
 
+{dag_setup}
+
 {preamble_section}
 
 while (iteration < MAX_ITER) {{
@@ -1062,6 +1174,7 @@ while (iteration < MAX_ITER) {{
     "TASK the work stage was asked to implement: " + JSON.stringify(task),
     "SCOPE: " + JSON.stringify(scope),
     "WORK OUTPUT under review:\\n" + JSON.stringify(workState),
+    (workState && workState.dag ? "The work output is a DAG fan-out merge; anchor findings to item ids ([item-id]) where applicable." : ""),
     (iteration >= 2 ? "This is a RE-REVIEW. Accept reasonable declines (the work stage's context is fuller than your scoped view); raise only NEW material defects. If you keep surfacing net-new issues every pass, say so in note (signals prompt drift)." : "First pass: full adversarial scan. Anchor every finding to text (not a line number) and supply an executable fix."),
     "CONFORMANCE — supersedes the re-review relaxation above: verdict is CHANGES_REQUIRED while the work output does not implement the TASK within SCOPE, regardless of internal quality. A standing conformance miss is never a reasonable decline and does not age into acceptance across iterations.",
     "Return APPROVED | CHANGES_REQUIRED + findings per the GATE schema."

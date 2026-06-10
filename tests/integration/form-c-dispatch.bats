@@ -1094,3 +1094,64 @@ _cost_card() {
     local m; m="$(echo "$output" | jq -r '.manifest')"
     [ "$(jq -r '.cost_card.kind' "$m")" = "compose_cost_card" ]
 }
+
+# =============================================================================
+# DAG-parallel work block (RFC #35) — args.items fan-out via boundedParallel.
+# The exec tests RUN the emitted segment through the stub harness.
+# =============================================================================
+
+_emit_dag_seg() {
+    local seg='{"segment_name":"t","index":0,"kind":"iterating","iterate":[1,2],"max_iterations":3,"stages":[{"stage":1,"name":"implement","construct":"general-purpose","skill":"implement","role":"primary"},{"stage":2,"name":"review","construct":"fagan","skill":"reviewing-diffs","role":"craft-gate"}]}'
+    printf '{"name":"dag-test","description":"d","intent":"test intent"}' > "$TMPROOT/dag-comp.json"
+    printf '%s' "$seg" | python3 "$EMIT" --segment - --composition "$TMPROOT/dag-comp.json" > "$TMPROOT/dag-seg.js"
+    echo "$TMPROOT/dag-seg.js"
+}
+
+DAG_RESPONSES='{"general-purpose":{"output":"did the item","rationale":"stub"},"construct-fagan":{"verdict":"APPROVED","findings":[]}}'
+
+@test "dag R35: items fan out in Kahn waves; merged workState converges" {
+    command -v node >/dev/null || skip "node not available"
+    local js; js="$(_emit_dag_seg)"
+    run node "$HARNESS" "$js" "$DAG_RESPONSES" '{"task":"T","scope":"S","items":[{"id":"a","task":"do a"},{"id":"b","task":"do b","depends_on":["a"]},{"id":"c","task":"do c"}]}'
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | jq -r '.outcome')" = "converged" ]
+    [ "$(echo "$output" | jq -r '.result.dag')" = "true" ]
+    [ "$(echo "$output" | jq -r '.result.waves')" = "2" ]
+    [ "$(echo "$output" | jq -r '.result.items | keys | join(",")')" = "a,b,c" ]
+}
+
+@test "dag R35: dependency cycle FAILS LOUD before any agent call (degraded, not silent)" {
+    command -v node >/dev/null || skip "node not available"
+    local js; js="$(_emit_dag_seg)"
+    run node "$HARNESS" "$js" "$DAG_RESPONSES" '{"task":"T","items":[{"id":"a","task":"x","depends_on":["b"]},{"id":"b","task":"y","depends_on":["a"]}]}'
+    [ "$(echo "$output" | jq -r '.outcome')" = "degraded" ]
+    [[ "$(echo "$output" | jq -r '.degraded.detail.error')" == *"dependency cycle"* ]]
+}
+
+@test "dag R35: unknown depends_on id FAILS LOUD with the offending id named" {
+    command -v node >/dev/null || skip "node not available"
+    local js; js="$(_emit_dag_seg)"
+    run node "$HARNESS" "$js" "$DAG_RESPONSES" '{"task":"T","items":[{"id":"a","task":"x","depends_on":["ghost"]}]}'
+    [ "$(echo "$output" | jq -r '.outcome')" = "degraded" ]
+    [[ "$(echo "$output" | jq -r '.degraded.detail.error')" == *"unknown id: ghost"* ]]
+}
+
+@test "dag R35: no items -> serial path unchanged (back-compat)" {
+    command -v node >/dev/null || skip "node not available"
+    local js; js="$(_emit_dag_seg)"
+    run node "$HARNESS" "$js" "$DAG_RESPONSES" '{"task":"T","scope":"S"}'
+    [ "$(echo "$output" | jq -r '.outcome')" = "converged" ]
+    [ "$(echo "$output" | jq -r '.result.dag // false')" = "false" ]
+}
+
+@test "dag R35: leaves are cheap-tier task monkeys; per-item tier override emitted" {
+    local js; js="$(_emit_dag_seg)"
+    grep -q 'model: leafModel(it)' "$js" || fail "leaf model must resolve per item"
+    grep -q '"max":"fable"' "$js" || fail "runtime tier map must carry the full ladder"
+    grep -q 'TIER_MODEL_JS\[it.intelligence_tier\] || "sonnet"' "$js" || fail "task-monkey default must be cheap≡sonnet"
+}
+
+@test "dag R35: gate prompt anchors findings to item ids in DAG mode" {
+    local js; js="$(_emit_dag_seg)"
+    grep -q 'anchor findings to item ids' "$js" || fail "gate must be told to anchor per-item"
+}
