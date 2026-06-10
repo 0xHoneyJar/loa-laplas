@@ -73,6 +73,7 @@ ROOM_VALIDATOR="$PROJECT_ROOT/.claude/scripts/room-packet-validate.sh"
 # Form C (cycle-053) libs — the cut algorithm + segment emitter + syntax checker.
 COMPOSE_CUT_LIB="$SCRIPT_DIR/lib/compose-cut.py"
 SEGMENT_EMITTER_LIB="$SCRIPT_DIR/lib/segment-emitter.py"
+COST_CARD_LIB="$SCRIPT_DIR/lib/compose-cost-card.py"
 WORKFLOW_SYNTAX_CHECK="$SCRIPT_DIR/lib/workflow-syntax-check.js"
 # Substrate-canonical handoff/room schemas (fallback when host paths absent).
 HANDOFF_SCHEMA_SUBSTRATE="$SUBSTRATE_ROOT/data/trajectory-schemas/construct-handoff.schema.json"
@@ -369,12 +370,31 @@ _run_form_c() {
         [[ "$OUTPUT_JSON" == "1" ]] || echo "[compose-dispatch]   segment $si → $out_file"
     done
 
+    # 3.5 COST CARD (intel-routing fix-plan #5) — the emit-time cost ceiling,
+    # surfaced at the moment the tier choice binds. Feedback, not a gate: a
+    # card failure degrades to {} and never blocks the dispatch.
+    local cost_card="{}"
+    if [[ -f "$COST_CARD_LIB" ]]; then
+        cost_card="$(printf '%s' "$plan" | python3 "$COST_CARD_LIB" 2>/dev/null)" || cost_card="{}"
+        [[ -n "$cost_card" ]] || cost_card="{}"
+        if [[ "$cost_card" != "{}" ]]; then
+            local ceiling_usd card_models card_warn
+            ceiling_usd="$(echo "$cost_card" | jq -r '.ceiling_usd // empty')"
+            card_models="$(echo "$cost_card" | jq -r '[.by_model | to_entries[] | "\(.value.calls)×\(.key)"] | join(" + ")')"
+            card_warn="$(echo "$cost_card" | jq -r '.warning // empty')"
+            log_event "form_c.cost_card" "$cost_card"
+            [[ "$OUTPUT_JSON" == "1" ]] || echo "[compose-dispatch] cost ceiling ≈ \$${ceiling_usd} (${card_models})"
+            [[ -z "$card_warn" ]] || echo "[compose-dispatch] WARNING: ${card_warn}" >&2
+        fi
+    fi
+
     # 4. MANIFEST — the contract the main loop's seam protocol consumes.
     local manifest="$RUN_DIR/form-c-manifest.json"
     echo "$plan" | jq \
         --arg run_id "$RUN_ID" --arg comp "$comp_name" --arg cycle "$cycle_id" \
         --argjson files "$emitted_files" --argjson rooms "$rooms_map" \
         --arg seam_doc "docs/compose-as-cc-workflow.md" \
+        --argjson cost_card "$cost_card" \
         '{
             run_id: $run_id, composition: $comp, cycle_id: $cycle, mode: "workflow",
             schema_version: .composition.schema_version, seam_roles: .composition.seam_roles,
@@ -384,6 +404,7 @@ _run_form_c() {
                 [ { construct: .seam_stage.construct, skill: (.seam_stage.skill // "") } ] else [] end ) } ],
             room_packets: $rooms,
             seam_protocol: $seam_doc,
+            cost_card: $cost_card,
             clew_capture: "scripts/clew/loa-clew-capture.sh"
         }' > "$manifest"
     log_event "form_c.manifest" "$(jq -n --arg m "$manifest" --argjson segs "$n_segs" --argjson seams "$n_seams" '{manifest: $m, segments: $segs, seams: $seams}')"
@@ -413,7 +434,8 @@ _run_form_c() {
     if [[ "$OUTPUT_JSON" == "1" ]]; then
         jq -n --arg run_id "$RUN_ID" --arg comp "$comp_name" --argjson segs "$n_segs" --argjson seams "$n_seams" \
             --arg manifest "$manifest" --arg vscript "$verify_script" --arg vcmd "$verify_cmd" --argjson vargv "$verify_argv" \
-            '{run_id: $run_id, composition: $comp, mode: "workflow", segments: $segs, seams: $seams, manifest: $manifest,
+            --argjson cost_card "$cost_card" \
+            '{run_id: $run_id, composition: $comp, mode: "workflow", segments: $segs, seams: $seams, manifest: $manifest, cost_card: $cost_card,
               awaiting_main_loop: true,
               terminal_gate: {gate: "compose-verify-run", script: $vscript, run_id: $run_id, argv: $vargv, cmd: $vcmd, require_executed: true, required: true},
               exit_code: 3}'
