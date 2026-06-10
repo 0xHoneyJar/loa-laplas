@@ -1042,3 +1042,53 @@ JSON
 @test "intel max-tier: invalid tier still falls back by role (R-F004 unchanged)" {
     [[ "$(_resolve_model '{"role":"primary","intelligence_tier":"mega"}')" == "sonnet" ]] || fail "invalid tier must fall back to role default"
 }
+
+# =============================================================================
+# Cost-card block (intel-routing fix-plan #5) — emit-time cost ceiling.
+# =============================================================================
+
+_cost_card() {
+    printf '%s' "$1" | python3 "$SUBSTRATE_ROOT/scripts/lib/compose-cost-card.py"
+}
+
+@test "cost-card: sequential plan prices each stage with the emitter's own resolver" {
+    local plan='{"segments":[{"index":0,"kind":"sequential","segment_name":"s","stages":[{"stage":1,"construct":"x","role":"primary","intelligence_tier":"max"},{"stage":2,"construct":"y","role":"primary","intelligence_tier":"tiny"}]}]}'
+    run _cost_card "$plan"
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | jq -r '.stages[0].model')" = "fable" ]
+    [ "$(echo "$output" | jq -r '.stages[1].model')" = "haiku" ]
+    [ "$(echo "$output" | jq -r '.stages[0].calls_ceiling')" = "1" ]
+    [ "$(echo "$output" | jq -r '.ceiling_micro_usd > 0')" = "true" ]
+}
+
+@test "cost-card: iterating segment multiplies by max_iterations (the cap IS the ceiling)" {
+    local plan='{"segments":[{"index":0,"kind":"iterating","segment_name":"loop","max_iterations":3,"stages":[{"stage":1,"construct":"w","role":"primary"},{"stage":2,"construct":"g","role":"craft-gate"}]}]}'
+    run _cost_card "$plan"
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | jq -r '.stages[0].calls_ceiling')" = "3" ]
+    [ "$(echo "$output" | jq -r '.stages[1].model')" = "opus" ]
+    [ "$(echo "$output" | jq -r '.by_model.opus.calls')" = "3" ]
+}
+
+@test "cost-card: gate floor visible in the card — default gate costs opus, never haiku" {
+    local plan='{"segments":[{"index":0,"kind":"sequential","segment_name":"s","stages":[{"stage":1,"construct":"g","role":"review","intelligence_tier":"tiny"}]}]}'
+    run _cost_card "$plan"
+    [ "$(echo "$output" | jq -r '.stages[0].model')" = "opus" ]
+}
+
+@test "cost-card: token-envelope env overrides scale the ceiling linearly" {
+    local plan='{"segments":[{"index":0,"kind":"sequential","segment_name":"s","stages":[{"stage":1,"construct":"x","role":"primary"}]}]}'
+    base="$(_cost_card "$plan" | jq -r '.ceiling_micro_usd')"
+    doubled="$(LOA_COMPOSE_EST_IN_TOKENS=240000 LOA_COMPOSE_EST_OUT_TOKENS=16000 _cost_card "$plan" | jq -r '.ceiling_micro_usd')"
+    [ "$doubled" -eq "$((base * 2))" ]
+}
+
+@test "cost-card: dispatch embeds the card in manifest + JSON output (pilot)" {
+    [[ -f "$PILOT" ]] || skip "pilot missing"
+    run "$DISPATCH" "$PILOT" --form-c --run-id cost-card-test --json
+    [ "$status" -eq 3 ]
+    [ "$(echo "$output" | jq -r '.cost_card.kind')" = "compose_cost_card" ]
+    [ "$(echo "$output" | jq -r '.cost_card.ceiling_micro_usd > 0')" = "true" ]
+    local m; m="$(echo "$output" | jq -r '.manifest')"
+    [ "$(jq -r '.cost_card.kind' "$m")" = "compose_cost_card" ]
+}
