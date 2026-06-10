@@ -324,6 +324,34 @@ def _persona_clause(persona):
     return f"You are {persona}. " if persona else ""
 
 
+def _emit_args_preamble(default_task):
+    """The args→input→task/scope preamble, emitted identically into every
+    segment body. ONE source — the iterating/sequential copies drifted once
+    (sequential lacked scope; PR #32 council review) and placeholder-task bugs
+    breed in that gap.
+
+    The emitted JS handles: JSON-string args including double-encoded strings
+    (bounded unwrap — a single parse reproduces the placeholder fallback one
+    encoding layer up), array-shaped payloads (typeof [] === "object" admits
+    arrays), and a loud warning that names what actually runs when no task
+    arrives."""
+    return f"""\
+// --- inputs (the `args` global; main loop passes them at invocation) ---
+// args may arrive as a JSON-encoded STRING (Workflow callers can deliver either
+// form — observed live), possibly double-encoded: unwrap until non-string
+// (bounded), reject array-shaped payloads, and warn loudly when no task
+// arrives instead of silently running the composition's intent prose.
+let _args = args;
+for (let _u = 0; _u < 3 && typeof _args === "string"; _u++) {{
+  try {{ _args = JSON.parse(_args); }}
+  catch (e) {{ log("args arrived as an unparseable string — falling back to defaults: " + e.message); break; }}
+}}
+const input = (_args && typeof _args === "object" && !Array.isArray(_args)) ? _args : {{}};
+if (!input.task) {{ log("WARNING: no usable task reached the segment — running on the composition's intent prose as the task"); }}
+const task = input.task || {js(default_task)};
+const scope = input.scope || "unscoped — the work stage infers the minimal blast radius";"""
+
+
 def _room_var(stage_num):
     return f"ROOM_PACKET_S{str(stage_num).replace('.', '_')}"
 
@@ -962,16 +990,7 @@ def emit_iterating_body(comp, seg, cycle_id, run_id):
     )
 
     return f"""\
-// --- inputs (the `args` global; main loop passes them at invocation) ---
-// args may arrive as a JSON-encoded STRING (Workflow callers can deliver either
-// form — observed live, run exp2-acf-0610a / issue #28): parse before guarding,
-// and warn loudly when no task arrives instead of silently running the placeholder.
-let _args = args;
-if (typeof _args === "string") {{ try {{ _args = JSON.parse(_args); }} catch (e) {{ log("args arrived as unparseable string — falling back to defaults: " + e.message); }} }}
-const input = (_args && typeof _args === "object") ? _args : {{}};
-if (!input.task) {{ log("WARNING: no task arg reached the segment — running on the placeholder default task (issue #28)"); }}
-const task = input.task || {js(comp.get('intent') or 'No task provided — pass { task, scope } as args.')};
-const scope = input.scope || "unscoped — the work stage infers the minimal blast radius";
+{_emit_args_preamble(comp.get('intent') or 'No task provided — pass { task, scope } as args.')}
 
 const MAX_ITER = {js(cap)};
 let workState = null;          // mode:persistent carry across iterations
@@ -1012,7 +1031,7 @@ while (iteration < MAX_ITER) {{
     "SCOPE: " + JSON.stringify(scope),
     "WORK OUTPUT under review:\\n" + JSON.stringify(workState),
     (iteration >= 2 ? "This is a RE-REVIEW. Accept reasonable declines (the work stage's context is fuller than your scoped view); raise only NEW material defects. If you keep surfacing net-new issues every pass, say so in note (signals prompt drift)." : "First pass: full adversarial scan. Anchor every finding to text (not a line number) and supply an executable fix."),
-    "CONFORMANCE (issue #29): verdict is CHANGES_REQUIRED if the work output does not implement the TASK within SCOPE — regardless of its internal quality.",
+    "CONFORMANCE — supersedes the re-review relaxation above: verdict is CHANGES_REQUIRED while the work output does not implement the TASK within SCOPE, regardless of internal quality. A standing conformance miss is never a reasonable decline and does not age into acceptance across iterations.",
     "Return APPROVED | CHANGES_REQUIRED + findings per the GATE schema."
   ].filter(Boolean).join("\\n");
   const gateOut = await withRetry({js(gate['construct'])}, GATE_REQUIRED, () => agent(gatePrompt, {{ label: {js(gate['construct'])} + ":iter-" + iteration, phase: {js((gate.get('name') or gate['construct']))}, agentType: {js(_agent_type(gate['construct']))}, model: {js(gate_model)}, schema: GATE_SCHEMA }}));
@@ -1089,6 +1108,7 @@ def emit_sequential_body(comp, seg, cycle_id, run_id):
       JSON.stringify({rv}),
       {lrn},
       "TASK: " + JSON.stringify(task),
+      "SCOPE: " + JSON.stringify(scope),
 {prior}
       {js(_return_instruction(st, "Return the structured output per the WORK schema."))}
     ].filter(Boolean).join("\\n");
@@ -1105,14 +1125,7 @@ def emit_sequential_body(comp, seg, cycle_id, run_id):
         )
     body = "\n".join(blocks)
     return f"""\
-// args may arrive as a JSON-encoded STRING (Workflow callers can deliver either
-// form — observed live, run exp2-acf-0610a / issue #28): parse before guarding,
-// and warn loudly when no task arrives instead of silently running the placeholder.
-let _args = args;
-if (typeof _args === "string") {{ try {{ _args = JSON.parse(_args); }} catch (e) {{ log("args arrived as unparseable string — falling back to defaults: " + e.message); }} }}
-const input = (_args && typeof _args === "object") ? _args : {{}};
-if (!input.task) {{ log("WARNING: no task arg reached the segment — running on the placeholder default task (issue #28)"); }}
-const task = input.task || {js(comp.get('intent') or 'No task provided.')};
+{_emit_args_preamble(comp.get('intent') or 'No task provided — pass { task, scope } as args.')}
 let prior = input.prior || null;
 const outputs = [];
 const handoffSeeds = [];
