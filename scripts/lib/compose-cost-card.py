@@ -123,6 +123,7 @@ def build_cost_card(plan: dict) -> dict:
             "retry_attempts_per_call": RETRY_ATTEMPTS_PER_CALL,
             "price_source": price_source,
             "note": "ceiling estimate for tier-choice feedback, not a bill",
+            "note_dag": "args.items fan-out (RFC #35) multiplies work-stage calls at runtime; this ceiling assumes the single-context path",
         },
         "stages": stages_out,
         "by_model": by_model,
