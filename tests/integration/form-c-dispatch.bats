@@ -1057,7 +1057,8 @@ _cost_card() {
     [ "$status" -eq 0 ]
     [ "$(echo "$output" | jq -r '.stages[0].model')" = "fable" ]
     [ "$(echo "$output" | jq -r '.stages[1].model')" = "haiku" ]
-    [ "$(echo "$output" | jq -r '.stages[0].calls_ceiling')" = "1" ]
+    # withRetry prices 2 attempts per call (worst case): sequential = 1×2
+    [ "$(echo "$output" | jq -r '.stages[0].calls_ceiling')" = "2" ]
     [ "$(echo "$output" | jq -r '.ceiling_micro_usd > 0')" = "true" ]
 }
 
@@ -1065,9 +1066,10 @@ _cost_card() {
     local plan='{"segments":[{"index":0,"kind":"iterating","segment_name":"loop","max_iterations":3,"stages":[{"stage":1,"construct":"w","role":"primary"},{"stage":2,"construct":"g","role":"craft-gate"}]}]}'
     run _cost_card "$plan"
     [ "$status" -eq 0 ]
-    [ "$(echo "$output" | jq -r '.stages[0].calls_ceiling')" = "3" ]
+    # 3 iterations × 2 retry attempts = 6 ceiling calls per stage
+    [ "$(echo "$output" | jq -r '.stages[0].calls_ceiling')" = "6" ]
     [ "$(echo "$output" | jq -r '.stages[1].model')" = "opus" ]
-    [ "$(echo "$output" | jq -r '.by_model.opus.calls')" = "3" ]
+    [ "$(echo "$output" | jq -r '.by_model.opus.calls')" = "6" ]
 }
 
 @test "cost-card: gate floor visible in the card — default gate costs opus, never haiku" {

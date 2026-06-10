@@ -50,6 +50,11 @@ PRICE_PROVENANCE = "pinned-snapshot 2026-06-10 (SoT: loa .claude/defaults/model-
 DEFAULT_EST_IN = 120_000
 DEFAULT_EST_OUT = 8_000
 
+# The emitted withRetry wrapper calls agent() up to twice per stage invocation
+# (one retry on transient failure / schema miss — segment-emitter.py). The
+# CEILING must price the worst case (codex review P2 on PR #34).
+RETRY_ATTEMPTS_PER_CALL = 2
+
 
 def _load_resolver():
     """Import _resolve_model from the sibling segment-emitter.py (hyphenated
@@ -84,7 +89,8 @@ def build_cost_card(plan: dict) -> dict:
         kind = seg.get("kind", "sequential")
         # Iterating segments: each stage runs up to max_iterations times — the
         # cap is the ceiling. Sequential stages run once.
-        calls = int(seg.get("max_iterations") or 1) if kind == "iterating" else 1
+        base_calls = int(seg.get("max_iterations") or 1) if kind == "iterating" else 1
+        calls = base_calls * RETRY_ATTEMPTS_PER_CALL
         for st in seg.get("stages", []):
             model = resolve_model(st)
             p = prices.get(model)
@@ -114,6 +120,7 @@ def build_cost_card(plan: dict) -> dict:
         "assumptions": {
             "est_in_tokens_per_call": est_in,
             "est_out_tokens_per_call": est_out,
+            "retry_attempts_per_call": RETRY_ATTEMPTS_PER_CALL,
             "price_source": price_source,
             "note": "ceiling estimate for tier-choice feedback, not a bill",
         },
