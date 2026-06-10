@@ -936,7 +936,7 @@ _run_preamble() {
     # and executes it, printing {task, scope, warned}.
     local js; js="$(_emit_pilot_seg0)"
     local pre="$TMPROOT/preamble.js"
-    sed -n '/^let _args = args;$/,/^const scope = /p' "$js" > "$pre"
+    sed -n '/@preamble-start/,/@preamble-end/p' "$js" > "$pre"
     [[ -s "$pre" ]] || fail "could not extract args preamble from emitted segment"
     node -e "
         const logs = [];

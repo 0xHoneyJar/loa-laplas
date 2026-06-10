@@ -336,6 +336,7 @@ def _emit_args_preamble(default_task):
     arrays), and a loud warning that names what actually runs when no task
     arrives."""
     return f"""\
+// @preamble-start (sentinels anchor test extraction — keep stable across edits)
 // --- inputs (the `args` global; main loop passes them at invocation) ---
 // args may arrive as a JSON-encoded STRING (Workflow callers can deliver either
 // form — observed live), possibly double-encoded: unwrap until non-string
@@ -346,10 +347,12 @@ for (let _u = 0; _u < 3 && typeof _args === "string"; _u++) {{
   try {{ _args = JSON.parse(_args); }}
   catch (e) {{ log("args arrived as an unparseable string — falling back to defaults: " + e.message); break; }}
 }}
+if (Array.isArray(_args)) {{ log("WARNING: args arrived as an array — expected an object; falling back to defaults"); }}
 const input = (_args && typeof _args === "object" && !Array.isArray(_args)) ? _args : {{}};
 if (!input.task) {{ log("WARNING: no usable task reached the segment — running on the composition's intent prose as the task"); }}
 const task = input.task || {js(default_task)};
-const scope = input.scope || "unscoped — the work stage infers the minimal blast radius";"""
+const scope = input.scope || "unscoped — the work stage infers the minimal blast radius";
+// @preamble-end"""
 
 
 def _room_var(stage_num):

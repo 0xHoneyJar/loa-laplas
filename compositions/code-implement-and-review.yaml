@@ -40,7 +40,7 @@ hivemind_labels:
 
 depends_on:
   constructs:
-    - fagan               # FAGAN — the lean reviewer. DEPRECATED(codex-review→fagan, bd-ii1m);
+    - fagan               # FAGAN — the lean reviewer. renamed from: codex-review (bd-ii1m);
                           # implementer is the built-in general-purpose passthrough, not a registry construct
   tools:
     - codex               # codex CLI (gpt-5.5 backend by default); both stages depend on it
@@ -141,7 +141,7 @@ outputs:
   - type: Verdict
     destination: .run/compose/<run_id>/fagan-trail.jsonl
     description: Per-iteration review verdicts + findings
-    schema: https://github.com/0xHoneyJar/construct-fagan/blob/main/schemas/codex-review-finding.schema.json
+    schema: https://raw.githubusercontent.com/0xHoneyJar/construct-fagan/main/schemas/codex-review-finding.schema.json
   - type: Signal
     destination: .run/compose/<run_id>/orchestrator.jsonl
     description: Orchestrator trajectory (stage transitions, iteration counts)
@@ -215,12 +215,12 @@ known_limitations:
 # ================================================================
 
 references:
-  - skill_implement: built-in `general-purpose` agent passthrough (bd-ii1m) — no SKILL.md; DEPRECATED(codex-rescue→general-purpose)
+  - skill_implement: built-in `general-purpose` agent passthrough (bd-ii1m) — no SKILL.md; replaced codex-rescue (retired)
   - skill_reviewing_diffs: construct-fagan/skills/reviewing-diffs/SKILL.md
   - skill_reviewing_files: construct-fagan/skills/reviewing-files/SKILL.md
-  - schema_review_finding: https://github.com/0xHoneyJar/construct-fagan/blob/main/schemas/codex-review-finding.schema.json
-  - construct_fagan_repo: https://github.com/0xHoneyJar/construct-fagan   # DEPRECATED(codex-review→fagan)
-  - arch_spec: loa-constructs/grimoires/loa/specs/arch-codex-review.md
+  - schema_review_finding: https://raw.githubusercontent.com/0xHoneyJar/construct-fagan/main/schemas/codex-review-finding.schema.json
+  - construct_fagan_repo: https://github.com/0xHoneyJar/construct-fagan   # renamed from: construct-codex-review
+  - arch_spec: loa-constructs/grimoires/loa/specs/arch-codex-review.md   # pre-rename filename — spec not renamed (BB F-005: file verified on disk)
   - companion_implementer_alternative: codex CLI direct (no MCP plugin) — V2 work, see arch spec build sequence
 
 # ================================================================
