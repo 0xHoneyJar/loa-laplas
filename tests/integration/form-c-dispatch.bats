@@ -1008,3 +1008,37 @@ JSON
     local js; js="$(_emit_pilot_seg0)"
     ! grep -q 'issue #2[89]' "$js" || fail "emitted JS embeds tracker IDs: $(grep -n 'issue #2' "$js")"
 }
+
+# =============================================================================
+# max-tier / fable regression block (2026-06-10 intel-routing review).
+# The unified hounfour ladder {tiny,cheap,mid,max} + the rank-based gate floor.
+# =============================================================================
+
+@test "intel max-tier: work stage with intelligence_tier max -> fable" {
+    [[ "$(_resolve_model '{"role":"primary","intelligence_tier":"max"}')" == "fable" ]] || fail "max must route to fable on a work stage"
+}
+
+@test "intel max-tier: mid routes to sonnet (hounfour ladder unified)" {
+    [[ "$(_resolve_model '{"role":"primary","intelligence_tier":"mid"}')" == "sonnet" ]] || fail "mid must route to sonnet"
+}
+
+@test "intel max-tier: gate-class stage with explicit max -> fable (opt-in UPGRADE allowed)" {
+    # The old guard was an unconditional pin (model = opus) and would have
+    # DOWNGRADED an explicit fable gate. Floor semantics allow the upgrade.
+    [[ "$(_resolve_model '{"role":"craft-gate","intelligence_tier":"max"}')" == "fable" ]] || fail "explicit max on a gate is an allowed upgrade, not pinned back to opus"
+}
+
+@test "intel max-tier: gate-class stage with NO tier stays opus (no auto-float to fable)" {
+    # GYGAX verdict: auto-floating the broad gate class to the top tier is the
+    # largest cost-runaway vector. The floor is a named constant pinned at opus.
+    [[ "$(_resolve_model '{"role":"craft-gate"}')" == "opus" ]] || fail "default gate must stay at the opus floor, never auto-float to fable"
+    [[ "$(_resolve_model '{"role":"gate","intelligence_tier":"cheap"}')" == "opus" ]] || fail "cheap on a gate still floors UP to opus"
+}
+
+@test "intel max-tier: tiny on a gate still floors to opus (GATE-NEVER-HAIKU preserved)" {
+    [[ "$(_resolve_model '{"role":"review","intelligence_tier":"tiny"}')" == "opus" ]] || fail "tiny on a gate-class stage must floor to opus"
+}
+
+@test "intel max-tier: invalid tier still falls back by role (R-F004 unchanged)" {
+    [[ "$(_resolve_model '{"role":"primary","intelligence_tier":"mega"}')" == "sonnet" ]] || fail "invalid tier must fall back to role default"
+}

@@ -137,11 +137,12 @@ GATE_REQUIRED = ["verdict", "findings"]
 # small mirror of advisor_strategy's SHAPE (NOT its multi-provider map — segment
 # bodies are Claude-only).
 #
-# R-F001 (alias provenance): the values "haiku" | "sonnet" | "opus" below are the
-# model ALIASES accepted by the Workflow tool's agent() `opts.model` parameter —
-# that runtime is the SOURCE OF TRUTH for these strings; they are not arbitrary.
-# Changing them here without a matching change at the agent() boundary silently
-# breaks dispatch.
+# R-F001 (alias provenance): the values "haiku" | "sonnet" | "opus" | "fable" below
+# are the model ALIASES accepted by the Workflow tool's agent() `opts.model`
+# parameter — that runtime is the SOURCE OF TRUTH for these strings; they are not
+# arbitrary. Changing them here without a matching change at the agent() boundary
+# silently breaks dispatch. ("fable" verified against the harness Workflow schema
+# 2026-06-10 — model enum: sonnet|opus|haiku|fable.)
 # TODO (R-F001): close the runtime-dispatch verification gap with a live
 # MODELINV-envelope probe — assert each emitted alias actually routes to the
 # intended model class at agent() invocation, not merely that the literal is emitted.
@@ -149,7 +150,34 @@ GATE_REQUIRED = ["verdict", "findings"]
 # `cheap` ≡ sonnet (model-config.yaml: cheap -> anthropic:claude-sonnet-4-6) — the
 # pre-reconciliation cheap≡haiku mapping silently mis-routed every `cheap` stage.
 # To route the cheapest native model, declare `tiny` explicitly (home vocabulary).
-TIER_MODEL = {"cheap": "sonnet", "standard": "sonnet", "deep": "opus", "tiny": "haiku"}
+# UNIFIED LADDER (2026-06-10 intel-routing review): the emitter now accepts the
+# full hounfour vocabulary {tiny, cheap, mid, max} alongside the legacy emitter
+# vocabulary {standard, deep}. `max` ≡ fable (the top intelligence tier; SoT
+# tier_groups.mappings.max.anthropic). Pricing for fable was registered in the
+# SoT BEFORE this routability landed (fix-plan ordering: an unpriced model
+# meters as $0 and blinds the budget governor).
+TIER_MODEL = {
+    "tiny": "haiku",
+    "cheap": "sonnet",
+    "mid": "sonnet",
+    "standard": "sonnet",
+    "deep": "opus",
+    "max": "fable",
+}
+
+# Model rank for FLOOR semantics (not pin semantics): higher = more capable.
+# Used by the R-F003 gate floor so an explicit `max` on a gate-class stage is an
+# allowed UPGRADE while anything below the floor is still raised to it.
+MODEL_RANK = {"haiku": 0, "sonnet": 1, "opus": 2, "fable": 3}
+
+# The gate-class floor, a NAMED constant (GYGAX, intel-routing review): pinned to
+# opus, NOT auto-floated to the top tier. The gate-floor invariant is RELATIVE
+# ("a gate is never cheaper than the work it gates"), not absolute — auto-floating
+# every gate to the most expensive model is the system's largest cost-runaway
+# vector. fable on a gate is explicit per-stage opt-in only. Known end-state
+# (latent until work stages commonly run fable): a relative floor =
+# max(GATE_FLOOR_MODEL, highest work-tier in the composition).
+GATE_FLOOR_MODEL = "opus"
 
 # Default-by-role (when a stage carries no explicit intelligence_tier): a TOKEN-EXACT
 # match on the stage's role slug. The DEEP set is the quality/decision class — gates,
@@ -247,14 +275,15 @@ def _resolve_model(stage):
         else:
             model = "sonnet"  # conservative default — unrecognized/missing role -> sonnet
 
-    # R-F003: the AUTHORITATIVE conservative floor. Floor a gate-class (DEEP-role)
-    # stage at opus regardless of tier or role-default above. An explicit tier can only
-    # push it UP (already opus); it can never silently drop a gate to haiku/sonnet. The
-    # gate is never cheaper than the work it gates. (A prior `elif role_is_deep: opus`
-    # branch in the cascade above was dead — always overridden by this guard — so it
-    # was removed; this `if` is the single source of the deep-role opus floor.)
-    if role_is_deep:
-        model = "opus"
+    # R-F003: the AUTHORITATIVE conservative floor — FLOOR semantics, not pin
+    # (2026-06-10 intel-routing review; was an unconditional `model = "opus"`,
+    # which would have DOWNGRADED an explicit max-tier gate once fable became
+    # routable). A gate-class (DEEP-role) stage is raised to GATE_FLOOR_MODEL
+    # when resolved below it; an explicit higher tier (max -> fable) is an
+    # allowed opt-in upgrade. It can never silently drop a gate to haiku/sonnet,
+    # and gates never auto-float above the named floor.
+    if role_is_deep and MODEL_RANK[model] < MODEL_RANK[GATE_FLOOR_MODEL]:
+        model = GATE_FLOOR_MODEL
 
     return model
 
