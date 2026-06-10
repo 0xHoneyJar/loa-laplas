@@ -1043,7 +1043,7 @@ def emit_iterating_body(comp, seg, cycle_id, run_id):
       "TASK (composition-level): " + JSON.stringify(task),
       "SCOPE: " + JSON.stringify(scope),
       "YOUR ITEM — implement EXACTLY this one item. Sibling agents handle the other items in parallel waves; do NOT touch their scope: " + JSON.stringify({{ id: it.id, task: it.task, acceptance: it.acceptance || null }}),
-      ((it.depends_on || []).length ? "COMPLETED UPSTREAM DEPENDENCIES (build on these, do not redo them):\\n" + JSON.stringify(Object.fromEntries((it.depends_on || []).map((d) => [d, done[d]]))) : ""),
+      ((it.depends_on || []).length ? "COMPLETED UPSTREAM DEPENDENCIES (their outputs — build on these, do not redo them):\\n" + JSON.stringify(Object.fromEntries((it.depends_on || []).map((d) => [d, ((done[d] || {{}}).output || "")]))) : ""),
       {js(_return_instruction(wst, "Return the structured output per the WORK schema (output + rationale)."))}
     ].filter(Boolean).join("\\n");
     const itemResults = {{}};
@@ -1054,14 +1054,28 @@ def emit_iterating_body(comp, seg, cycle_id, run_id):
       const results = await boundedParallel(wave.map((it) => () =>
         withRetry({js(wst['construct'])} + ":" + it.id, {_emit_stage_required(wst)}, () =>
           agent(leafPrompt(it, itemResults), Object.assign({{ label: {js(wst['construct'])} + ":item-" + it.id, phase: {js(w_name)}, agentType: {js(_agent_type(wst['construct']))}, model: leafModel(it), schema: {_emit_stage_schema(wst)} }}, it.isolation === "worktree" ? {{ isolation: "worktree" }} : {{}})))));
+      // Drain the WHOLE wave before failing: sibling results were already paid
+      // for and are kept as partial progress (council: claude + cursor).
+      const waveFailures = [];
       for (let i = 0; i < wave.length; i++) {{
         const r = results[i];
-        if (r === null) {{ dagFailed = {{ reason: "operator-skip", stage: {js(wst['construct'])}, item: wave[i].id, iteration: iteration }}; break; }}
-        if (isFailed(r)) {{ dagFailed = {{ reason: "dag-leaf-failed", detail: r, item: wave[i].id, iteration: iteration }}; break; }}
+        if (r === null) {{ waveFailures.push({{ reason: "operator-skip", item: wave[i].id }}); continue; }}
+        if (isFailed(r)) {{ waveFailures.push({{ reason: "dag-leaf-failed", item: wave[i].id, detail: r }}); continue; }}
         itemResults[wave[i].id] = r;
       }}
+      if (waveFailures.length) {{
+        dagFailed = {{ reason: "dag-wave-failed", stage: {js(wst['construct'])}, wave: w + 1,
+          failures: waveFailures, iteration: iteration }};
+      }}
     }}
-    if (dagFailed) {{ degraded = dagFailed; break; }}
+    if (dagFailed) {{
+      // Materialize partial progress so the degraded envelope carries the work
+      // that DID complete (resumability + operator visibility).
+      workState = {{ dag: true, partial: true, wavesCompleted: dagFailed.wave - 1, items: itemResults,
+        output: Object.entries(itemResults).map(([id, r]) => "[" + id + "] " + ((r && r.output) || "")).join("\\n\\n"),
+        rationale: "PARTIAL DAG merge — wave " + dagFailed.wave + " failed: " + dagFailed.failures.map((f) => f.item + " (" + f.reason + ")").join(", ") }};
+      degraded = dagFailed; break;
+    }}
     workState = {{
       dag: true, waves: dagWavesResolved.length, items: itemResults,
       output: Object.entries(itemResults).map(([id, r]) => "[" + id + "] " + ((r && r.output) || "")).join("\\n\\n"),
@@ -1086,18 +1100,22 @@ def emit_iterating_body(comp, seg, cycle_id, run_id):
     )
 
     if dag_capable:
-        dag_setup = """\
+        dag_setup_template = """\
 // --- DAG-parallel work (RFC #35) ---
 // args.items turns iteration 1 into a wave-scheduled fan-out; leaves are
 // cheap-tier task monkeys (hounfour: cheap ≡ sonnet) unless the item declares
 // its own intelligence_tier. Validation FAILS LOUD before any token is spent.
-const TIER_MODEL_JS = {"tiny":"haiku","cheap":"sonnet","mid":"sonnet","standard":"sonnet","deep":"opus","max":"fable"};
+const TIER_MODEL_JS = __TIER_MODEL_JSON__;
 const leafModel = (it) => TIER_MODEL_JS[it.intelligence_tier] || "sonnet";
+const MAX_DAG_ITEMS = 64;  // runaway guard; boundedParallel already chunks wave width
 const dagValidate = (items) => {
+  if (items.length > MAX_DAG_ITEMS) return "items exceeds MAX_DAG_ITEMS (" + MAX_DAG_ITEMS + "): " + items.length;
   const ids = new Set();
   for (const it of items) {
     if (!it || typeof it !== "object" || !it.id || !it.task) return "every item needs {id, task}";
     if (ids.has(it.id)) return "duplicate item id: " + it.id;
+    if (it.depends_on != null && !Array.isArray(it.depends_on)) return "item " + it.id + " depends_on must be an array";
+    if (it.intelligence_tier != null && !TIER_MODEL_JS[it.intelligence_tier]) return "item " + it.id + " has unknown intelligence_tier: " + it.intelligence_tier;
     ids.add(it.id);
   }
   for (const it of items) for (const d of (it.depends_on || []))
@@ -1125,6 +1143,9 @@ if (dagItems) {
   if (!dagWavesResolved) return preambleDegraded({ error: "dag-invalid: dependency cycle" });
   log("DAG mode: " + dagItems.length + " item(s) in " + dagWavesResolved.length + " wave(s)");
 }"""
+        # the runtime tier map is the SAME constant the python resolver uses —
+        # emitted by value so the two can never drift (council: gpt + cursor).
+        dag_setup = dag_setup_template.replace("__TIER_MODEL_JSON__", js(TIER_MODEL))
     else:
         dag_setup = """\
 // DAG fan-out (RFC #35) requires exactly ONE work stage in the iterate pair —

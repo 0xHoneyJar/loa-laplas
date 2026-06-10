@@ -1124,6 +1124,7 @@ DAG_RESPONSES='{"general-purpose":{"output":"did the item","rationale":"stub"},"
     command -v node >/dev/null || skip "node not available"
     local js; js="$(_emit_dag_seg)"
     run node "$HARNESS" "$js" "$DAG_RESPONSES" '{"task":"T","items":[{"id":"a","task":"x","depends_on":["b"]},{"id":"b","task":"y","depends_on":["a"]}]}'
+    [ "$status" -eq 0 ]
     [ "$(echo "$output" | jq -r '.outcome')" = "degraded" ]
     [[ "$(echo "$output" | jq -r '.degraded.detail.error')" == *"dependency cycle"* ]]
 }
@@ -1132,6 +1133,7 @@ DAG_RESPONSES='{"general-purpose":{"output":"did the item","rationale":"stub"},"
     command -v node >/dev/null || skip "node not available"
     local js; js="$(_emit_dag_seg)"
     run node "$HARNESS" "$js" "$DAG_RESPONSES" '{"task":"T","items":[{"id":"a","task":"x","depends_on":["ghost"]}]}'
+    [ "$status" -eq 0 ]
     [ "$(echo "$output" | jq -r '.outcome')" = "degraded" ]
     [[ "$(echo "$output" | jq -r '.degraded.detail.error')" == *"unknown id: ghost"* ]]
 }
@@ -1147,11 +1149,55 @@ DAG_RESPONSES='{"general-purpose":{"output":"did the item","rationale":"stub"},"
 @test "dag R35: leaves are cheap-tier task monkeys; per-item tier override emitted" {
     local js; js="$(_emit_dag_seg)"
     grep -q 'model: leafModel(it)' "$js" || fail "leaf model must resolve per item"
-    grep -q '"max":"fable"' "$js" || fail "runtime tier map must carry the full ladder"
+    grep -q '"max": "fable"' "$js" || fail "runtime tier map must carry the full ladder"
     grep -q 'TIER_MODEL_JS\[it.intelligence_tier\] || "sonnet"' "$js" || fail "task-monkey default must be cheap≡sonnet"
 }
 
 @test "dag R35: gate prompt anchors findings to item ids in DAG mode" {
     local js; js="$(_emit_dag_seg)"
     grep -q 'anchor findings to item ids' "$js" || fail "gate must be told to anchor per-item"
+}
+
+@test "dag R35: non-array depends_on FAILS LOUD, never a mid-flight TypeError (council)" {
+    command -v node >/dev/null || skip "node not available"
+    local js; js="$(_emit_dag_seg)"
+    run node "$HARNESS" "$js" "$DAG_RESPONSES" '{"task":"T","items":[{"id":"a","task":"x","depends_on":"b"}]}'
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | jq -r '.outcome')" = "degraded" ]
+    [[ "$(echo "$output" | jq -r '.degraded.detail.error')" == *"depends_on must be an array"* ]]
+}
+
+@test "dag R35: unknown intelligence_tier FAILS LOUD, never silent-defaults (council)" {
+    command -v node >/dev/null || skip "node not available"
+    local js; js="$(_emit_dag_seg)"
+    run node "$HARNESS" "$js" "$DAG_RESPONSES" '{"task":"T","items":[{"id":"a","task":"x","intelligence_tier":"mega"}]}'
+    [ "$status" -eq 0 ]
+    [[ "$(echo "$output" | jq -r '.degraded.detail.error')" == *"unknown intelligence_tier: mega"* ]]
+}
+
+@test "dag R35: items ceiling guards runaway fan-out (council)" {
+    command -v node >/dev/null || skip "node not available"
+    local js; js="$(_emit_dag_seg)"
+    local items; items="$(python3 -c 'import json; print(json.dumps([{"id": f"i{n}", "task": "x"} for n in range(65)]))')"
+    run node "$HARNESS" "$js" "$DAG_RESPONSES" "{\"task\":\"T\",\"items\":$items}"
+    [ "$status" -eq 0 ]
+    [[ "$(echo "$output" | jq -r '.degraded.detail.error')" == *"MAX_DAG_ITEMS"* ]]
+}
+
+@test "dag R35: leaf failure degrades with PARTIAL progress materialized (council)" {
+    command -v node >/dev/null || skip "node not available"
+    local js; js="$(_emit_dag_seg)"
+    # work output missing 'rationale' -> conforms() fails -> retry -> __stage_failed
+    local bad='{"general-purpose":{"output":"only-output"},"construct-fagan":{"verdict":"APPROVED","findings":[]}}'
+    run node "$HARNESS" "$js" "$bad" '{"task":"T","items":[{"id":"a","task":"x"},{"id":"b","task":"y"}]}'
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | jq -r '.outcome')" = "degraded" ]
+    [ "$(echo "$output" | jq -r '.degraded.reason')" = "dag-wave-failed" ]
+    [ "$(echo "$output" | jq -r '.result.partial')" = "true" ]
+    [ "$(echo "$output" | jq -r '.degraded.failures | length')" = "2" ]
+}
+
+@test "dag R35: emitted tier map is the python TIER_MODEL by value (no drift)" {
+    local js; js="$(_emit_dag_seg)"
+    grep -q 'TIER_MODEL_JS = {"tiny": "haiku", "cheap": "sonnet", "mid": "sonnet", "standard": "sonnet", "deep": "opus", "max": "fable"}' "$js" || fail "tier map must be emitted from the python constant"
 }

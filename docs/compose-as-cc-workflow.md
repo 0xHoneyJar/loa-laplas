@@ -176,6 +176,11 @@ code) supports both; the *policy* lives in the executor (`/compose` SKILL), not 
   `meta.metadata.terminate_when` for operator legibility.
 - **Dry-run harness:** `scripts/lib/run-emitted-segment.js <emitted.js> '<responsesByAgentType>' ['<args>']`
 
+
+  drives an emitted segment with scripted agent responses (no token spend) and prints the
+  return — used by the bats runtime tests (converged / cap_reached / degraded / skip / throw)
+  and handy for local verification.
+
 ## DAG-parallel work — `args.items` (RFC #35)
 
 When an iterating segment has exactly ONE work stage, the executor MAY pass an
@@ -204,9 +209,6 @@ mega-context:
   merged output and anchors findings to `[item-id]`.
 - Segments with multiple work stages ignore `items` loudly (a logged warning),
   never silently.
-  drives an emitted segment with scripted agent responses (no token spend) and prints the
-  return — used by the bats runtime tests (converged / cap_reached / degraded / skip / throw)
-  and handy for local verification.
 
 ## Contrast cases — do NOT auto-migrate
 
