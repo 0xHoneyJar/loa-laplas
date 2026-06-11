@@ -73,16 +73,32 @@ augury family. To register a real tool: add `name → pure fn(input)→output`. 
 tool with nondeterministic inputs MUST be recorded `attestable`, never here
 (LG-5) — misclassification is the substrate's one integrity lie.
 
+## The bound of the guarantee (read this before you rely on it)
+
+The chain is tamper-**evident**, not yet tamper-**proof** against an adversary
+with write access to the run dir. The binding check catches an *envelope* edited
+after gating (its content no longer hashes to what the chain recorded). But
+nothing yet externally anchors the receipt, so an attacker who can rewrite the
+whole `legba/` directory can rebuild a clean chain over tampered envelopes. The
+fix is in the schema (`RunReceipt` LR-4: anchor `receipt_hash` into the loa
+audit chain at build time, compare on verify) and is the next increment. Until
+then: trust `legba verify` against accidental corruption and post-hoc envelope
+edits; do not yet treat it as proof against a hostile filesystem.
+
 ## What's still wiring (honest)
 
+- **External anchoring (LR-4)**: pin `receipt_hash` into the loa audit chain so a
+  full `legba/` rebuild over tampered envelopes is detectable — the bound above.
 - **Involuntary capture**: `legba-record-hook.mjs` is the PostToolUse hook shape
   (LG-1: recording must be hook-enforced, not voluntary). Wiring it into the
   compose-dispatch executor sequence — so every Form C segment records + gates +
   turnstiles automatically — is the integration step that makes the gradient
   flip (the governed path becomes the cheapest path). Today the CLI is driven
-  explicitly; the hook makes it structural.
-- **compose-verify-run chain extension**: `compose-verify-run.sh:41-49` reserves
-  the inter-envelope hash chain; pointing it at `legba verify` is the final seam.
+  explicitly; the hook makes it structural. Note the turnstile currently
+  *records* ordering post-hoc; it *refuses* a skipped segment only once recording
+  is on the dispatch path.
+- **compose-verify-run chain extension**: DONE — `compose-verify-run.sh --legba`
+  derives + verifies the chain (the seam the comment reserved is closed).
 - **Full RFC-8785 JCS**: the canonicalizer here is the documented subset (flat
   shapes only) — swap before cross-runtime producers appear.
 - **Cross-field validators in hounfour**: the constraint files + cross-field
