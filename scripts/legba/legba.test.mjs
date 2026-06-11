@@ -100,3 +100,43 @@ test('LG-3 (terminal fail-token): a fail verdict does not open the next span', (
   assert.throws(() => openSpan(dir, { runId, spanIndex: 1 }), /not pass/);
   rmSync(dir, { recursive: true, force: true });
 });
+
+// ── compose-bridge: the inter-envelope chain over a Form C run ───────────────
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, writeFileSync as wf } from 'node:fs';
+
+function fakeComposeRun() {
+  const dir = mkdtempSync(join(tmpdir(), 'legba-compose-'));
+  writeFileSync(join(dir, 'form-c-manifest.json'), JSON.stringify({ composition_run_id: 'bridge-test', segments: [{ stage: 1 }, { stage: 2 }] }));
+  mkdirSync(join(dir, 'envelopes'), { recursive: true });
+  wf(join(dir, 'envelopes', '01.alpha.handoff.json'), JSON.stringify({ composition_run_id: 'bridge-test', stage_index: 1, construct_slug: 'alpha', verdict: { outcome: 'converged', n: 1 } }));
+  wf(join(dir, 'envelopes', '02.beta.handoff.json'), JSON.stringify({ composition_run_id: 'bridge-test', stage_index: 2, construct_slug: 'beta', verdict: { outcome: 'converged', n: 2 } }));
+  return dir;
+}
+const BRIDGE = new URL('./compose-bridge.mjs', import.meta.url).pathname;
+const runBridge = (cmd, dir) => {
+  try { return { code: 0, out: JSON.parse(execFileSync('node', [BRIDGE, cmd, dir], { encoding: 'utf8' })) }; }
+  catch (e) { return { code: e.status ?? 1, out: e.stdout ? JSON.parse(e.stdout) : null }; }
+};
+
+test('bridge: derives a verifying custody chain over executed envelopes', () => {
+  const dir = fakeComposeRun();
+  const r = runBridge('verify', dir);
+  assert.equal(r.code, 0, 'honest compose run must verify');
+  assert.equal(r.out.ok, true);
+  assert.equal(r.out.binding.ok, true);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('bridge: an envelope edited after gating fails the binding check', () => {
+  const dir = fakeComposeRun();
+  runBridge('build', dir); // pin the chain
+  const p = join(dir, 'envelopes', '01.alpha.handoff.json');
+  const env = JSON.parse(readFileSync(p, 'utf8'));
+  env.verdict.injected = 'tamper'; writeFileSync(p, JSON.stringify(env));
+  const r = runBridge('verify', dir);
+  assert.equal(r.code, 1, 'tampered run must NOT verify');
+  assert.equal(r.out.binding.ok, false);
+  assert.equal(r.out.binding.mismatches.length, 1);
+  rmSync(dir, { recursive: true, force: true });
+});
