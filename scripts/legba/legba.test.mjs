@@ -12,7 +12,7 @@ import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  initKeys, provisionRun, record, gate, openSpan, verifyRun, challenge,
+  initKeys, loadOrInitKeys, provisionRun, record, gate, openSpan, verifyRun, challenge,
 } from './legba-core.mjs';
 import { REGISTRY } from './tools.mjs';
 
@@ -139,4 +139,37 @@ test('bridge: an envelope edited after gating fails the binding check', () => {
   assert.equal(r.out.binding.ok, false);
   assert.equal(r.out.binding.mismatches.length, 1);
   rmSync(dir, { recursive: true, force: true });
+});
+
+// ── Codex review hardening ───────────────────────────────────────────────────
+import { readdirSync } from 'node:fs';
+
+test('P1: a CAS blob edited in place (same filename) is rejected — content-addressing enforced', () => {
+  const { dir } = freshRun();
+  // find the arith input blob and rewrite its content while keeping the filename
+  const casDir = join(dir, 'cas');
+  const before = readdirSync(casDir);
+  // tamper EVERY cas blob's content; verify must now fail (cas_complete / artifacts)
+  for (const f of before) writeFileSync(join(casDir, f), JSON.stringify({ tampered: true }));
+  assert.equal(verifyRun(dir).ok, false, 'in-place CAS edit must break verification');
+  // and a challenge against a tampered input must not silently pass
+  const r = challenge(dir, 0, 0, REGISTRY);
+  assert.equal(r.ok, false, 'challenge must not replay against a tampered input blob');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('P2: provisioning a second run with the same gatekeeper reuses the key (earlier run still verifies)', () => {
+  const a = mkdtempSync(join(tmpdir(), 'legba-keyA-'));
+  const b = mkdtempSync(join(tmpdir(), 'legba-keyB-'));
+  const gkId = 'legba:shared-' + Math.floor(process.hrtime()[1]); // unique per run
+  const k1 = loadOrInitKeys(gkId);
+  provisionRun('run-a', k1, a);
+  record(a, { runId: 'run-a', spanIndex: 0, kind: 'tool', determinism: 're_executable', tool: 'arith', input: { expr: '1 + 1' }, output: { result: 2 } });
+  gate(a, { runId: 'run-a', gateIndex: 0, registry: REGISTRY });
+  // second provision, SAME gatekeeper — must reuse, not overwrite
+  const k2 = loadOrInitKeys(gkId);
+  provisionRun('run-b', k2, b);
+  assert.equal(k1.publicKeyPem, k2.publicKeyPem, 'same gatekeeper must reuse the keypair');
+  assert.equal(verifyRun(a).ok, true, 'earlier run still verifies after the second provision');
+  rmSync(a, { recursive: true, force: true }); rmSync(b, { recursive: true, force: true });
 });

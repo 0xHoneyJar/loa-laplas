@@ -16,7 +16,7 @@
  * dir and get a cryptographic verdict / fraud proof. Exit 0 = ok, 1 = refused/failed.
  */
 import {
-  initKeys, provisionRun, record, gate, openSpan, verifyRun, challenge,
+  initKeys, loadOrInitKeys, provisionRun, record, gate, openSpan, verifyRun, challenge,
   runDir, readSpanLog, CONTRACT_VERSION,
 } from './legba-core.mjs';
 import { REGISTRY } from './tools.mjs';
@@ -52,7 +52,7 @@ try {
     }
     case 'provision': {
       const runId = f._[0];
-      const gk = initKeys(f.gatekeeper || 'legba:default');
+      const gk = loadOrInitKeys(f.gatekeeper || 'legba:default', 1, { rotate: !!f.rotate });
       const man = provisionRun(runId, gk, f['run-dir']);
       out({ ok: true, run_dir: runDir(runId, f['run-dir']), manifest: man });
       break;

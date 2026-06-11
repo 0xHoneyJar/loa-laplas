@@ -21,7 +21,7 @@
  * verifies self-contained.
  */
 import {
-  initKeys, provisionRun, record, gate, openSpan, verifyRun, readSpanLog, jcs,
+  loadOrInitKeys, provisionRun, record, gate, openSpan, verifyRun, readSpanLog, jcs,
 } from './legba-core.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
@@ -51,7 +51,7 @@ function build(composeRunDir) {
 
   const legbaDir = join(composeRunDir, 'legba');
   if (existsSync(legbaDir)) rmSync(legbaDir, { recursive: true, force: true });
-  const gk = initKeys(`legba:compose:${runId}`);
+  const gk = loadOrInitKeys(`legba:compose:${runId}`);
   provisionRun(runId, gk, legbaDir);
 
   envs.forEach((env, i) => {

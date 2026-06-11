@@ -76,6 +76,25 @@ function loadPriv(gatekeeperId) {
   const safe = gatekeeperId.replace(/[^A-Za-z0-9._-]/g, '_');
   return readFileSync(join(keyDir(), `${safe}.priv`), 'utf8');
 }
+/**
+ * Load an existing gatekeeper keypair, or run the ceremony if none exists.
+ * Provisioning a second run with the same gatekeeper MUST NOT silently rotate the
+ * key — an earlier still-open run's manifest holds the old public key and would
+ * fail to verify gates signed by a new private key. Pass {rotate:true} to mint a
+ * fresh key on purpose. (Codex P2.)
+ */
+export function loadOrInitKeys(gatekeeperId = 'legba:default', keyVersion = 1, { rotate = false } = {}) {
+  const safe = gatekeeperId.replace(/[^A-Za-z0-9._-]/g, '_');
+  const privPath = join(keyDir(), `${safe}.priv`);
+  const pubPath = join(keyDir(), `${safe}.pub`);
+  if (!rotate && existsSync(privPath) && existsSync(pubPath)) {
+    return {
+      gatekeeperId, keyVersion, key_id: sha(`${gatekeeperId}:${keyVersion}`),
+      publicKeyPem: readFileSync(pubPath, 'utf8'), _privateKeyPem: readFileSync(privPath, 'utf8'),
+    };
+  }
+  return initKeys(gatekeeperId, keyVersion);
+}
 
 // ── manifest ────────────────────────────────────────────────────────────────
 export function provisionRun(runId, gk, base) {
@@ -98,11 +117,21 @@ function casPut(dir, value) {
   writeFileSync(join(dir, 'cas', `${h}.json`), body);
   return h; // bare hex
 }
+// Content-addressing is ENFORCED, not assumed: a blob whose file content no
+// longer hashes to its filename is rejected (a blob edited in place keeping its
+// hash-name must NOT pass). Without this, verify/challenge would replay against
+// altered inputs — the store would not be tamper-evident. (Codex P1.)
 function casGet(dir, hashBare) {
   const p = join(dir, 'cas', `${hashBare}.json`);
-  return existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : undefined;
+  if (!existsSync(p)) return undefined;
+  const raw = readFileSync(p, 'utf8');
+  if (sha(raw) !== hashBare) return undefined; // tampered blob — content ≠ name
+  return JSON.parse(raw);
 }
-const casHas = (dir, hashBare) => existsSync(join(dir, 'cas', `${hashBare}.json`));
+function casHas(dir, hashBare) {
+  const p = join(dir, 'cas', `${hashBare}.json`);
+  return existsSync(p) && sha(readFileSync(p, 'utf8')) === hashBare;
+}
 
 // ── recorder (LG-1): append one chained SpanMove ─────────────────────────────
 function spanLogPath(dir, spanIndex) { return join(dir, 'spans', `span-${spanIndex}.log.jsonl`); }
