@@ -8,7 +8,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -214,5 +214,35 @@ test('LR-4: an unanchored run still verifies on chain+binding (honest fallback)'
   const r = runBridge('verify', dir);
   assert.equal(r.out.anchor.state, 'unanchored');
   assert.equal(r.out.ok, true, 'unanchored honest run still verifies on chain+binding');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('LR-4 P2: tampering a NON-verdict field (construct_slug) is caught', () => {
+  const dir = fakeComposeRun();
+  runBridge('build', dir);
+  const p = join(dir, 'envelopes', '01.alpha.handoff.json');
+  const env = JSON.parse(readFileSync(p, 'utf8'));
+  env.construct_slug = 'IMPERSONATOR'; // a non-verdict field
+  writeFileSync(p, JSON.stringify(env));
+  const r = runBridge('verify', dir);
+  assert.equal(r.code, 1, 'non-verdict tampering must NOT verify');
+  assert.ok(r.out.binding.ok === false || r.out.anchor.state === 'anchored_mismatch', 'caught by binding or anchor');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('LR-4 P1: a run_id containing a shell metachar does not execute shell (no injection)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'legba-inj-'));
+  // manifest run_id with a single quote + command substitution attempt
+  const evilId = "x'; touch " + join(dir, 'PWNED') + "; echo '";
+  writeFileSync(join(dir, 'form-c-manifest.json'), JSON.stringify({ composition_run_id: evilId }));
+  wf(join(dir, 'orchestrator.jsonl'), JSON.stringify({ event: 'form_c.manifest', run_id: evilId }) + '\n');
+  mkdirSync(join(dir, 'envelopes'), { recursive: true });
+  wf(join(dir, 'envelopes', '01.x.handoff.json'), JSON.stringify({ composition_run_id: evilId, stage_index: 1, verdict: { ok: true } }));
+  // force the audit-chain path on (the injection surface), pointing at a real source-able stub
+  const stub = join(dir, 'audit-stub.sh');
+  wf(stub, 'audit_emit() { :; }\n');
+  runBridge('build', dir, '--expect', 'sha256:' + '0'.repeat(64)); // run it (env carries LOA_AUDIT_ENVELOPE_SH via process)
+  execFileSync('node', [BRIDGE, 'build', dir], { encoding: 'utf8', env: { ...process.env, LOA_AUDIT_ENVELOPE_SH: stub } });
+  assert.equal(existsSync(join(dir, 'PWNED')), false, 'no shell injection — PWNED file must NOT exist');
   rmSync(dir, { recursive: true, force: true });
 });

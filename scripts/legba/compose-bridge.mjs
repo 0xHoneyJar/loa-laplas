@@ -30,7 +30,11 @@ import { join } from 'node:path';
 
 const shaBare = (o) => createHash('sha256').update(jcs(o), 'utf8').digest('hex');
 const shaStr = (s) => createHash('sha256').update(s, 'utf8').digest('hex');
-const attestedContent = (envBody) => envBody.verdict ?? envBody;
+// The attested artifact is the FULL canonical envelope, not just its verdict
+// (Codex P2): changing any field — construct_slug, composition_run_id,
+// output_type, persona — must change the recorded content, the binding hash, AND
+// the content_receipt. Hashing only `verdict` left every other field unprotected.
+const attestedContent = (envBody) => envBody;
 
 function envelopes(runDir) {
   const dir = join(runDir, 'envelopes');
@@ -79,14 +83,26 @@ function writeAnchor(composeRunDir, runId, receipt) {
   if (readAnchor(composeRunDir, runId)) return { anchored: true, where: 'orchestrator(existing)' };
   const ev = { event: 'legba.anchor', ts: new Date().toISOString(), run_id: runId, payload: { content_receipt: receipt } };
   if (existsSync(ORCH(composeRunDir))) appendFileSync(ORCH(composeRunDir), JSON.stringify(ev) + '\n');
-  // best-effort hardened anchor: the loa audit chain (if the helper is reachable)
+  // best-effort hardened anchor: the loa audit chain (if the helper is reachable).
+  // Untrusted values (run_id, receipt) are passed via ENVIRONMENT, never
+  // interpolated into a shell string — a run_id with a quote cannot break out and
+  // run arbitrary shell (Codex P1: the verify path must not become code execution
+  // on a malformed run dir).
   let hardened = false;
   const auditSh = process.env.LOA_AUDIT_ENVELOPE_SH;
   if (auditSh && existsSync(auditSh)) {
     try {
       execFileSync('bash', ['-c',
-        `source "${auditSh}" && audit_emit LEGBA legba.anchor '${JSON.stringify({ run_id: runId, content_receipt: receipt })}' "$PWD/.run/legba-anchors.jsonl"`,
-      ], { stdio: 'ignore' });
+        'source "$LEGBA_AUDIT_SH" && audit_emit LEGBA legba.anchor "$LEGBA_PAYLOAD" "$LEGBA_LOG"'],
+        {
+          stdio: 'ignore',
+          env: {
+            ...process.env,
+            LEGBA_AUDIT_SH: auditSh,
+            LEGBA_PAYLOAD: JSON.stringify({ run_id: runId, content_receipt: receipt }),
+            LEGBA_LOG: join(composeRunDir, '.run-legba-anchors.jsonl'),
+          },
+        });
       hardened = true;
     } catch { /* best-effort — orchestrator anchor stands */ }
   }
