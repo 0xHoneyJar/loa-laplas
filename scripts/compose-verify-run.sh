@@ -38,15 +38,24 @@
 #      compute-id`), never reinvented here. The per-envelope ids are folded (in
 #      stage order) into an `envelope_digest` a downstream consumer can pin.
 #
-# NOT a hash CHAIN in this repo: the construct-rooms-substrate Form C handoff
-# format (`construct-handoff.schema.json`, additionalProperties:false) carries
-# NO inter-envelope `prev_hash`/self-`hash` chain fields — that chain core lives
-# in loa-constructs (`audit_envelope.py` / `construct-handoff-v0.schema.json`)
-# and is NOT present/callable here. So this verifier checks the integrity that
-# IS locally provable (content-addressable per-envelope id + set linkage), and
-# does NOT fabricate a `prev_hash` chain against a format that lacks one. When
-# the v0 chained envelope format lands here, extend check 4 with
-# audit_verify_chain.
+# Check 5 (--legba, OPTIONAL): THE HASH CHAIN, now present. The Form C handoff
+# format still carries no inter-envelope `prev_hash` field of its own, but
+# `scripts/legba/compose-bridge.mjs` DERIVES a real custody chain over the
+# executed envelopes — one envelope → one Legba span → one ed25519-signed gate
+# token; the tokens chain (`prev_token_hash`) and the turnstile enforces order.
+# With `--legba`, a run is `valid_run` only if that chain ALSO verifies from the
+# gatekeeper's public key (`legba verify <run>/legba`). This closes the seam this
+# comment used to reserve: the set-membership check proved presence; the Legba
+# chain proves authorship + integrity-over-time (the playtest's exact gap). The
+# flag is opt-in (warn-first) until recording is wired into dispatch by default;
+# the exit code is the lever either way.
+#
+# Historical note (pre-Legba): this verifier checked only the integrity that was
+# locally provable (content-addressable per-envelope id + set linkage) and did
+# NOT fabricate a `prev_hash` chain against a format that lacked one. The chain
+# now exists as a DERIVED layer (Legba), not a fabricated envelope field — the
+# refusal discipline is preserved (old runs without a legba/ dir are old-rules
+# runs; --legba simply has nothing to verify and says so).
 #
 # Usage:
 #   compose-verify-run.sh <run_id> [--json] [--base-dir DIR] [--require-executed]
@@ -160,11 +169,13 @@ EOF
 RUN_ID=""
 OUTPUT_JSON=0
 REQUIRE_EXECUTED=0
+LEGBA=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --json) OUTPUT_JSON=1; shift ;;
         --base-dir) BASE_DIR="$2"; shift 2 ;;
         --require-executed) REQUIRE_EXECUTED=1; shift ;;
+        --legba) LEGBA=1; shift ;;
         -h|--help) usage; exit 0 ;;
         -*) echo "ERROR: unknown flag '$1'" >&2; usage >&2; exit 1 ;;
         *) if [[ -z "$RUN_ID" ]]; then RUN_ID="$1"; else echo "ERROR: extra arg '$1'" >&2; exit 1; fi; shift ;;
@@ -190,6 +201,8 @@ CHK_ENVELOPES=false
 SEGMENT_COUNT=0
 ENVELOPE_COUNT=0
 ENVELOPE_DIGEST=""
+LEGBA_VERIFIED=null   # null = not checked; true/false when --legba ran
+LEGBA_RECEIPT=""
 
 # Emit the verdict + exit. $1=verdict $2=exit_code $3=reason
 _verdict() {
@@ -206,6 +219,8 @@ _verdict() {
             --argjson seg_count "$SEGMENT_COUNT" \
             --argjson env_count "$ENVELOPE_COUNT" \
             --arg env_digest "$ENVELOPE_DIGEST" \
+            --argjson legba_verified "$LEGBA_VERIFIED" \
+            --arg legba_receipt "$LEGBA_RECEIPT" \
             '{
                 verdict: $verdict,
                 run_id: $run_id,
@@ -214,11 +229,13 @@ _verdict() {
                     manifest: $manifest,
                     segments_present: $segments,
                     orchestrator: $orch,
-                    envelopes: $envelopes
+                    envelopes: $envelopes,
+                    legba_chain: $legba_verified
                 },
                 segment_count: $seg_count,
                 envelope_count: $env_count,
-                envelope_digest: (if $env_digest == "" then null else $env_digest end)
+                envelope_digest: (if $env_digest == "" then null else $env_digest end),
+                legba_receipt_hash: (if $legba_receipt == "" then null else $legba_receipt end)
             }'
     else
         if [[ "$code" -eq 0 ]]; then
@@ -454,10 +471,32 @@ if [[ "$ENVELOPE_COUNT" -gt 0 ]]; then
 fi
 
 # -----------------------------------------------------------------------------
+# Check 5 (--legba): the derived Legba custody chain over the executed envelopes
+# must verify (ed25519, from the gatekeeper public key). This is THE hash chain
+# the header comment used to reserve — presence+set-membership becomes
+# authorship+integrity-over-time. Opt-in; only runs when envelopes executed.
+# -----------------------------------------------------------------------------
+if [[ "$LEGBA" == "1" && "$ENVELOPE_COUNT" -gt 0 ]]; then
+    _LEGBA_BRIDGE="$(dirname "${BASH_SOURCE[0]}")/legba/compose-bridge.mjs"
+    if [[ ! -f "$_LEGBA_BRIDGE" ]] || ! command -v node >/dev/null 2>&1; then
+        _verdict "broken_run" 3 "--legba requested but the bridge ($_LEGBA_BRIDGE) or node is unavailable"
+    fi
+    if _legba_out="$(node "$_LEGBA_BRIDGE" verify "$RUN_DIR" 2>/dev/null)"; then
+        LEGBA_VERIFIED=true
+        LEGBA_RECEIPT="$(printf '%s' "$_legba_out" | jq -r '.run_receipt_hash // ""' 2>/dev/null)"
+    else
+        LEGBA_VERIFIED=false
+        _verdict "broken_run" 3 "Legba custody chain FAILED to verify over the executed envelopes (--legba): the inter-envelope chain is broken or a token signature is invalid"
+    fi
+fi
+
+# -----------------------------------------------------------------------------
 # All checks passed.
 # -----------------------------------------------------------------------------
 if [[ "$ENVELOPE_COUNT" -gt 0 ]]; then
-    _verdict "valid_run" 0 "manifest + $SEGMENT_COUNT segment(s) + orchestrator trail + $ENVELOPE_COUNT executed handoff envelope(s) verified"
+    _legba_note=""
+    [[ "$LEGBA_VERIFIED" == "true" ]] && _legba_note=" + Legba custody chain verified"
+    _verdict "valid_run" 0 "manifest + $SEGMENT_COUNT segment(s) + orchestrator trail + $ENVELOPE_COUNT executed handoff envelope(s) verified$_legba_note"
 elif [[ "$REQUIRE_EXECUTED" == "1" ]]; then
     # TERMINAL gate: the compile is provably real, but ZERO segments executed —
     # not a completed composition. Distinct from valid_run (default) so an
