@@ -1,11 +1,23 @@
-// level-contract — the Observatory level treaty (obs-level/1).
+// level-contract — the Observatory level treaty (obs-level/1, rev 2).
 // ONE invariant list enforced on both sides of the seam: trace-gen validates
 // before writing, game.html validates (inlined copy, CONTRACT_REV-stamped)
 // before loading. Evolution rule: unknown fields ignored, missing-optional
 // defaulted, missing-required → reject whole. (Panel fill W1-4 · obs-panel-20260611)
-export const CONTRACT_REV = 1;
+//
+// rev 2 (SDD §3, flatlined): IMPASSE joins the verdict enum (a gate ARRIVAL,
+// not a refusal — routed, never bounced) · envelopes[].gate carries DECLARED
+// hardness (joined from hardness-manifest; fail-honest: unknown → HOLLOW) ·
+// level.clews[] is the thread (distress is a legal, rendered move) ·
+// sanitizeText closes the innerHTML path to untrusted levels (SP-B6).
+// Cross-rev (IMP-002): a rev-2 consumer accepts rev-1 levels (gate defaults
+// hardness=unknown, clews defaults []); a rev-1 consumer ignores unknown
+// fields by design and console.warns the rev mismatch naming both revs.
+export const CONTRACT_REV = 2;
 export const SCHEMA = "obs-level/1";
-export const VERDICTS = ["APPROVED", "CHECKPOINT", "EMITTED", "REJECTED", "DENIED"];
+export const VERDICTS = ["APPROVED", "CHECKPOINT", "EMITTED", "REJECTED", "DENIED", "IMPASSE"];
+export const HARDNESS = ["hook", "prose", "unknown"];
+export const CLEW_ROUTING = ["retrace", "rotate", "heal"];
+export const CLEW_DROPPED_BY = ["agent", "watchdog"];
 
 export function validateLevel(L) {
   const errs = [];
@@ -41,6 +53,38 @@ export function validateLevel(L) {
     const g = h.transform?.badge;
     if (g !== undefined && (typeof g !== "string" || [...g].length < 1 || [...g].length > 2)) E(`envelopes[${i}].transform.badge must be 1..2 chars`);
     if (h.wave !== undefined && !Number.isInteger(h.wave)) E(`envelopes[${i}].wave must be an integer`);
+    // rev 2 — the gate block (hardness is DECLARED data; renderer never invents enforcement)
+    if (h.gate !== undefined) {
+      if (typeof h.gate !== "object" || h.gate === null) E(`envelopes[${i}].gate must be an object`);
+      else {
+        if (h.gate.hardness !== undefined && !HARDNESS.includes(h.gate.hardness))
+          E(`envelopes[${i}].gate.hardness '${h.gate.hardness}' not in enum {${HARDNESS.join(",")}}`);
+        for (const f of ["mechanism", "help", "teaches"])
+          if (h.gate[f] !== undefined && (typeof h.gate[f] !== "string" || h.gate[f].length > 120))
+            E(`envelopes[${i}].gate.${f} must be a string ≤120 chars`);
+      }
+    }
+  });
+  // rev 2 — the thread (clews[] is optional; structure is not)
+  if (L.clews !== undefined) {
+    if (!Array.isArray(L.clews)) E("clews must be an array");
+    else L.clews.forEach((c, i) => {
+      if (!c || typeof c !== "object") return E(`clews[${i}] must be an object`);
+      if (!Number.isInteger(c.room) || c.room < 0 || c.room >= n) E(`clews[${i}].room invalid`);
+      if (!Number.isInteger(c.divergence) || c.divergence < 0 || c.divergence >= L.envelopes.length)
+        E(`clews[${i}].divergence must index an envelope`);
+      if (!CLEW_ROUTING.includes(c.routing)) E(`clews[${i}].routing '${c.routing}' not in enum {${CLEW_ROUTING.join(",")}}`);
+      if (!CLEW_DROPPED_BY.includes(c.dropped_by)) E(`clews[${i}].dropped_by '${c.dropped_by}' not in enum {${CLEW_DROPPED_BY.join(",")}}`);
+      if (typeof c.packet_digest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(c.packet_digest))
+        E(`clews[${i}].packet_digest must be 'sha256:<64 hex>' (JCS-sha256, S3.1)`);
+    });
+  }
+  // rev 2 — IMPASSE is empty-handed-but-honest: it MUST drop a thread.
+  // An IMPASSE envelope without a clews entry pointing at it is rejected.
+  L.envelopes.forEach((h, i) => {
+    if (h.verdict === "IMPASSE" &&
+        !(Array.isArray(L.clews) && L.clews.some(c => c && c.divergence === i)))
+      E(`envelopes[${i}].verdict IMPASSE has no clews entry (divergence=${i}) — the thread is the move`);
   });
   return { ok: errs.length === 0, errors: errs };
 }
@@ -54,6 +98,29 @@ export function defaultLevel(L) {
     h.keepers = h.keepers ?? 1;
     h.wave = h.wave ?? i;
     h.transform = h.transform ?? { badge: "✦", line: "the handoff lands" };
+    // rev 2: missing gate → fail-honest. A rev-1 level loads with hardness=unknown (HOLLOW).
+    h.gate = h.gate ?? {};
+    h.gate.hardness = h.gate.hardness ?? "unknown";
   });
+  L.clews = L.clews ?? [];
   return L;
+}
+
+// rev 2 (SP-B6) — sanitizeText: escape-by-default, whitelist <b>/<i> only.
+// EVERY level-sourced string the engine renders into HTML goes through this;
+// the log's raw-innerHTML path is closed to untrusted levels. A <script> in a
+// gateline renders inert (the red test). Inlined into game.html beside the
+// validator copy, same CONTRACT_REV stamp.
+export function sanitizeText(s) {
+  if (typeof s !== "string") return "";
+  const escaped = s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+  // re-admit ONLY bare <b>/<i> pairs (no attributes — an attribute is a surface)
+  return escaped
+    .replace(/&lt;(\/?)b&gt;/g, "<$1b>")
+    .replace(/&lt;(\/?)i&gt;/g, "<$1i>");
 }

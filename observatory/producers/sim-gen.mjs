@@ -13,8 +13,21 @@
 // and meets the reaper; a disciplined one ships CHECKPOINTs; the winning play
 // is the substrate's own doctrine — present at the gate before the flood.
 // Same seed → byte-identical LevelData (obs-level/1) → asson golden vectors.
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { validateLevel, defaultLevel, SCHEMA, CONTRACT_REV } from "../contract/level-contract.mjs";
+
+// rev 2: gates are DECLARED data joined from the hardness manifest (SDD §3.4).
+// Reading a checked-in file is deterministic; the vectors pin manifest+sim together.
+const here = dirname(fileURLToPath(import.meta.url));
+const MANIFEST = JSON.parse(readFileSync(join(here, "../contract/hardness-manifest.json"), "utf8"));
+const GATE_NAMES = Object.keys(MANIFEST.gates);
+const gateFor = i => {
+  const name = GATE_NAMES[i % GATE_NAMES.length];
+  const g = MANIFEST.gates[name];
+  return { name, hardness: g.hardness, mechanism: g.mechanism, help: g.help, ...(g.teaches ? { teaches: g.teaches } : {}) };
+};
 
 const args = process.argv.slice(2);
 const opt = (n, d) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : d; };
@@ -78,6 +91,7 @@ for (let i = 0; i < NROOMS - 1; i++) {
   envelopes.push({ from: i, to: i + 1, payload, keepers, verdict, wave: i,
     loiter: reapedAt === i ? undefined : undefined,
     gateline: GATELINE,
+    gate: gateFor(i),
     transform: { badge: BADGES[i % BADGES.length],
       line: `<b>${rooms[i + 1].construct}</b> receives ${payload} — quality ${Math.round(q * 100)}%` } });
   if (reapedAt === i) {
@@ -90,6 +104,7 @@ for (let i = 0; i < NROOMS - 1; i++) {
       envelopes.push({ from: i + 1, to: i + 2, payload: "checkpoint · what the reaper left",
         keepers: 1, verdict: "CHECKPOINT", pale: true, wave: i + 1,
         gateline: "the checkpoint presents at the gate… accepted.",
+        gate: gateFor(i + 1),
         transform: { badge: "✓", line: `<b>${rooms[i + 2].construct}</b> takes the salvage` } });
       i++; // the salvage hop consumed the next leg
     }

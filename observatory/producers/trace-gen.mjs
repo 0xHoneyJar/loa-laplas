@@ -11,8 +11,23 @@
 //   (packet mtime → next packet mtime); loiter only attested or loudly inferred.
 // The treaty (W1-4): validate via level-contract before writing — exit 2 on violation.
 import { readFileSync, readdirSync, writeFileSync, existsSync, statSync } from "node:fs";
-import { join, basename } from "node:path";
-import { validateLevel, defaultLevel, VERDICTS, SCHEMA, CONTRACT_REV } from "../contract/level-contract.mjs";
+import { join, basename, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { validateLevel, defaultLevel, sanitizeText, VERDICTS, SCHEMA, CONTRACT_REV } from "../contract/level-contract.mjs";
+
+// rev 2 (SDD §3.4): hardness manifest joined at fold time by gate name.
+// Misses and missing attribution → unknown (fail-honest: renders HOLLOW).
+const HERE = dirname(fileURLToPath(import.meta.url));
+const MANIFEST = (() => {
+  try { return JSON.parse(readFileSync(join(HERE, "../contract/hardness-manifest.json"), "utf8")); }
+  catch { return { gates: {} }; }
+})();
+const joinGate = (name) => {
+  const g = name ? MANIFEST.gates[name] : null;
+  if (!g) return { ...(name ? { name } : {}), hardness: "unknown",
+    mechanism: name ? `'${name}' not in hardness-manifest — fail-honest` : "no gate attribution in packet — fail-honest" };
+  return { name, hardness: g.hardness, mechanism: g.mechanism, help: g.help, ...(g.teaches ? { teaches: g.teaches } : {}) };
+};
 
 const args = process.argv.slice(2);
 const opt = (n, d) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : d; };
@@ -20,16 +35,49 @@ const flag = n => args.includes(`--${n}`);
 
 // ── red selftest (S-4c): a wall is proven by going red ──
 if (flag("selftest")) {
-  const broken = {
-    rooms: [{ id: 0, name: "a", construct: "a", spr: "noether", gx: 0, gy: 0, live: .5 },
-            { id: 1, name: "b", construct: "b", spr: "arcade", gx: 1, gy: 0, live: .5 }],
-    seams: [],                                                  // dangling: envelope has no seam
-    envelopes: [{ from: 0, to: 1, payload: "x", keepers: 9, verdict: "TOTALLY_FINE" }],
-  };
-  const v = validateLevel(broken);
-  if (v.ok) { console.error("✗ SELFTEST FAILED: validator passed a broken level"); process.exit(1); }
-  console.error(`✓ selftest: validator rejected the broken level (${v.errors.length} violations):`);
-  v.errors.forEach(e => console.error(`  · ${e}`));
+  const baseRooms = [{ id: 0, name: "a", construct: "a", spr: "noether", gx: 0, gy: 0, live: .5 },
+                     { id: 1, name: "b", construct: "b", spr: "arcade", gx: 1, gy: 0, live: .5 }];
+  // every case must be REJECTED
+  const cases = [
+    ["rev-1 wall (dangling seam · bad verdict · keepers out of range)", {
+      rooms: baseRooms, seams: [],
+      envelopes: [{ from: 0, to: 1, payload: "x", keepers: 9, verdict: "TOTALLY_FINE" }],
+    }],
+    // rev 2 red cases (SDD §7 · sprint S2.1)
+    ["IMPASSE without a clews entry (the thread is the move)", {
+      rooms: baseRooms, seams: [[0, 1]],
+      envelopes: [{ from: 0, to: 1, verdict: "IMPASSE" }], clews: [],
+    }],
+    ["clews[].routing outside enum", {
+      rooms: baseRooms, seams: [[0, 1]],
+      envelopes: [{ from: 0, to: 1, verdict: "IMPASSE" }],
+      clews: [{ room: 1, divergence: 0, routing: "panic", dropped_by: "agent",
+                packet_digest: "sha256:" + "a".repeat(64) }],
+    }],
+    ["gate.hardness outside enum (declared data only — never invented)", {
+      rooms: baseRooms, seams: [[0, 1]],
+      envelopes: [{ from: 0, to: 1, gate: { hardness: "vibes" } }],
+    }],
+  ];
+  let red = 0;
+  for (const [name, broken] of cases) {
+    const v = validateLevel(broken);
+    if (v.ok) { console.error(`✗ SELFTEST FAILED: validator passed '${name}'`); process.exit(1); }
+    red++;
+    console.error(`✓ selftest: rejected '${name}' (${v.errors.length} violations):`);
+    v.errors.forEach(e => console.error(`  · ${e}`));
+  }
+  // sanitizer red case (SP-B6): <script> in a gateline renders inert
+  const dirty = `<script>alert(1)</script> the seal <b>holds</b> <i onmouseover=x>no</i>`;
+  const clean = sanitizeText(dirty);
+  if (clean.includes("<script") || /<i\s/.test(clean)) {
+    console.error("✗ SELFTEST FAILED: sanitizer let live markup through:", clean); process.exit(1);
+  }
+  if (!clean.includes("<b>holds</b>") || !clean.includes("&lt;script&gt;")) {
+    console.error("✗ SELFTEST FAILED: sanitizer over/under-escaped:", clean); process.exit(1);
+  }
+  console.error(`✓ selftest: sanitizer renders <script>-in-gateline inert (bare <b>/<i> survive)`);
+  console.error(`✓ selftest: ${red} red walls + sanitizer — all fired`);
   process.exit(0);
 }
 
@@ -107,6 +155,10 @@ const PHRASEBOOK = {
   EMITTED: p => `the packet <i>${p}</i> passes, seal unread — emitted, not yet attested.`,
   REJECTED: p => `LEGBA bars the door — <i>${p}</i> returns to sender.`,
   DENIED: p => `the gate stays shut. <i>${p}</i> is refused.`,
+  // IMPASSE is an ARRIVAL, not a refusal — routed, never bounced. A folded
+  // IMPASSE packet must carry its clew (S3 wiring); until then the validator
+  // rejecting an unthreaded IMPASSE is the contract working, not a bug.
+  IMPASSE: p => `<i>${p}</i> arrives empty-handed but honest — routed, never bounced.`,
 };
 const mapVerdict = v => {
   if (!v) return "EMITTED";
@@ -134,6 +186,9 @@ for (let i = 0; i < Math.max(packets.length, stationNames.length - 1); i++) {
   envelopes.push({
     from, to, payload: p?.topic ?? p?.event ?? topic, keepers, verdict, wave: i,
     gateline: PHRASEBOOK[verdict](p?.file ?? "the handoff"),
+    // gate attribution: explicit packet claim wins; an envelope FILE landed via the
+    // wrap path implies handoff-validate fired; synthetic hops stay unattributed.
+    gate: joinGate(p?.gate ?? (p?.file ? "handoff-validate" : null)),
     transform: {
       badge: "✦",
       line: p?.artifacts ? `artifacts land: <i>${Object.keys(p.artifacts).slice(0, 3).join(" · ")}</i>` : `<b>${rooms[to].construct}</b> receives the handoff`,
