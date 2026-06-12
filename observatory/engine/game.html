@@ -223,6 +223,12 @@ function sanitizeText(s){if(typeof s!=='string')return'';
   const e=s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   return e.replace(/&lt;(\/?)b&gt;/g,'<$1b>').replace(/&lt;(\/?)i&gt;/g,'<$1i>');}
 const SAN=sanitizeText;
+// SP-B2: ?live=/?level= accept ONLY same-origin relative paths — no scheme,
+// no protocol-relative //, no backslash. SSRF/exfil closed (mirrors contract).
+function isSameOriginRef(v){if(typeof v!=='string'||!v.length)return false;
+  if(/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(v))return false;
+  if(v.startsWith('//')||v.startsWith('\\'))return false;
+  return true;}
 
 // ───────────────── LEVEL 1 — baked facts (the asson session). Swappable: ?level=,
 // #level=<b64>, drag-drop a level.json, or window.OBS_LEVEL. ─────────────────
@@ -964,7 +970,9 @@ function renderShelf(){ try{ const sh=JSON.parse(localStorage.getItem('obs.shelf
     `▸ ${SAN(String(e.name))} · ${e.hops|0} hops · ${e.reaped?'<span style="color:var(--rage)">REAPED</span>':'clear'} · ${new Date(e.ts).toLocaleDateString()}`
   ).join('<br>'); }catch(e){} }
 // live mode (W3-3): the map reveals itself as the substrate writes — prefix-stable splice
-const liveUrl=Q.get('live');
+const liveRaw=Q.get('live');
+const liveUrl=liveRaw&&isSameOriginRef(liveRaw)?liveRaw:null;
+if(liveRaw&&!liveUrl)console.warn(`?live= refused: '${liveRaw}' is not a same-origin relative path (SP-B2)`);
 async function pollLive(){ try{
     const r=await fetch(liveUrl,{cache:'no-store'}); const L=await r.json();
     if(!validateLevel(L).ok)return; defaultLevel(L);
@@ -980,7 +988,10 @@ async function start(){
   let loaded=false;
   try{
     if(liveUrl){ const r=await fetch(liveUrl,{cache:'no-store'}); loaded=boot(await r.json()); }
-    else if(Q.get('level')){ const r=await fetch(Q.get('level')); loaded=boot(await r.json()); }
+    else if(Q.get('level')){ const lv=Q.get('level');
+      if(!isSameOriginRef(lv)){ console.warn(`?level= refused: '${lv}' is not a same-origin relative path (SP-B2)`);
+        log(`level ref refused — <b>same-origin relative paths only</b>`,'rage'); }
+      else { const r=await fetch(lv); loaded=boot(await r.json()); } }
     else if(location.hash.startsWith('#level=')) loaded=boot(JSON.parse(
       new TextDecoder().decode(Uint8Array.from(atob(location.hash.slice(7)),c=>c.charCodeAt(0)))));
     else if(window.OBS_LEVEL) loaded=boot(window.OBS_LEVEL);

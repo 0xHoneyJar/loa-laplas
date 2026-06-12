@@ -13,7 +13,7 @@
 import { readFileSync, readdirSync, writeFileSync, existsSync, statSync } from "node:fs";
 import { join, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { validateLevel, defaultLevel, sanitizeText, VERDICTS, SCHEMA, CONTRACT_REV } from "../contract/level-contract.mjs";
+import { validateLevel, defaultLevel, sanitizeText, redactLevel, assertShareable, VERDICTS, SCHEMA, CONTRACT_REV } from "../contract/level-contract.mjs";
 
 // rev 2 (SDD §3.4): hardness manifest joined at fold time by gate name.
 // Misses and missing attribution → unknown (fail-honest: renders HOLLOW).
@@ -219,10 +219,23 @@ const level = defaultLevel({
 const v = validateLevel(level);
 if (!v.ok) { console.error("✗ level violates obs-level/1:"); v.errors.forEach(e => console.error(`  · ${e}`)); process.exit(2); }
 
+// ── 6b. --redact (FR-F, SDD §3.6): allowlist emission for the public path.
+// The redacted level must STILL validate (it is a level) AND pass the share
+// guard (it is shareable) — both walls fire before anything leaves.
+let emit = level;
+if (flag("redact")) {
+  emit = redactLevel(level);
+  const rv = validateLevel(emit);
+  if (!rv.ok) { console.error("✗ redacted level violates obs-level/1:"); rv.errors.forEach(e => console.error(`  · ${e}`)); process.exit(2); }
+  const sg = assertShareable(emit);
+  if (!sg.ok) { console.error("✗ redaction incomplete:"); sg.errors.forEach(e => console.error(`  · ${e}`)); process.exit(2); }
+  console.error("redacted: allowlist emission · pseudonyms salted per-call · topology preserved (accepted leakage)");
+}
+
 const out = opt("out");
-const json = JSON.stringify(level, null, 1);
+const json = JSON.stringify(emit, null, 1);
 if (out) { writeFileSync(out, json); console.error(`wrote ${out}`); } else console.log(json);
-if (flag("url")) console.error(`door: game.html#level=${Buffer.from(JSON.stringify(level)).toString("base64")}`);
+if (flag("url")) console.error(`door: game.html#level=${Buffer.from(JSON.stringify(emit)).toString("base64")}`);
 
 const keepers = envelopes.reduce((n, e) => n + e.keepers, 0);
 console.error(`LevelData: ${rooms.length} rooms · ${envelopes.length} envelopes · ${keepers} gatekeepers · ${seams.length} seams`);

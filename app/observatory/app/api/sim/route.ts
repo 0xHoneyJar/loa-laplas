@@ -16,9 +16,13 @@ const execFileP = promisify(execFile);
 
 // Single source: the graduated producer. Override for deployments that
 // relocate the bundle (Vercel outputFileTracingIncludes pins it — S5).
+import { existsSync } from "node:fs";
+const VENDORED = join(process.cwd(), "vendor", "observatory", "producers", "sim-gen.mjs");
 const SIM_GEN =
   process.env.SIM_GEN_PATH ??
-  join(process.cwd(), "..", "..", "observatory", "producers", "sim-gen.mjs");
+  (existsSync(VENDORED)
+    ? VENDORED // build-time copy (prebuild) — what deployed bundles run
+    : join(process.cwd(), "..", "..", "observatory", "producers", "sim-gen.mjs"));
 
 type Bound = { min: number; max: number; int: boolean };
 const BOUNDS: Record<string, Bound> = {
