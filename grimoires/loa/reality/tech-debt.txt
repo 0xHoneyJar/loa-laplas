@@ -1,0 +1,4 @@
+# Tech debt markers
+scripts/lib/segment-emitter.py:146 — TODO (R-F001): close the runtime-dispatch verification gap with a live model-alias probe
+scripts/clew/VENDORED.md:49 — TODO: apply ledger-append.sh slug-normalization fix upstream (loa-constructs#249)
+(mktemp XXXXXX and uXXXX-escape doc mentions are false positives)

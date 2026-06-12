@@ -1,0 +1,17 @@
+# Test files (bats)
+tests/integration/adapter-gen-env-override.bats: 5 @test
+tests/integration/compose-terminal-gate.bats: 10 @test
+tests/integration/compose-verify-run.bats: 25 @test
+tests/integration/composition-pilot.bats: 8 @test
+tests/integration/form-c-dispatch.bats: 102 @test
+tests/integration/headless-parity.bats: 7 @test
+tests/integration/pair-relay-orchestrator.bats: 12 @test
+tests/integration/pair-relay-validate.bats: 20 @test
+tests/integration/pilot-adapter-discovery.bats: 10 @test
+tests/integration/surface-envelope.bats: 14 @test
+tests/integration/tool-mandate.bats: 10 @test
+tests/composition/state/clew-hook-never-blocks.bats: 5 @test
+tests/composition/state/recent-learnings.bats: 8 @test
+TOTAL integration: 223
+TOTAL composition/state: 13
+legba: scripts/legba/legba.test.mjs (node --test, 8 asserts per README)

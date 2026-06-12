@@ -1,0 +1,50 @@
+# API Surface — extracted 2026-06-12
+# No web routes: this is a CLI/script substrate. Surface = executable entry points.
+
+## Compiler / runner (bash)
+scripts/compose-dispatch.sh <composition.yaml> [--form-c|--interactive|--headless]
+  [--run-id ID] [--stage N] [--dry-run] [--json]      exit: 0 ok / 1 invalid / 2 stage-fail / 3 awaiting
+scripts/compose-verify-run.sh <run_id>                 proof-of-run terminal gate (valid_run | not_a_run)
+scripts/compose-doctor.sh                              runtime readiness check
+scripts/compose-handoff-wrap.sh                        seed -> validate -> envelope a handoff at seam
+scripts/compose-seam-clew.sh                           capture >>clew@<construct>: <why> at seam
+scripts/compose-output-schema-preflight.sh             stage output_schema preflight
+scripts/construct-adapter-gen.sh                       construct.yaml -> .claude/agents/construct-<slug>.md
+scripts/surface-envelope.sh                            pair-relay envelope surfacing (FIFO)
+
+## Validators (bash, fail-closed)
+scripts/handoff-validate.sh            construct-handoff packets (3-tier)
+scripts/room-packet-validate.sh        room-activation packets
+scripts/construct-manifest-validate.sh manifest v4
+scripts/pair-relay-validate.sh         pair-relay composition descriptors
+scripts/handoff-parity-check.sh        native vs headless packet diff
+
+## Library (python/node, invoked by the bash layer)
+scripts/lib/compose-cut.py <comp.json|-> --schema <path> [--validate-only] [--seam-roles a,b,c]
+  exit: 0 ok / 1 invalid / 64 usage; stdout: {ok, composition, segments, seams}
+scripts/lib/segment-emitter.py --segment <plan> --composition <comp> --room-packets <map>
+  --cycle-id ID --run-id ID --authored-at ISO          emits one .workflow.js
+scripts/lib/adapter-generator.py                       template render for adapters
+scripts/lib/compose-cost-card.py                       per-run cost estimate card
+scripts/lib/run-emitted-segment.js <seg.workflow.js> '<responsesByAgentType>' '<args>'  dry-run harness
+scripts/lib/workflow-syntax-check.js <seg.workflow.js> offline syntax/determinism gate
+scripts/lib/construct-handoff-lib.sh                   hash core (compute-id), shared bash lib
+
+## Legba CLI (node, zero-dep)
+node scripts/legba/legba.mjs demo|provision|record|gate|verify|challenge
+  verify <run-dir>                  exit 0 ok / 1 failed (custody chain + receipt hash)
+  challenge <run-dir> --span N --seq K   fraud-proof by re-execution
+
+## Clew (vendored from loa-constructs — see scripts/clew/VENDORED.md)
+scripts/clew/loa-clew-capture.sh / loa-clew-capture-agent.sh / loa-clew-distill.sh
+scripts/clew/ledger-append.sh / clew-lock.sh / clew-genome-admit.py
+
+## Hooks (Claude Code)
+hooks/subagent-start/loa-tool-mandate.sh   logs denylist/required-tool findings; NEVER blocks (exit 0)
+hooks/subagent-stop/loa-handoff-collect.sh collects handoff packets at subagent stop
+
+## Migration utilities
+scripts/migrate-subagents-to-agents.sh / migrate-subagents-verify.sh
+
+## Skill surface
+skills/compose/SKILL.md — /compose (browse + run compositions; executor contract)
