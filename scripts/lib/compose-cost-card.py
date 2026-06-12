@@ -57,14 +57,18 @@ RETRY_ATTEMPTS_PER_CALL = 2
 
 
 def _load_resolver():
-    """Import _resolve_model from the sibling segment-emitter.py (hyphenated
-    filename, hence importlib)."""
+    """Import the SEGMENT-AWARE resolver from the sibling segment-emitter.py
+    (hyphenated filename, hence importlib). _resolve_model_in_segment applies
+    the relative gate floor (gate >= highest non-gate peer in its segment); the
+    card passes the whole segment stage list — a superset of the work peers the
+    emitter scopes the gate to — so the card prices a gate at >= the emitted
+    model, preserving the CEILING property."""
     here = os.path.dirname(os.path.abspath(__file__))
     path = os.path.join(here, "segment-emitter.py")
     spec = importlib.util.spec_from_file_location("segment_emitter", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod._resolve_model
+    return mod._resolve_model_in_segment
 
 
 def build_cost_card(plan: dict) -> dict:
@@ -92,7 +96,7 @@ def build_cost_card(plan: dict) -> dict:
         base_calls = int(seg.get("max_iterations") or 1) if kind == "iterating" else 1
         calls = base_calls * RETRY_ATTEMPTS_PER_CALL
         for st in seg.get("stages", []):
-            model = resolve_model(st)
+            model = resolve_model(st, seg.get("stages", []))
             p = prices.get(model)
             if p is None:
                 unpriced.append(model)

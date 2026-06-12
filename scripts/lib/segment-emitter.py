@@ -156,11 +156,32 @@ GATE_REQUIRED = ["verdict", "findings"]
 # tier_groups.mappings.max.anthropic). Pricing for fable was registered in the
 # SoT BEFORE this routability landed (fix-plan ordering: an unpriced model
 # meters as $0 and blinds the budget governor).
+#
+# SINGLETON-UP / SUBSCRIPTION REGIME (2026-06-12, issue #40): mid/standard —
+# and the role-else default below — route to OPUS, not sonnet. Two grounds:
+#   (a) Cardinality. A singleton stage is a single point of quality failure in
+#       a serial chain; cheap models earn their seat in PARALLEL breadth, where
+#       ensemble redundancy covers them. The DAG fan-out leaves (leafModel)
+#       correctly stay sonnet; the singleton path was the mis-routed one — a
+#       sonnet grounding room loitered ~14 min / 68 tool calls without
+#       converging (#40), and every pinned-sonnet singleton was ALSO a silent
+#       DOWNGRADE vs. the session model agent() would inherit if the emitter
+#       pinned nothing.
+#   (b) Billing regime. The old ladder encoded metered-API payoffs (cost ∝
+#       tokens × price). The operator runs flat-rate subscription: marginal
+#       token cost ≈ 0, the binding constraints are rate-limits and wall-clock,
+#       so sonnet singletons saved dollars that don't exist while paying real
+#       quality and convergence-time costs.
+# `mid` here deliberately tracks the OPERATOR'S EFFECTIVE hounfour config
+# (.loa.config.yaml override mid→opus), not the upstream metered default
+# (mappings.mid.anthropic→sonnet). Metered operators: re-pin mid/standard to
+# sonnet. Known end-state: read these bindings FROM the hounfour SoT instead of
+# a hardcoded table (the contribute-to-loa integration named in #40).
 TIER_MODEL = {
     "tiny": "haiku",
     "cheap": "sonnet",
-    "mid": "sonnet",
-    "standard": "sonnet",
+    "mid": "opus",
+    "standard": "opus",
     "deep": "opus",
     "max": "fable",
 }
@@ -174,17 +195,21 @@ MODEL_RANK = {"haiku": 0, "sonnet": 1, "opus": 2, "fable": 3}
 # opus, NOT auto-floated to the top tier. The gate-floor invariant is RELATIVE
 # ("a gate is never cheaper than the work it gates"), not absolute — auto-floating
 # every gate to the most expensive model is the system's largest cost-runaway
-# vector. fable on a gate is explicit per-stage opt-in only. Known end-state
-# (latent until work stages commonly run fable): a relative floor =
-# max(GATE_FLOOR_MODEL, highest work-tier in the composition).
+# vector. fable on a gate is explicit per-stage opt-in only. The relative floor
+# (max(GATE_FLOOR_MODEL, highest work model in the segment)) is ACTIVE as of
+# 2026-06-12 — see _resolve_model_in_segment below; with work stages commonly
+# on opus the static floor alone no longer guarantees the invariant once any
+# work stage runs fable.
 GATE_FLOOR_MODEL = "opus"
 
 # Default-by-role (when a stage carries no explicit intelligence_tier): a TOKEN-EXACT
 # match on the stage's role slug. The DEEP set is the quality/decision class — gates,
 # judges, verifiers, reviewers, synthesizers. The CHEAP set is the mechanical-fan-out
 # class — read/scan/gather/format. EVERYTHING ELSE (including any unrecognized or
-# missing role) is STANDARD — the conservative default that never downgrades an
-# unknown stage below sonnet.
+# missing role) is STANDARD — and standard ≡ opus under the singleton-up regime
+# above: an unknown singleton is reasoning work until proven mechanical, and the
+# failure mode of guessing low (a loitering, non-converging room — #40) is worse
+# than the failure mode of guessing high (rate-limit headroom spent).
 #
 # R-F002 (token-exact, NOT substring): the role slug is tokenized (lowercase, split
 # on -/_///whitespace into a token SET) and classified by EXACT token membership.
@@ -204,8 +229,12 @@ DEEP_ROLE_TOKENS = frozenset({
 # NOTE: "hard-stop" tokenizes to {hard, stop} (-> deep via "stop") and "craft-gate"
 # tokenizes to {craft, gate} (-> deep via either) — both preserved by the token set
 # above, which carries the same keywords as the prior substring list.
+# "explore" was REMOVED from the CHEAP set (2026-06-12, issue #40): open-ended
+# exploration is reasoning-wide — the exact loitering class #40 documents (a
+# k-hole grounding/DIG room is exploration). The cheap set is for MECHANICAL
+# fan-out legs only; an explore-role stage now falls to the standard default.
 CHEAP_ROLE_TOKENS = frozenset({
-    "explore", "read", "scan", "gather", "capture", "format", "lint", "fetch",
+    "read", "scan", "gather", "capture", "format", "lint", "fetch",
 })
 
 # Tokenize a role slug: lowercase, split on - / _ / / and whitespace into a token set.
@@ -230,18 +259,26 @@ def _role_is_cheap(role):
     """True when the role slug names a mechanical-fan-out (cheap-class) stage.
     Token-exact (R-F002) — a false cheap match is DANGEROUS (downgrades to haiku), so
     this must never be a substring match. A role is cheap iff ANY of its tokens is a
-    member of CHEAP_ROLE_TOKENS."""
-    return not _role_tokens(role).isdisjoint(CHEAP_ROLE_TOKENS)
+    member of CHEAP_ROLE_TOKENS — UNLESS the slug also carries an "explore" token:
+    explore POISONS cheapness (FAGAN council on #41, cursor voice): "explore-read" /
+    "explore-gather" would otherwise route to haiku via their mechanical token, which
+    is exactly the #40 loiter class the explore removal was meant to close."""
+    tokens = _role_tokens(role)
+    if "explore" in tokens:
+        return False
+    return not tokens.isdisjoint(CHEAP_ROLE_TOKENS)
 
 
 def _resolve_model(stage):
-    """Resolve a stage dict to a Claude model alias ("haiku"|"sonnet"|"opus").
+    """Resolve a stage dict to a Claude model alias ("haiku"|"sonnet"|"opus"|"fable").
 
     Precedence + the CONSERVATIVE GUARD (load-bearing):
-      1. An explicit intelligence_tier in {cheap,standard,deep,tiny} maps via
-         TIER_MODEL (cheap ≡ sonnet per the hounfour SoT; tiny is the haiku route).
-      2. Else default-by-role: DEEP set -> opus, CHEAP set -> haiku, else sonnet
-         (sonnet is also the floor for an unrecognized/missing role).
+      1. An explicit intelligence_tier in {tiny,cheap,mid,standard,deep,max} maps
+         via TIER_MODEL (cheap ≡ sonnet per the hounfour SoT; tiny is the haiku
+         route; mid/standard ≡ opus under the singleton-up regime; max ≡ fable).
+      2. Else default-by-role: DEEP set -> opus, CHEAP set -> haiku, else opus
+         (opus is the singleton default for an unrecognized/missing role — see
+         the SINGLETON-UP rationale above TIER_MODEL).
       3. NEVER SILENTLY DOWNGRADE A GATE: if the role is in the DEEP set, the result
          is floored at "opus" regardless of an explicit cheaper tier. An explicit
          tier may UPGRADE a stage (e.g. a 'work' stage marked deep -> opus) but it
@@ -264,16 +301,16 @@ def _resolve_model(stage):
         # raise; the role default + conservative floor still produce a safe model.
         if tier:
             sys.stderr.write(
-                "segment-emitter: invalid intelligence_tier %r (valid: cheap, standard, deep, tiny); "
+                "segment-emitter: invalid intelligence_tier %r (valid: tiny, cheap, mid, standard, deep, max); "
                 "falling back to role-based default\n" % (tier,)
             )
-        # Default-by-role: DEEP-token set -> opus, CHEAP-token set -> haiku, else sonnet.
+        # Default-by-role: DEEP-token set -> opus, CHEAP-token set -> haiku, else opus.
         # (The DEEP branch here is informational only — the unconditional bottom guard
         # below is the AUTHORITATIVE opus floor for a gate-class stage; see R-F003.)
         if _role_is_cheap(stage.get("role")):
             model = "haiku"
         else:
-            model = "sonnet"  # conservative default — unrecognized/missing role -> sonnet
+            model = "opus"  # singleton default — unrecognized/missing role -> opus (issue #40)
 
     # R-F003: the AUTHORITATIVE conservative floor — FLOOR semantics, not pin
     # (2026-06-10 intel-routing review; was an unconditional `model = "opus"`,
@@ -285,6 +322,32 @@ def _resolve_model(stage):
     if role_is_deep and MODEL_RANK[model] < MODEL_RANK[GATE_FLOOR_MODEL]:
         model = GATE_FLOOR_MODEL
 
+    return model
+
+
+def _resolve_model_in_segment(stage, seg_stages):
+    """Segment-aware resolution — the RELATIVE gate floor (the R-F003 end-state,
+    activated 2026-06-12 alongside the singleton-up regime): a gate-class
+    (DEEP-role) stage resolves to at least the highest model any NON-gate peer
+    in its segment runs. "The gate is never cheaper than the work it gates" now
+    holds by construction when work runs above the static floor (fable work ->
+    fable gate); an explicit higher tier on the gate itself still wins (max ->
+    fable survives, it is already >= every peer). Non-gate stages pass through
+    _resolve_model unchanged, so this is safe to call uniformly.
+
+    compose-cost-card.py imports THIS function so the card can never price a
+    gate below what is actually emitted. The emitter passes the gate's WORK
+    peers; the card passes the whole segment stage list — a superset, so the
+    card's estimate is >= the emitted reality, preserving its CEILING property."""
+    model = _resolve_model(stage)
+    if not _role_is_deep(stage.get("role")):
+        return model
+    for peer in seg_stages or []:
+        if peer is stage or _role_is_deep(peer.get("role")):
+            continue
+        pm = _resolve_model(peer)
+        if MODEL_RANK[pm] > MODEL_RANK[model]:
+            model = pm
     return model
 
 
@@ -1089,9 +1152,13 @@ def emit_iterating_body(comp, seg, cycle_id, run_id):
     }}"""
 
     grv = _room_var(gate["stage"])
-    # The gate is a craft-gate (DEEP role) — _resolve_model floors it at opus; the
-    # conservative guard guarantees a quality gate is never emitted on a cheap model.
-    gate_model = _resolve_model(gate)
+    # The gate is a craft-gate (DEEP role) — the RELATIVE floor resolves it to at
+    # least the highest model among its loop-work peers (fable work -> fable gate),
+    # never below GATE_FLOOR_MODEL. Scoped to work_stages, not preamble: the gate
+    # gates the LOOP WORK output; preamble is once-only context. KNOWN LIMIT: DAG
+    # items (args.items, RFC #35) bind at runtime, so an item declaring max cannot
+    # lift this emit-time literal — declare the tier on the gate stage instead.
+    gate_model = _resolve_model_in_segment(gate, work_stages)
     gate_head = (
         _persona_clause(gate.get("persona"))
         + f"You are the craft-gate reviewer (construct: {gate['construct']}"
@@ -1105,6 +1172,9 @@ def emit_iterating_body(comp, seg, cycle_id, run_id):
 // args.items turns iteration 1 into a wave-scheduled fan-out; leaves are
 // cheap-tier task monkeys (hounfour: cheap ≡ sonnet) unless the item declares
 // its own intelligence_tier. Validation FAILS LOUD before any token is spent.
+// NOTE (singleton-up, #41): the UNDECLARED leaf default stays sonnet — the
+// cardinality contract. A leaf that EXPLICITLY declares mid/standard rides the
+// regime values (opus); fan-out authors wanting cheap legs declare tiny/cheap.
 const TIER_MODEL_JS = __TIER_MODEL_JSON__;
 const leafModel = (it) => TIER_MODEL_JS[it.intelligence_tier] || "sonnet";
 const MAX_DAG_ITEMS = 64;  // runaway guard; boundedParallel already chunks wave width
@@ -1263,7 +1333,14 @@ def emit_sequential_body(comp, seg, cycle_id, run_id):
             + f" (role: {st.get('role')}). Operate in ROOM AUTHORITY (room mode, not studio) per your room-activation packet below."
         )
         prior = "" if idx == 0 else '      "PRIOR STAGE OUTPUT:\\n" + JSON.stringify(prior),'
-        resolved_model = _resolve_model(st)
+        # Segment-aware: a deep-role stage in a sequence (e.g. a trailing
+        # synthesize/review) takes the relative floor against the stages whose
+        # output FLOWS INTO it — strictly PRECEDING peers (codex P2 on #41: a
+        # review at position 1 cannot be gating a max stage that runs after it;
+        # whole-list scope lifted it to fable for work it never sees). Sequential
+        # output threads forward (`prior`), so stages[:idx] is exactly the
+        # reviewed set. Non-deep stages pass through unchanged.
+        resolved_model = _resolve_model_in_segment(st, stages[:idx])
         lrn = _learnings_prompt_expr(st)
         blocks.append(
             f"""  phase({js((st.get('name') or st['construct']))});
