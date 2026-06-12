@@ -110,13 +110,29 @@ _wrap_envelope() {
     echo "$COMPOSE_OUT" | jq -e '.terminal_gate.run_id == "tg-runid"' >/dev/null \
         || fail "terminal_gate.run_id not baked: $COMPOSE_OUT"
     # The handed command is the TERMINAL gate (--require-executed), run_id baked.
-    echo "$COMPOSE_OUT" | jq -e '.terminal_gate.cmd | test("compose-verify-run.sh tg-runid --require-executed --json")' >/dev/null \
+    # (--legba may be inserted between --require-executed and --json by the gradient
+    # flip when node + the bridge are present, so the flags are not asserted adjacent.)
+    echo "$COMPOSE_OUT" | jq -e '.terminal_gate.cmd | test("compose-verify-run.sh tg-runid --require-executed")' >/dev/null \
         || fail "terminal_gate.cmd should be the baked TERMINAL gate command: $COMPOSE_OUT"
+    echo "$COMPOSE_OUT" | jq -e '.terminal_gate.cmd | test("--json")' >/dev/null \
+        || fail "terminal_gate.cmd should carry --json: $COMPOSE_OUT"
     echo "$COMPOSE_OUT" | jq -e '.terminal_gate.require_executed == true' >/dev/null \
         || fail "terminal_gate.require_executed should be true: $COMPOSE_OUT"
-    # Structured argv (machine-safe; no shell-string ambiguity): [script, run_id, --require-executed, --json].
+    # Structured argv (machine-safe; no shell-string ambiguity): [script, run_id, --require-executed, ..., --json].
     echo "$COMPOSE_OUT" | jq -e '.terminal_gate.argv | (type=="array") and (index("tg-runid")!=null) and (index("--require-executed")!=null) and (index("--json")!=null)' >/dev/null \
         || fail "terminal_gate.argv should be a structured array carrying the run_id + flags: $COMPOSE_OUT"
+}
+
+@test "form-c gradient flip: --legba is baked into the terminal gate when node + bridge are present" {
+    _compile_json tg-legba
+    # node + scripts/legba/compose-bridge.mjs are present in this repo, so the gate
+    # verifies the Legba custody chain by construction (the gradient flip).
+    echo "$COMPOSE_OUT" | jq -e '.terminal_gate.legba == true' >/dev/null \
+        || fail "terminal_gate.legba should be true when the bridge is present: $COMPOSE_OUT"
+    echo "$COMPOSE_OUT" | jq -e '.terminal_gate.cmd | test("--legba")' >/dev/null \
+        || fail "terminal_gate.cmd should carry --legba: $COMPOSE_OUT"
+    echo "$COMPOSE_OUT" | jq -e '.terminal_gate.argv | index("--legba") != null' >/dev/null \
+        || fail "terminal_gate.argv should carry --legba: $COMPOSE_OUT"
 }
 
 @test "form-c human output prints the TERMINAL GATE line with the verify command" {

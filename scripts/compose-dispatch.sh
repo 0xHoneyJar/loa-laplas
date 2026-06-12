@@ -424,20 +424,36 @@ _run_form_c() {
     # cross-host consumer must re-resolve the script via its own $RT, not exec the
     # baked path verbatim.
     local verify_script="$SCRIPT_DIR/compose-verify-run.sh"
-    local verify_cmd="$verify_script $RUN_ID --require-executed --json"
+    # GRADIENT FLIP (legba): every governed run's terminal gate verifies the Legba
+    # custody chain over its envelopes — BY CONSTRUCTION, not opt-in. We bake
+    # --legba into the handed command WHEN the runtime can actually do it (node +
+    # the bridge present), so enabling it never breaks an environment that lacks
+    # the infra. Where present, an executor cannot reach valid_run without a
+    # verifying, anchored chain; the chain is auto-derived from the envelopes the
+    # executor already produces, so recording is free and the gate is structural.
+    local legba_flag="" legba_on=false
+    if command -v node >/dev/null 2>&1 && [[ -f "$SCRIPT_DIR/legba/compose-bridge.mjs" ]]; then
+        legba_flag="--legba"; legba_on=true
+    fi
+    local verify_cmd="$verify_script $RUN_ID --require-executed ${legba_flag:+$legba_flag }--json"
     local verify_argv
-    verify_argv="$(jq -nc --arg s "$verify_script" --arg r "$RUN_ID" '[$s, $r, "--require-executed", "--json"]')"
-    log_event "form_c.terminal_gate_pending" "$(jq -n --arg s "$verify_script" --arg r "$RUN_ID" \
-        '{gate: "compose-verify-run", script: $s, run_id: $r, require_executed: true, required: true}')"
+    if [[ "$legba_on" == "true" ]]; then
+        verify_argv="$(jq -nc --arg s "$verify_script" --arg r "$RUN_ID" '[$s, $r, "--require-executed", "--legba", "--json"]')"
+    else
+        verify_argv="$(jq -nc --arg s "$verify_script" --arg r "$RUN_ID" '[$s, $r, "--require-executed", "--json"]')"
+    fi
+    log_event "form_c.terminal_gate_pending" "$(jq -n --arg s "$verify_script" --arg r "$RUN_ID" --argjson legba "$legba_on" \
+        '{gate: "compose-verify-run", script: $s, run_id: $r, require_executed: true, legba: $legba, required: true}')"
 
     # 5. OUTPUT.
     if [[ "$OUTPUT_JSON" == "1" ]]; then
         jq -n --arg run_id "$RUN_ID" --arg comp "$comp_name" --argjson segs "$n_segs" --argjson seams "$n_seams" \
             --arg manifest "$manifest" --arg vscript "$verify_script" --arg vcmd "$verify_cmd" --argjson vargv "$verify_argv" \
             --argjson cost_card "$cost_card" \
+            --argjson legba_on "$legba_on" \
             '{run_id: $run_id, composition: $comp, mode: "workflow", segments: $segs, seams: $seams, manifest: $manifest, cost_card: $cost_card,
               awaiting_main_loop: true,
-              terminal_gate: {gate: "compose-verify-run", script: $vscript, run_id: $run_id, argv: $vargv, cmd: $vcmd, require_executed: true, required: true},
+              terminal_gate: {gate: "compose-verify-run", script: $vscript, run_id: $run_id, argv: $vargv, cmd: $vcmd, require_executed: true, legba: $legba_on, required: true},
               exit_code: 3}'
     else
         echo "[compose-dispatch] Form C compiled — run each segment via the Workflow tool per: $manifest"
