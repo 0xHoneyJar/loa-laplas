@@ -75,20 +75,31 @@ tool with nondeterministic inputs MUST be recorded `attestable`, never here
 
 ## The bound of the guarantee (read this before you rely on it)
 
-The chain is tamper-**evident**, not yet tamper-**proof** against an adversary
-with write access to the run dir. The binding check catches an *envelope* edited
-after gating (its content no longer hashes to what the chain recorded). But
-nothing yet externally anchors the receipt, so an attacker who can rewrite the
-whole `legba/` directory can rebuild a clean chain over tampered envelopes. The
-fix is in the schema (`RunReceipt` LR-4: anchor `receipt_hash` into the loa
-audit chain at build time, compare on verify) and is the next increment. Until
-then: trust `legba verify` against accidental corruption and post-hoc envelope
-edits; do not yet treat it as proof against a hostile filesystem.
+Three layers now bind a run, weakest-adversary first:
+
+1. **Chain + signature** (`legba verify`) — the custody chain is internally
+   consistent and ed25519-signed. Catches a token forgery or a span-log edit.
+2. **Binding** — each *live* envelope must still hash to what the chain recorded.
+   Catches an envelope edited after gating.
+3. **External anchor (LR-4)** — a deterministic `content_receipt` over the
+   envelopes is anchored at build time OUTSIDE `legba/` (the orchestrator trail —
+   a different writer, append-only — and best-effort into the loa audit chain).
+   On verify the receipt is recomputed and compared. This catches the attack
+   layer 2 could not: a wholesale `legba/` rebuild over tampered envelopes (the
+   rebuilt chain matches the tamper, but the recomputed receipt no longer matches
+   the anchor the honest build left behind).
+
+What remains: an attacker who can rewrite BOTH `legba/` AND the orchestrator
+anchor (and, if present, the hash-chained signed loa audit entry) in one
+coherent pass. The strongest defense is operator-held: record the
+`content_receipt` out of band at build time and verify with
+`compose-bridge.mjs verify <run> --expect <receipt>` — then nothing on the host
+can fake it. Beyond that, N-of-M co-signature / on-chain anchoring are the
+schema's named future hardening. Honest summary: tamper-**resistant** against a
+same-host attacker, tamper-**proof** when the operator holds the receipt.
 
 ## What's still wiring (honest)
 
-- **External anchoring (LR-4)**: pin `receipt_hash` into the loa audit chain so a
-  full `legba/` rebuild over tampered envelopes is detectable — the bound above.
 - **Involuntary capture**: `legba-record-hook.mjs` is the PostToolUse hook shape
   (LG-1: recording must be hook-enforced, not voluntary). Wiring it into the
   compose-dispatch executor sequence — so every Form C segment records + gates +
