@@ -43,5 +43,5 @@
 | Shell builds | `npm ci && npm run build` in `app/observatory/` | ✅ S1 |
 | Policy conformance (pure/total/cap-bounded) | `node --test observatory/tests/policies.test.mjs` (11 tests, incl. IMP-010 registry wall + SP-B8 bound witness seed 5) | ✅ S4 |
 | Episode schema validates | same suite + sim validates line-by-line before emit; agent episode archived: `grimoires/loa/cycles/observatory-graduation/episodes/agent-disciplined-42.jsonl` (28 ticks) · replay capture `captures/s4-agent-episode-morgue.png` | ✅ S4 |
-| Redaction fixtures (incl. sensitive-looking strings) | — | ☐ S5 |
-| Deployed-engine same-origin fetch restriction | — | ☐ S5 |
+| Redaction fixtures (incl. sensitive-looking strings) | `node --test observatory/tests/share.test.mjs` (7 tests: nothing survives, salts differ/topology identical, allowlist-is-code, IMP-011 forged-flag refusal) | ✅ S5 |
+| Deployed-engine same-origin fetch restriction | same suite (SP-B2 matrix: schemes/protocol-relative/backslash refused) + engine doors warn and refuse | ✅ S5 |
