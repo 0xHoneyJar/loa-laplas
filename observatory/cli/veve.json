@@ -76,6 +76,25 @@
       "stdin": "",
       "expect_output_hash": "sha256:8f881152fee407a8bb93b1747805d0d027bacace6bb200166c5158920a023fc0",
       "expect_exit": 0
+    },
+    {
+      "name": "sim-stuck-clew-heals",
+      "argv": [
+        "sim",
+        "--seed",
+        "7",
+        "--greed",
+        ".2",
+        "--discipline",
+        ".9",
+        "--rooms",
+        "6",
+        "--stuck",
+        "2"
+      ],
+      "stdin": "",
+      "expect_output_hash": "sha256:b12b9ff23fb849a8257f2a42286a80517c633e5efeaab694d2c00dc3d408405c",
+      "expect_exit": 0
     }
   ],
   "ladder": {

@@ -18,6 +18,9 @@ export const VERDICTS = ["APPROVED", "CHECKPOINT", "EMITTED", "REJECTED", "DENIE
 export const HARDNESS = ["hook", "prose", "unknown"];
 export const CLEW_ROUTING = ["retrace", "rotate", "heal"];
 export const CLEW_DROPPED_BY = ["agent", "watchdog"];
+// §3.3-AMENDMENT (S1.4 spike): why the watchdog fired. OPTIONAL — absent on
+// voluntary clews (testimony needs no trigger). "budget" is the loiter case.
+export const CLEW_TRIGGER = ["liveness", "budget"];
 
 export function validateLevel(L) {
   const errs = [];
@@ -77,14 +80,17 @@ export function validateLevel(L) {
       if (!CLEW_DROPPED_BY.includes(c.dropped_by)) E(`clews[${i}].dropped_by '${c.dropped_by}' not in enum {${CLEW_DROPPED_BY.join(",")}}`);
       if (typeof c.packet_digest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(c.packet_digest))
         E(`clews[${i}].packet_digest must be 'sha256:<64 hex>' (JCS-sha256, S3.1)`);
+      if (c.trigger !== undefined && !CLEW_TRIGGER.includes(c.trigger))
+        E(`clews[${i}].trigger '${c.trigger}' not in enum {${CLEW_TRIGGER.join(",")}}`);
     });
   }
   // rev 2 — IMPASSE is empty-handed-but-honest: it MUST drop a thread.
-  // An IMPASSE envelope without a clews entry pointing at it is rejected.
+  // The clew is dropped WHERE DISTRESS OCCURRED — the IMPASSE envelope's origin
+  // room (divergence is the last known-good junction, a separate fact).
   L.envelopes.forEach((h, i) => {
     if (h.verdict === "IMPASSE" &&
-        !(Array.isArray(L.clews) && L.clews.some(c => c && c.divergence === i)))
-      E(`envelopes[${i}].verdict IMPASSE has no clews entry (divergence=${i}) — the thread is the move`);
+        !(Array.isArray(L.clews) && L.clews.some(c => c && c.room === h.from)))
+      E(`envelopes[${i}].verdict IMPASSE has no clew dropped in its origin room ${h.from} — the thread is the move`);
   });
   return { ok: errs.length === 0, errors: errs };
 }

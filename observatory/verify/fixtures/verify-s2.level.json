@@ -141,10 +141,11 @@
  ],
  "clews": [
   {
-   "room": 2,
-   "divergence": 2,
+   "room": 1,
+   "divergence": 0,
    "routing": "heal",
    "dropped_by": "watchdog",
+   "trigger": "budget",
    "packet_digest": "sha256:abababababababababababababababababababababababababababababababab"
   }
  ]

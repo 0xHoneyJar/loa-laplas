@@ -67,6 +67,28 @@ these when the beats land):
   the NEXT such decision is made from a rendered beat — this diagnosis is the
   control-group anecdote for G-1.
 
+### S3.4 — FR-B closure gate (blocked-by S1.4, flatline SP-B5/IMP-006) — 2026-06-12
+
+S1.4's diagnosis reviewed: **A-3 DISPROVEN** → IMP-005 remediation EXECUTED before
+S3 mechanics were built (the spike preceded S3.1, not just S3.4):
+
+- **SDD §3.3 amended** (both copies, marked amendment — flatlined text preserved):
+  watchdog trigger taxonomy = `liveness` OR `budget`; the loiter case is budget
+  exhaustion by a fully-live agent. `clews[].trigger` joins rev 2 as optional declared
+  data; red test (`trigger: "vibes"` rejected) in selftest.
+- **Sim mechanics re-grounded**: the stuck condition is a QUALITY WALL (returns
+  plateau below every present threshold), not a hang — `--stuck N`. Discipline
+  testifies at the plateau (voluntary clew, clock 0.21); indiscipline grinds to the
+  flood and the watchdog drops the identical packet with `trigger: budget`
+  (clock 1.0). The three-prices ordering is IN THE DATA, then in the morgue.
+- **Beat citation**: `observatory/verify/captures/s3-clew-involuntary.png` —
+  the S1.4 loiter, rendered: flooded clock + ENRAGE + "◷ the watchdog drops the
+  thread for protocol — budget spent. signed ⛓". Plus the G-4 third story golden
+  vector `sim-stuck-clew-heals` (veve, byte-pinned).
+
+**FR-B closes.** The clew mechanics now describe the failure mode that actually
+happened, not the one we assumed.
+
 ### S1.3 — A-2 checkpoint (dispatch gate, flatline SP-B4)
 
 _PENDING — OPERATOR decision at S1 review. S2 work order may not OPEN until this is logged._

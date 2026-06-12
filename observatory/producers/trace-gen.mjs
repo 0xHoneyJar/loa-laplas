@@ -51,12 +51,18 @@ if (flag("selftest")) {
     ["clews[].routing outside enum", {
       rooms: baseRooms, seams: [[0, 1]],
       envelopes: [{ from: 0, to: 1, verdict: "IMPASSE" }],
-      clews: [{ room: 1, divergence: 0, routing: "panic", dropped_by: "agent",
+      clews: [{ room: 0, divergence: 0, routing: "panic", dropped_by: "agent",
                 packet_digest: "sha256:" + "a".repeat(64) }],
     }],
     ["gate.hardness outside enum (declared data only — never invented)", {
       rooms: baseRooms, seams: [[0, 1]],
       envelopes: [{ from: 0, to: 1, gate: { hardness: "vibes" } }],
+    }],
+    ["clews[].trigger outside enum (§3.3-amendment: liveness|budget only)", {
+      rooms: baseRooms, seams: [[0, 1]],
+      envelopes: [{ from: 0, to: 1, verdict: "IMPASSE" }],
+      clews: [{ room: 0, divergence: 0, routing: "heal", dropped_by: "watchdog",
+                trigger: "vibes", packet_digest: "sha256:" + "a".repeat(64) }],
     }],
   ];
   let red = 0;

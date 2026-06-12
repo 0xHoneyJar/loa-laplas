@@ -163,6 +163,7 @@ const VERDICTS=["APPROVED","CHECKPOINT","EMITTED","REJECTED","DENIED","IMPASSE"]
 const HARDNESS=["hook","prose","unknown"];
 const CLEW_ROUTING=["retrace","rotate","heal"];
 const CLEW_DROPPED_BY=["agent","watchdog"];
+const CLEW_TRIGGER=["liveness","budget"];
 function validateLevel(L){const errs=[];const E=m=>errs.push(m);
   if(!L||typeof L!=='object')return{ok:false,errors:['level is not an object']};
   if(!Array.isArray(L.rooms)||!L.rooms.length)E('rooms[] missing or empty');
@@ -204,10 +205,11 @@ function validateLevel(L){const errs=[];const E=m=>errs.push(m);
       if(!Number.isInteger(c.divergence)||c.divergence<0||c.divergence>=L.envelopes.length)E(`clews[${i}].divergence must index an envelope`);
       if(!CLEW_ROUTING.includes(c.routing))E(`clews[${i}].routing '${c.routing}' not in enum`);
       if(!CLEW_DROPPED_BY.includes(c.dropped_by))E(`clews[${i}].dropped_by '${c.dropped_by}' not in enum`);
-      if(typeof c.packet_digest!=='string'||!/^sha256:[0-9a-f]{64}$/.test(c.packet_digest))E(`clews[${i}].packet_digest must be 'sha256:<64 hex>'`);});}
+      if(typeof c.packet_digest!=='string'||!/^sha256:[0-9a-f]{64}$/.test(c.packet_digest))E(`clews[${i}].packet_digest must be 'sha256:<64 hex>'`);
+      if(c.trigger!==undefined&&!CLEW_TRIGGER.includes(c.trigger))E(`clews[${i}].trigger '${c.trigger}' not in enum`);});}
   L.envelopes.forEach((h,i)=>{
-    if(h.verdict==='IMPASSE'&&!(Array.isArray(L.clews)&&L.clews.some(c=>c&&c.divergence===i)))
-      E(`envelopes[${i}].verdict IMPASSE has no clews entry (divergence=${i}) — the thread is the move`);});
+    if(h.verdict==='IMPASSE'&&!(Array.isArray(L.clews)&&L.clews.some(c=>c&&c.room===h.from)))
+      E(`envelopes[${i}].verdict IMPASSE has no clew dropped in its origin room ${h.from} — the thread is the move`);});
   return{ok:errs.length===0,errors:errs};}
 function defaultLevel(L){L.meta=L.meta??{};L.meta.contract_rev=L.meta.contract_rev??CONTRACT_REV;
   L.envelopes.forEach((h,i)=>{h.verdict=h.verdict??'EMITTED';h.keepers=h.keepers??1;h.wave=h.wave??i;
@@ -300,8 +302,20 @@ const roomById=id=>LEVEL.rooms.find(r=>r.id===id);
 // work dur = min(3.6, .9+2.6·live) (W2-1) · loiter/reap emitted ONLY when the clock
 // attests live≥1 (W1-3) · REJECTED/DENIED hops compile a refusal beat, no transform
 // (W1-6) · arrive carries its approach direction for the seated lean (W1-7).
-let phases=[], reapIdx=-1, loiterGateIdx=-1, loiterArriveIdx=-1, cpGateIdx=-1;
+let phases=[], reapIdx=-1, loiterGateIdx=-1, loiterArriveIdx=-1, cpGateIdx=-1, threads=[];
 const workDur=r=>Math.min(3.6,.9+2.6*r.live);
+// THE THREAD (S3.2): tiles from the clew room BACK along traversed seams to the
+// divergence envelope's ORIGIN room (the junction where the path was last known good).
+function threadTiles(c){
+  const H=LEVEL.envelopes;
+  const seq=[H[c.divergence].from];
+  for(let j=c.divergence;j<H.length&&seq[seq.length-1]!==c.room;j++)
+    if(H[j].from===seq[seq.length-1])seq.push(H[j].to);
+  if(seq[seq.length-1]!==c.room)return hopPath(c.room,H[c.divergence].from); // fallback: direct walk
+  let tiles=[];
+  for(let k2=0;k2<seq.length-1;k2++)tiles=tiles.concat(hopPath(seq[k2],seq[k2+1]));
+  return tiles.reverse();  // the thread pays out FROM the clew room
+}
 function compile(){
   const H=LEVEL.envelopes;
   phases=[{k:'work',room:H[0].from,dur:workDur(roomById(H[0].from)),nh:H[0],
@@ -309,7 +323,23 @@ function compile(){
   // wave disclosure (W2-10): name the fold when a wave carries >1 envelope
   const waves={}; H.forEach(h=>{waves[h.wave??0]=(waves[h.wave??0]||0)+1;});
   const waveNamed=new Set();
+  const clewsUsed=new Set();
   for(let hi=0;hi<H.length;hi++){ const h=H[hi];
+    // THE CLEW (S3.2/3.3): distress drops the thread in the ORIGIN room before the
+    // envelope carries the testimony out. Voluntary and involuntary are the SAME
+    // packet — only dropped_by (and the ◷) differs. Price 2: signed into the chain.
+    let clewHere=null;
+    if(h.verdict==='IMPASSE'){
+      const ci=(LEVEL.clews||[]).findIndex((c,z)=>!clewsUsed.has(z)&&c.room===h.from);
+      if(ci>=0){ clewHere=LEVEL.clews[ci]; clewsUsed.add(ci);
+        const involuntary=clewHere.dropped_by==='watchdog';
+        phases.push({k:'clew',clew:clewHere,room:h.from,tiles:threadTiles(clewHere),dur:2.4,
+          line:involuntary
+            ?`◷ the watchdog drops the thread for <b>${SAN(roomById(h.from).construct)}</b> — ${SAN(clewHere.trigger??'liveness')} spent. signed ⛓`
+            :`<b>${SAN(roomById(h.from).construct)}</b> drops the thread — testimony, signed into the chain ⛓`,
+          cls:'impasse'});
+      }
+    }
     const path=hopPath(h.from,h.to), di=doorIndex(path,h.to);
     // the agent's threshold: the last tile still inside its own chamber
     const cF=roomTile[h.from], RF=RAD(roomById(h.from));
@@ -344,10 +374,21 @@ function compile(){
         ?`◈ the envelope arrives empty-handed but honest — routed, never bounced`
         :`⚡ the handoff transforms the resident — ${SAN(h.transform.line)}`,
       cls:h.verdict==='IMPASSE'?'impasse':'ok'});
+    // THE ROUTING BEAT (S3.2): the dungeon answers the routed testimony.
+    if(clewHere){
+      const c=clewHere, rm=c.room;
+      if(c.routing==='heal') phases.push({k:'heal',room:rm,clew:c,dur:4.2,
+        line:`the dungeon answers — <b>gecko</b> walks in to heal <b>${SAN(roomById(rm).name)}</b>`,cls:'ok'});
+      else if(c.routing==='rotate') phases.push({k:'rotate',room:rm,clew:c,dur:1.6,
+        line:`rotate ↻ — a fresh instance takes the chamber, same entry token`,cls:'impasse'});
+      else phases.push({k:'retrace',room:rm,clew:c,tiles:threadTiles(c),
+        dur:Math.max(1.4,threadTiles(c).length*.05),
+        line:`retrace — back along the thread to the last known-good junction`,cls:'impasse'});
+    }
     const dest=roomById(h.to);
     if(h.loiter&&(dest.live>=1||h.attested)){
       phases.push({k:'loiter',room:h.to,dur:6.5,
-        line:`the clock floods red. <b>${dest.construct}</b> eddies — finds more to read…`,cls:'rage'});
+        line:`the clock floods red. <b>${SAN(dest.construct)}</b> eddies — finds more to read…`,cls:'rage'});
       phases.push({k:'reap',room:h.to,dur:2.8,
         line:`<b>ENRAGE.</b> the reaper comes. <b>REAPED.</b>`,cls:'rage'});
     } else phases.push({k:'work',room:h.to,dur:workDur(dest),nh:H[hi+1]??null});
@@ -362,6 +403,7 @@ function compile(){
   phases.forEach((q,i)=>{ if(q.k==='gate'&&q.h.loiter)loiterGateIdx=i;
     if(q.k==='arrive'&&q.h.loiter)loiterArriveIdx=i;
     if(q.k==='gate'&&q.h.pale)cpGateIdx=i; });
+  threads=[]; phases.forEach((q,i)=>{ if(q.k==='clew')threads.push({c:q.clew,tiles:q.tiles,phaseIdx:i}); });
 }
 
 // ───────────────── canvas + token cache (W1-2: one palette, read once) ────────────
@@ -409,6 +451,7 @@ const VOICE={
   enrage: ()=>{bleep('square',220,180,120,.09);},                    // ×3 pulses via caller
   reap:   ()=>{bleep('sine',55,40,300,.18);nburst(80,.10);},         // the strike
   clear:  ()=>bleep('triangle',520,780,200,.07),                     // the morgue presents
+  clew:   ()=>{bleep('triangle',420,280,180,.06);bleep('sine',210,140,220,.05);},  // the thread pays out
 };
 let lastTurn={}, enrageFired=false, enragePulse=0;
 
@@ -433,6 +476,9 @@ function resetWorld(){
 }
 // one-shot teaching lines (W2-10)
 function teach(key,html){ if(taught.has(key))return; taught.add(key); log(`<i>${html}</i>`,''); }
+// the thread is knowledge: rooms it passes become seen (fog rule, S3.2)
+function revealAlong(tiles){ for(const r of LEVEL.rooms){ if(visited.has(r.id))continue; const c=roomTile[r.id];
+  if(tiles.some(([tx2,ty2])=>Math.max(Math.abs(tx2-c.tx),Math.abs(ty2-c.ty))<=RAD(r))) visited.add(r.id); } }
 function teachClock(id){ if(ck[id]>=.6) teach('clock','the clock yellows — at the flood, the reaper comes'); }
 function gateTeach(h){ if(h.keepers>=2) teach('keys',`${h.keepers} keys — this door trusts no single hand`);
   if(h.verdict==='CHECKPOINT') teach('checkpoint','a checkpoint is not a defeat — the party presents'); }
@@ -454,8 +500,14 @@ function enterPhase(i){ pi=i; pt=0; const p=phases[pi]; if(!p)return;
   if(p.k==='arrive'){ flash={room:p.room,until:simT+.16};
     const c=roomTile[p.room]; ripples.push({x:c.tx*T+T/2,y:c.ty*T+T/2,t0:simT});
     const v=p.h.verdict; badges[p.room].push({g:p.h.transform.badge,
-      c:v==='CHECKPOINT'?TK['--steel']:TK['--gold'],t0:simT});
+      c:v==='CHECKPOINT'?TK['--steel']:v==='IMPASSE'?TK['--impasse']:TK['--gold'],t0:simT});
     visited.add(p.room); VOICE.transform(); }
+  if(p.k==='clew'){ badges[p.room].push({g:p.clew.dropped_by==='watchdog'?'◷':'⛓',c:TK['--impasse'],t0:simT});
+    revealAlong(p.tiles);
+    teach('clew','a clew is free but ends the span — strictly better than loitering, strictly worse than finishing');
+    VOICE.clew(); }
+  if(p.k==='rotate'){ flash={room:p.room,until:simT+.16}; badges[p.room].push({g:'↻',c:TK['--impasse'],t0:simT}); }
+  if(p.k==='heal'){ visited.add(p.room); }
   if(p.k==='end'){ revealAll=true; endT=simT; shelfWrite(); VOICE.clear(); }
 }
 // terminal effects of a COMPLETED phase — seek's replay (W1-1, the pure fold)
@@ -467,11 +519,17 @@ function applyTerminal(i,p){
     case 'work': case 'arrive': { const r=roomById(p.room);
       ck[r.id]=Math.min(r.live, ck[r.id]+r.live/1.4); teachClock(r.id);
       if(p.k==='arrive'){ const v=p.h.verdict;
-        badges[p.room].push({g:p.h.transform.badge,c:v==='CHECKPOINT'?TK['--steel']:TK['--gold'],t0:-9});
+        badges[p.room].push({g:p.h.transform.badge,c:v==='CHECKPOINT'?TK['--steel']:v==='IMPASSE'?TK['--impasse']:TK['--gold'],t0:-9});
         visited.add(p.room); } break; }
     case 'gate': keys[i]=p.h.keepers; gateTeach(p.h); break;
     case 'loiter': ck[p.room]=1; tele=true; enrageFired=true; teachClock(p.room); break;
     case 'reap': reaped=true; struck=true; strikeT=-9; break;
+    case 'clew': badges[p.room].push({g:p.clew.dropped_by==='watchdog'?'◷':'⛓',c:TK['--impasse'],t0:-9});
+      revealAlong(p.tiles);
+      ck[p.room]=Math.max(ck[p.room],roomById(p.room).live);  // the price already paid shows
+      teach('clew','a clew is free but ends the span — strictly better than loitering, strictly worse than finishing'); break;
+    case 'rotate': badges[p.room].push({g:'↻',c:TK['--impasse'],t0:-9}); break;
+    case 'heal': ck[p.room]=Math.min(ck[p.room],.35); visited.add(p.room); break;  // the patch relieves the flood
     case 'end': revealAll=true; break;
   }
 }
@@ -498,7 +556,8 @@ function advance(dt){ if(!playing)return;
 // ───────────────── envelope position — C0-continuous, docked clear of the resident ──
 const dock=id=>{const c=roomTile[id];return{x:c.tx*T+T/2+26,y:c.ty*T+T/2+8};};
 function envPos(){ const p=phases[pi]; if(!p)return null;
-  if(p.k==='work'||p.k==='loiter'||p.k==='reap'||p.k==='end'||p.k==='wait') return dock(p.room);
+  if(p.k==='work'||p.k==='loiter'||p.k==='reap'||p.k==='end'||p.k==='wait'||p.k==='clew') return dock(p.room);
+  if(p.k==='heal'||p.k==='rotate'||p.k==='retrace') return curH?dock(curH.to):dock(p.room);
   if(p.k==='arrive'){ const d=dock(p.room);
     const s=lean(pt); return{x:d.x+p.ax*s,y:d.y+p.ay*s}; }       // the bowl seats (K-2b)
   if(p.k==='carry'||p.k==='travel'||p.k==='enter'||p.k==='refuse'){
@@ -517,7 +576,8 @@ function camTarget(){ const p=phases[pi];
   if(p.k==='carry'||p.k==='travel'||p.k==='enter'||p.k==='gate'||p.k==='refuse'){const e=envPos();return e;}
   const c=roomTile[p.room??0]; return{x:c.tx*T+T/2,y:c.ty*T+T/2}; }
 function activeRoom(){ const p=phases[pi];
-  if(p.k==='work'||p.k==='arrive'||p.k==='loiter'||p.k==='reap'||p.k==='end'||p.k==='wait')return p.room;
+  if(p.k==='work'||p.k==='arrive'||p.k==='loiter'||p.k==='reap'||p.k==='end'||p.k==='wait'
+    ||p.k==='clew'||p.k==='heal'||p.k==='rotate'||p.k==='retrace')return p.room;
   return p.h?p.h.from:0; }
 // THE AGENT IS THE FOCUS (operator spine): it produces, carries to the door, and the
 // receiver comes to its door to collect — residents move, but never leave their room.
@@ -640,6 +700,22 @@ function draw(ts){
       ctx.strokeStyle='#2a3147'; ctx.lineWidth=1; ctx.strokeRect(tx2-tw/2+.5,ty2-10.5,tw-1,14);
       ctx.fillStyle=TK['--dim']; ctx.fillText(hp,tx2,ty2); ctx.textAlign='left'; }
   }
+  // THE THREAD (S3.2): violet polyline from the clew room back along traversed
+  // seams to the last known-good junction — persists once dropped (the dungeon
+  // remembers). Pale toward the far end; ⛓ testimony / ◷ watchdog at the drop.
+  for(const th of threads){ if(pi<th.phaseIdx)continue;
+    const reveal=pi===th.phaseIdx?Math.min(1,pt/1.8):1;
+    const n=Math.max(1,Math.floor(th.tiles.length*reveal));
+    for(let z=0;z<n;z++){ const [ttx,tty]=th.tiles[z];
+      ctx.globalAlpha=.75-.45*(z/th.tiles.length);
+      ctx.fillStyle=TK['--impasse'];
+      ctx.fillRect(ttx*T-camx+T/2-1,tty*T-camy+T/2-1,3,3); }
+    ctx.globalAlpha=1;
+    const [hx,hy]=th.tiles[0];
+    ctx.font='13px ui-monospace'; ctx.textAlign='center'; ctx.fillStyle=TK['--impasse'];
+    ctx.fillText(th.c.dropped_by==='watchdog'?'◷':'⛓',hx*T-camx+T/2,hy*T-camy+T/2-10);
+    ctx.textAlign='left';
+  }
   // rooms: the AGENT is the focus (labelled ◆ construct, moves within its room);
   // the ROOM is the task (uppercase plate on the chamber's top wall)
   for(const r of LEVEL.rooms){ if(!isVisited(r.id))continue;
@@ -704,6 +780,31 @@ function draw(ts){
       ctx.globalAlpha=.65; ctx.fillStyle='#fff';
       ctx.fillRect((rc.tx-2)*T-camx,(rc.ty-2)*T-camy,5*T,5*T); ctx.globalAlpha=1; }
   }
+  // THE SUMMON (S3.2 heal): GECKO walks in along the thread — the reaper's
+  // entrance choreography at friendly tempo. inspect (2-beat) · patch · exit.
+  if(p.k==='heal'){ const rc=roomTile[p.room];
+    const cx2=rc.tx*T+T/2-camx, cy2=rc.ty*T+T/2-camy;
+    const th=threads.find(t=>t.c===p.clew);
+    const far=th&&th.tiles.length>4?th.tiles[Math.min(6,th.tiles.length-1)]:[rc.tx+3,rc.ty];
+    const fx2=far[0]*T+T/2-camx, fy2=far[1]*T+T/2-camy;
+    let gx2,gy2;
+    if(pt<1.2){ const t2=pt/1.2; gx2=fx2+(cx2+22-fx2)*t2; gy2=fy2+(cy2-6-fy2)*t2; }
+    else if(pt<2.8){ gx2=cx2+22; gy2=cy2-6+(Math.floor((pt-1.2)/.8)%2?2:0); }  // 2-beat inspect
+    else if(pt<3.2){ gx2=cx2+22; gy2=cy2-6;
+      if(pt>=2.9&&pt<2.99){ ctx.globalAlpha=.5; ctx.fillStyle='#fff';        // the patch — door re-renders
+        ctx.fillRect((rc.tx-2)*T-camx,(rc.ty-2)*T-camy,5*T,5*T); ctx.globalAlpha=1; } }
+    else { const t2=(pt-3.2)/1; gx2=cx2+22+(fx2-cx2-22)*t2; gy2=cy2-6+(fy2-cy2+6)*t2; }
+    sprite(ctx,'gecko',gx2-16,gy2-18,2,TK['--ok']);
+  }
+  // RETRACE (S3.2): the envelope ghosts BACK along the thread, pale violet
+  if(p.k==='retrace'&&p.tiles&&p.tiles.length){ const n2=p.tiles.length;
+    const f2=Math.min(1,pt/p.dur)*(n2-1), i2=Math.min(n2-2,Math.floor(f2)), u2=f2-i2;
+    const a2=p.tiles[i2], b2=p.tiles[Math.min(n2-1,i2+1)];
+    const rx=(a2[0]+(b2[0]-a2[0])*u2)*T+T/2-camx, ry2=(a2[1]+(b2[1]-a2[1])*u2)*T+T/2-camy;
+    ctx.save(); ctx.translate(rx,ry2); ctx.rotate(Math.PI/4); ctx.globalAlpha=.6;
+    ctx.fillStyle='#b8b0f0'; ctx.fillRect(-5,-5,10,10);
+    ctx.fillStyle=TK['--bg']; ctx.fillRect(-2,-2,5,5); ctx.globalAlpha=1; ctx.restore();
+  }
   // transform ripples (E-3): one ring, 360ms, once
   ripples=ripples.filter(rp=>simT-rp.t0<.36);
   for(const rp of ripples){ const q=(simT-rp.t0)/.36;
@@ -730,12 +831,17 @@ function draw(ts){
     if(blink){ ctx.fillStyle=pale?'#dfe9f5':'#fff3d0'; ctx.fillRect(-1,-1,2,2); }
     ctx.globalAlpha=1; ctx.restore();
   }
-  // torch FOV — iris contracts at the telegraph, opens at the end-reveal
+  // torch FOV — iris contracts at the telegraph, opens at the end-reveal.
+  // Thread beats (clew/heal/rotate/retrace) OWN the torch: the iris opens and
+  // centers on the distress room — the dungeon shows you the thread (S3.2).
+  const threadBeat=p.k==='clew'||p.k==='heal'||p.k==='rotate'||p.k==='retrace';
   let fovT=.46;
   if(tele&&reapIdx>=0&&pi<=reapIdx) fovT=.40;
+  if(threadBeat) fovT=.78;
   if(endT>=0) fovT=.46+(0.85-.46)*Math.min(1,(simT-endT)/2.5);
   fovCur+=(fovT-fovCur)*Math.min(1,dt*2);
-  const fx=e?e.x-camx:W/2, fy=e?e.y-camy:H/2;
+  const beatC=threadBeat?roomTile[p.room]:null;
+  const fx=beatC?beatC.tx*T+T/2-camx:(e?e.x-camx:W/2), fy=beatC?beatC.ty*T+T/2-camy:(e?e.y-camy:H/2);
   const fov=ctx.createRadialGradient(fx,fy-6,40, fx,fy-6, Math.min(W,H)*fovCur);
   fov.addColorStop(0,'rgba(255,179,71,0.07)'); fov.addColorStop(.45,'rgba(6,7,13,0)');
   fov.addColorStop(.86,'rgba(4,5,10,.78)'); fov.addColorStop(1,'rgba(2,2,6,.98)');
@@ -756,6 +862,12 @@ function drawMorgue(){
     ['REAPED',`×${reaped?1:0}`,TK['--rage']],
     ['salvage',`${LEVEL.envelopes.filter(h=>h.verdict==='CHECKPOINT').length} checkpoint accepted`,TK['--steel']],
   ];
+  // THE THREE PRICES (S3.3): the clew row + the ordering, derived
+  if((LEVEL.clews||[]).length){
+    const vol=LEVEL.clews.filter(c=>c.dropped_by==='agent').length;
+    rows.push(['clews ⛓',`${LEVEL.clews.length} dropped — ${vol} testimony · ${LEVEL.clews.length-vol} watchdog ◷`,TK['--impasse']]);
+    rows.push(['the prices','loiter burns > clew > finish',TK['--dim']]);
+  }
   const deep=LEVEL.rooms.reduce((a,r)=>ck[r.id]>ck[a.id]?r:a,LEVEL.rooms[0]);
   rows.push(['deepest clock',`${deep.construct} ${Math.round(ck[deep.id]*100)}%`,liveCol(ck[deep.id])]);
   rows.push(['run time',`~${Math.round(phases.reduce((s,q)=>s+(q.dur<1e8?q.dur:0),0))}s @1×`,TK['--dim']]);

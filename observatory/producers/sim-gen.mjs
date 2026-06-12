@@ -14,9 +14,18 @@
 // is the substrate's own doctrine — present at the gate before the flood.
 // Same seed → byte-identical LevelData (obs-level/1) → asson golden vectors.
 import { readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateLevel, defaultLevel, SCHEMA, CONTRACT_REV } from "../contract/level-contract.mjs";
+
+// JCS-flavored digest (S3.1): sha256 over sorted-key, no-whitespace JSON.
+// Our packets are flat string/int objects — sorted JSON.stringify IS RFC 8785
+// canonical form for them. Producer and verifier agree by spec (IMP-004/006).
+const jcsDigest = (obj) => {
+  const sorted = JSON.stringify(obj, Object.keys(obj).sort());
+  return "sha256:" + createHash("sha256").update(sorted).digest("hex");
+};
 
 // rev 2: gates are DECLARED data joined from the hardness manifest (SDD §3.4).
 // Reading a checked-in file is deterministic; the vectors pin manifest+sim together.
@@ -35,6 +44,9 @@ const SEED = Number(opt("seed", 7));
 const GREED = Math.max(0, Math.min(1, Number(opt("greed", .5))));
 const DISC = Math.max(0, Math.min(1, Number(opt("discipline", .5))));
 const NROOMS = Math.max(2, Math.min(12, Number(opt("rooms", 6))));
+// §3.3-amendment (S3.1): --stuck N plants a QUALITY WALL at room N (not a hang —
+// returns plateau below every present threshold; the real failure mode, S1.4).
+const STUCK = Number.isInteger(Number(opt("stuck", NaN))) ? Number(opt("stuck")) : -1;
 
 // mulberry32 — tiny seeded RNG; determinism is the contract
 function rng(seed) { let a = seed >>> 0; return () => {
@@ -62,7 +74,44 @@ for (let i = 0; i < NROOMS; i++) {
 rooms.forEach((r, i) => { if (r.gy % 2 === 1) r.gx = 3 - (i % 4); });
 
 let reapedAt = -1;
+const clews = [];
 for (let i = 0; i < NROOMS - 1; i++) {
+  // ── the stuck room (S3.1): a quality wall. Distress is a legal, rendered move. ──
+  if (i === STUCK) {
+    const wall = .25 + R() * .08;              // returns asymptote — below every present bar
+    const plateauAt = wall * (.04 + .1 * DISC); // discipline recognizes futility sooner
+    let q = 0, clock = 0, gain = Infinity;
+    const voluntary = DISC >= .5;              // discipline testifies at the plateau
+    while (clock < 1) {
+      clock += .07 + R() * .05;
+      gain = (.16 + R() * .1) * (wall - q); q += gain;   // asymptote: the wall
+      if (voluntary && gain <= plateauAt) break;         // the testimony beat
+    }
+    if (!voluntary) { clock = 1; }             // the grind: burns to the flood
+    rooms[i].live = voluntary ? Math.min(1, Math.round(clock * 100) / 100) : 1;
+    // divergence = last ATTESTED junction (APPROVED/CHECKPOINT) — EMITTED passed
+    // unattested and cannot anchor the thread. None attested → the entrance (0).
+    let divergence = 0;
+    for (let j = envelopes.length - 1; j >= 0; j--)
+      if (envelopes[j].verdict === "APPROVED" || envelopes[j].verdict === "CHECKPOINT") { divergence = j; break; }
+    const packet = {
+      run_id: `sim-seed-${SEED}`, room: i, divergence, routing: "heal",
+      dropped_by: voluntary ? "agent" : "watchdog",
+      ...(voluntary ? {} : { trigger: "budget" }),
+      clock: Math.round(clock * 100) / 100, quality: Math.round(q * 100) / 100,
+    };
+    clews.push({ room: i, divergence, routing: "heal",
+      dropped_by: packet.dropped_by, ...(voluntary ? {} : { trigger: "budget" }),
+      packet_digest: jcsDigest(packet) });
+    seams.push([i, i + 1]);
+    envelopes.push({ from: i, to: i + 1, payload: "distress packet", keepers: 1,
+      verdict: "IMPASSE", wave: i, gate: gateFor(i),
+      gateline: voluntary
+        ? `the envelope presents empty-handed — quality walled at ${Math.round(q * 100)}%. the agent drops the thread.`
+        : `the flood takes the chamber — the watchdog drops the thread. ◷ budget spent, quality ${Math.round(q * 100)}%.`,
+      transform: { badge: "◈", line: `routed onward — <b>${rooms[i + 1].construct}</b> receives the testimony` } });
+    continue;
+  }
   const difficulty = .3 + R() * .6;            // how much reading the task truly needs
   // work loop: each tick burns clock, buys diminishing quality
   let q = 0, clock = 0;
@@ -115,9 +164,9 @@ if (!rooms[NROOMS - 1].live) rooms[NROOMS - 1].live = Math.round((.2 + R() * .3)
 
 const level = defaultLevel({
   schema: SCHEMA, id: `sim-${SEED}`, name: `the gradient, played (greed ${GREED} · discipline ${DISC})`,
-  meta: { run_id: `sim-seed-${SEED}`, generated_at: `sim:${SEED}:${GREED}:${DISC}`, contract_rev: CONTRACT_REV,
-    enrage_s: 300, sources: { simulator: "sim-gen.mjs", seed: SEED, greed: GREED, discipline: DISC } },
-  rooms, seams, envelopes,
+  meta: { run_id: `sim-seed-${SEED}`, generated_at: `sim:${SEED}:${GREED}:${DISC}${STUCK >= 0 ? `:stuck${STUCK}` : ""}`, contract_rev: CONTRACT_REV,
+    enrage_s: 300, sources: { simulator: "sim-gen.mjs", seed: SEED, greed: GREED, discipline: DISC, ...(STUCK >= 0 ? { stuck: STUCK } : {}) } },
+  rooms, seams, envelopes, ...(clews.length ? { clews } : {}),
 });
 const v = validateLevel(level);
 if (!v.ok) { console.error("✗ sim emitted an invalid level:"); v.errors.forEach(e => console.error("  · " + e)); process.exit(2); }

@@ -71,6 +71,25 @@ level.clews = [{
 ```
 Render: a violet thread polyline from the clew room back along traversed seams to the divergence envelope's room; routing beats — **retrace**: the envelope walks BACK along the thread (reverse travel, pale violet); **rotate**: the resident sprite swaps for a fresh instance (flash + same room, badge ↻); **heal**: the GECKO sprite walks in from the nearest corridor (the summon — reuses the reaper's entrance choreography at friendly tempo), inspects (2-beat), patches (door re-renders), exits. Watchdog-dropped clews render identically with a `◷` badge (involuntary) — voluntary and involuntary emit the same packet shape, per the three-prices doctrine.
 
+**§3.3-AMENDMENT (S1.4 re-grounding spike, 2026-06-12 — IMP-005, gates S3.4).**
+The flatlined text above derives the watchdog from `livenessVerdict` alone. S1.4
+forensics DISPROVED A-3: the observed loiterer was **fully live** (varied tool calls,
+14 min / 68 calls against a declared ceiling of 2) — a liveness watchdog would never
+have fired. The clew mechanics re-ground as follows:
+
+- **Watchdog trigger taxonomy**: the involuntary clew fires on EITHER
+  (a) `liveness` — `livenessVerdict` failure (the original mechanism), OR
+  (b) `budget` — per-stage budget exhaustion (calls/tick ceiling exceeded: the
+  loiter case; substrate evidence: compose-calls-ceiling, hardness-manifest).
+- **Contract**: `clews[].trigger: "liveness" | "budget"` joins rev 2 as an OPTIONAL
+  field (absent on voluntary clews — the agent's testimony needs no trigger).
+  Packet shape otherwise unchanged; the amendment is the trigger taxonomy, not the schema.
+- **Sim mechanics (S3.1)**: the stuck condition is a QUALITY WALL (diminishing returns
+  plateau below the present threshold), not a hang — matching the real failure mode.
+  High discipline → the agent drops the voluntary clew at the plateau (testimony);
+  low discipline → it grinds to the flood and the watchdog drops the involuntary clew
+  with `trigger: "budget"`.
+
 **Re-grounding A-1**: the watchdog authority is `@freeside/asson/liveness#livenessVerdict` (exists, this branch). The REAL-substrate clew verb (asson-graduated `clew drop`) is **out of MVP** — this cycle renders the mechanics and simulates them; runtime emission lands with FR-G/asson ladder. The contract is designed so the future verb emits exactly this shape.
 
 ### 3.4 Hardness manifest (`contract/hardness-manifest.json`)
