@@ -592,29 +592,38 @@ sys.stdout.write("STDERR:" + buf.getvalue().replace("\n", " ").strip() + "\n")
 PY
 }
 
-@test "intel: explicit intelligence_tier cheap->sonnet (SoT), standard->sonnet, deep->opus, tiny->haiku" {
+@test "intel: explicit intelligence_tier cheap->sonnet (SoT), standard->opus (singleton-up), deep->opus, tiny->haiku" {
     # cheap ≡ sonnet per the hounfour SoT reconciliation (2026-06-07, arrakis-d72w);
-    # tiny is the explicit haiku route (home vocabulary).
+    # tiny is the explicit haiku route (home vocabulary); standard/mid ≡ opus under
+    # the singleton-up regime (2026-06-12, issue #40).
     [[ "$(_resolve_model '{"intelligence_tier":"cheap","role":"primary"}')" == "sonnet" ]] || fail "cheap must map to sonnet (hounfour SoT)"
-    [[ "$(_resolve_model '{"intelligence_tier":"standard","role":"primary"}')" == "sonnet" ]] || fail "standard should map to sonnet"
+    [[ "$(_resolve_model '{"intelligence_tier":"standard","role":"primary"}')" == "opus" ]] || fail "standard should map to opus (singleton-up, #40)"
     [[ "$(_resolve_model '{"intelligence_tier":"deep","role":"primary"}')" == "opus" ]] || fail "deep should map to opus"
     [[ "$(_resolve_model '{"intelligence_tier":"tiny","role":"primary"}')" == "haiku" ]] || fail "tiny should map to haiku"
 }
 
-@test "intel: default-by-role — gather/explore->haiku, gate/craft-gate/judge->opus, primary/work->sonnet" {
+@test "intel: default-by-role — gather->haiku, gate/craft-gate/judge->opus, primary/work->opus (singleton-up)" {
     [[ "$(_resolve_model '{"role":"gather"}')" == "haiku" ]] || fail "gather (no tier) should default to haiku"
-    [[ "$(_resolve_model '{"role":"explore"}')" == "haiku" ]] || fail "explore (no tier) should default to haiku"
     [[ "$(_resolve_model '{"role":"gate"}')" == "opus" ]] || fail "gate (no tier) should default to opus"
     [[ "$(_resolve_model '{"role":"craft-gate"}')" == "opus" ]] || fail "craft-gate (no tier) should default to opus"
     [[ "$(_resolve_model '{"role":"judge"}')" == "opus" ]] || fail "judge (no tier) should default to opus"
-    [[ "$(_resolve_model '{"role":"primary"}')" == "sonnet" ]] || fail "primary (no tier) should default to sonnet"
-    [[ "$(_resolve_model '{"role":"work"}')" == "sonnet" ]] || fail "work (no tier) should default to sonnet"
+    [[ "$(_resolve_model '{"role":"primary"}')" == "opus" ]] || fail "primary (no tier) should default to opus (singleton-up, #40)"
+    [[ "$(_resolve_model '{"role":"work"}')" == "opus" ]] || fail "work (no tier) should default to opus (singleton-up, #40)"
 }
 
-@test "intel: unrecognized/missing role with no tier -> sonnet (conservative default)" {
-    [[ "$(_resolve_model '{"role":"frobnicate"}')" == "sonnet" ]] || fail "unrecognized role must conservatively default to sonnet, never haiku"
-    [[ "$(_resolve_model '{}')" == "sonnet" ]] || fail "missing role must conservatively default to sonnet"
-    [[ "$(_resolve_model '{"role":null}')" == "sonnet" ]] || fail "null role must conservatively default to sonnet"
+@test "intel #40: explore (no tier) -> opus — open-ended exploration is reasoning-wide, NEVER haiku" {
+    # 'explore' was removed from the CHEAP role set (issue #40): a sonnet grounding/
+    # DIG room loitered ~14 min / 68 calls without converging; an explore room on
+    # haiku is that failure class amplified. Exploration falls to the standard
+    # (opus) default; mechanical fan-out legs keep their explicit cheap tokens.
+    [[ "$(_resolve_model '{"role":"explore"}')" == "opus" ]] || fail "explore (no tier) must default to opus (loiter class, #40)"
+    [[ "$(_resolve_model '{"role":"explore"}')" != "haiku" ]] || fail "explore must never default to haiku (#40)"
+}
+
+@test "intel: unrecognized/missing role with no tier -> opus (singleton default, #40)" {
+    [[ "$(_resolve_model '{"role":"frobnicate"}')" == "opus" ]] || fail "unrecognized role must default to opus (singleton-up), never haiku"
+    [[ "$(_resolve_model '{}')" == "opus" ]] || fail "missing role must default to opus (singleton-up)"
+    [[ "$(_resolve_model '{"role":null}')" == "opus" ]] || fail "null role must default to opus (singleton-up)"
 }
 
 @test "intel: GATE-NEVER-HAIKU — craft-gate + explicit intelligence_tier cheap still resolves to opus" {
@@ -654,15 +663,15 @@ EOF
     # one model: per stage (3), each a quoted alias literal next to agentType.
     [[ "$(grep -c 'model: "' "$js")" -eq 3 ]] || fail "expected one model: per agent() site (3), got $(grep -c 'model: "' "$js")"
     grep -q 'agentType: "construct-explorer", model: "haiku"' "$js" || fail "gather role should emit model:haiku"
-    grep -q 'agentType: "construct-worker", model: "opus"' "$js" || fail "explicit deep should emit model:opus (upgrade)"
-    grep -q 'agentType: "construct-finisher", model: "sonnet"' "$js" || fail "primary role should emit model:sonnet (conservative default)"
+    grep -q 'agentType: "construct-worker", model: "opus"' "$js" || fail "explicit deep should emit model:opus"
+    grep -q 'agentType: "construct-finisher", model: "opus"' "$js" || fail "primary role should emit model:opus (singleton-up default, #40)"
 }
 
 @test "intel: emitted iterating .workflow.js injects model: in preamble/work/gate — gate floored at opus" {
     command -v node >/dev/null || skip "node not available"
-    # preamble stage (read=cheap), loop work (work=sonnet), craft-gate carrying an
-    # EXPLICIT cheap tier — which MUST still emit model:opus (the conservative guard
-    # surfaced in the emitted source, not just the resolver).
+    # preamble stage (read=cheap), loop work (work=opus, singleton-up), craft-gate
+    # carrying an EXPLICIT cheap tier — which MUST still emit model:opus (the
+    # conservative guard surfaced in the emitted source, not just the resolver).
     cat > "$TMPROOT/intel-iter.yaml" <<'EOF'
 schema_version: "1.4"
 kind: workflow
@@ -681,7 +690,7 @@ EOF
     run node "$SYNTAX" "$js"; [[ "$status" -eq 0 ]] || fail "syntax check failed: $output"
     [[ "$(grep -c 'model: "' "$js")" -eq 3 ]] || fail "expected 3 model: sites (preamble+work+gate), got $(grep -c 'model: "' "$js")"
     grep -q 'agentType: "construct-reader", model: "haiku"' "$js" || fail "preamble read role should emit model:haiku"
-    grep -q 'agentType: "construct-worker", model: "sonnet"' "$js" || fail "loop work role should emit model:sonnet"
+    grep -q 'agentType: "construct-worker", model: "opus"' "$js" || fail "loop work role should emit model:opus (singleton-up, #40)"
     grep -q 'agentType: "construct-reviewer", model: "opus"' "$js" || fail "craft-gate+cheap MUST emit model:opus (GATE-NEVER-HAIKU in emitted source)"
     ! grep -q 'agentType: "construct-reviewer", model: "haiku"' "$js" || fail "gate must NEVER be emitted on haiku"
 }
@@ -689,38 +698,43 @@ EOF
 # --- BB review on #20: token-match (no substring collisions) + invalid-tier warn ---
 # R-F002: role classification is TOKEN-EXACT, not substring. The three collision
 # classes the substring matcher produced are now GONE — every collision role matches
-# NEITHER set and falls to the conservative sonnet default.
+# NEITHER set and falls to the standard (opus, singleton-up) default. Since the
+# else-default and the deep floor are now BOTH opus, the discriminator for "not
+# deep-classified" is an explicit tiny tier: a deep-role stage floors tiny UP to
+# opus, a neither-set role keeps haiku.
 
-@test "intel R-F002: 'thread-merge' (no tier) -> sonnet (NOT haiku via the old 'read' substring)" {
+@test "intel R-F002: 'thread-merge' (no tier) -> opus standard default (NOT haiku via the old 'read' substring)" {
     # "thread-merge" tokenizes to {thread, merge}; neither is a CHEAP token. The old
     # substring matcher saw 'read' inside 'thREAD' and wrongly downgraded to haiku —
-    # the DANGEROUS false-cheap class. Token-exact resolves it to sonnet.
-    [[ "$(_resolve_model '{"role":"thread-merge"}')" == "sonnet" ]] || fail "thread-merge must be sonnet, never haiku via 'read' substring"
+    # the DANGEROUS false-cheap class. Token-exact resolves it to the standard default.
+    [[ "$(_resolve_model '{"role":"thread-merge"}')" == "opus" ]] || fail "thread-merge must take the standard default, never haiku via 'read' substring"
     [[ "$(_resolve_model '{"role":"thread-merge"}')" != "haiku" ]] || fail "thread-merge wrongly downgraded to haiku (substring collision)"
 }
 
-@test "intel R-F002: 'navigate-flow' (no tier) -> sonnet (NOT opus via the old 'gate' substring)" {
+@test "intel R-F002: 'navigate-flow' is NOT deep-classified via the old 'gate' substring (tiny discriminator)" {
     # "navigate-flow" tokenizes to {navigate, flow}; neither is a DEEP token. The old
-    # substring matcher saw 'gate' inside 'naviGATE' and over-promoted to opus.
-    # Over-promotion is merely wasteful (not unsafe), but assert the precise result.
-    [[ "$(_resolve_model '{"role":"navigate-flow"}')" == "sonnet" ]] || fail "navigate-flow must be sonnet, never opus via 'gate' substring"
+    # substring matcher saw 'gate' inside 'naviGATE' and deep-classified it. With the
+    # else-default now opus, the bare result no longer discriminates — but the deep
+    # FLOOR does: a deep-classified role floors an explicit tiny UP to opus, while a
+    # neither-set role keeps haiku.
+    [[ "$(_resolve_model '{"role":"navigate-flow","intelligence_tier":"tiny"}')" == "haiku" ]] || fail "navigate-flow+tiny must stay haiku — opus means it was deep-classified via 'gate' substring"
     # also the original BB phrasing "navigate-x":
-    [[ "$(_resolve_model '{"role":"navigate-x"}')" == "sonnet" ]] || fail "navigate-x must be sonnet, never opus via 'gate' substring"
+    [[ "$(_resolve_model '{"role":"navigate-x","intelligence_tier":"tiny"}')" == "haiku" ]] || fail "navigate-x+tiny must stay haiku — opus means 'gate' substring collision returned"
 }
 
-@test "intel R-F002: 'preview-pane' (no tier) -> sonnet (NOT opus via the old 'review' substring)" {
-    # "preview-pane" tokenizes to {preview, pane}; neither is a DEEP token. The old
-    # substring matcher saw 'review' inside 'pREVIEW' and over-promoted to opus.
-    [[ "$(_resolve_model '{"role":"preview-pane"}')" == "sonnet" ]] || fail "preview-pane must be sonnet, never opus via 'review' substring"
+@test "intel R-F002: 'preview-pane' is NOT deep-classified via the old 'review' substring (tiny discriminator)" {
+    # "preview-pane" tokenizes to {preview, pane}; neither is a DEEP token. Same
+    # tiny-floor discriminator as navigate-flow above.
+    [[ "$(_resolve_model '{"role":"preview-pane","intelligence_tier":"tiny"}')" == "haiku" ]] || fail "preview-pane+tiny must stay haiku — opus means 'review' substring collision returned"
 }
 
-@test "intel R-F004: invalid intelligence_tier on a non-deep role -> role default (sonnet) + stderr warning" {
+@test "intel R-F004: invalid intelligence_tier on a non-deep role -> role default (opus) + stderr warning" {
     # An invalid (set-but-unrecognized) tier is an authoring error: warn (naming the
     # bad value + valid tiers) and fall through to the role default — never silently
     # ignore, never raise.
     run _resolve_model_stderr '{"role":"primary","intelligence_tier":"medium"}'
     [[ "$status" -eq 0 ]] || fail "resolver errored: $output"
-    [[ "$(echo "$output" | head -1)" == "sonnet" ]] || fail "invalid tier on primary must fall to sonnet, got $(echo "$output" | head -1)"
+    [[ "$(echo "$output" | head -1)" == "opus" ]] || fail "invalid tier on primary must fall to opus (singleton-up), got $(echo "$output" | head -1)"
     echo "$output" | grep -q 'STDERR:.*invalid intelligence_tier' || fail "expected a stderr warning naming the invalid tier; got: $output"
     echo "$output" | grep -q "medium" || fail "warning should name the invalid value 'medium'"
     echo "$output" | grep -qE 'cheap.*standard.*deep' || fail "warning should list the valid tiers"
@@ -1018,8 +1032,10 @@ JSON
     [[ "$(_resolve_model '{"role":"primary","intelligence_tier":"max"}')" == "fable" ]] || fail "max must route to fable on a work stage"
 }
 
-@test "intel max-tier: mid routes to sonnet (hounfour ladder unified)" {
-    [[ "$(_resolve_model '{"role":"primary","intelligence_tier":"mid"}')" == "sonnet" ]] || fail "mid must route to sonnet"
+@test "intel max-tier: mid routes to opus (singleton-up regime, #40)" {
+    # mid tracked sonnet under the metered ladder; under the subscription regime it
+    # tracks the operator's effective hounfour override (mid -> opus).
+    [[ "$(_resolve_model '{"role":"primary","intelligence_tier":"mid"}')" == "opus" ]] || fail "mid must route to opus (singleton-up, #40)"
 }
 
 @test "intel max-tier: gate-class stage with explicit max -> fable (opt-in UPGRADE allowed)" {
@@ -1040,7 +1056,67 @@ JSON
 }
 
 @test "intel max-tier: invalid tier still falls back by role (R-F004 unchanged)" {
-    [[ "$(_resolve_model '{"role":"primary","intelligence_tier":"mega"}')" == "sonnet" ]] || fail "invalid tier must fall back to role default"
+    [[ "$(_resolve_model '{"role":"primary","intelligence_tier":"mega"}')" == "opus" ]] || fail "invalid tier must fall back to role default (opus, singleton-up)"
+}
+
+# =============================================================================
+# Relative gate floor (2026-06-12, issue #40) — the R-F003 end-state activated:
+# a gate resolves to at least the highest NON-gate peer in its segment.
+# =============================================================================
+
+# Resolve a stage dict against a segment peer list via _resolve_model_in_segment.
+_resolve_in_segment() {
+    python3 - "$EMIT" "$1" "$2" <<'PY'
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("se", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m._resolve_model_in_segment(json.loads(sys.argv[2]), json.loads(sys.argv[3])))
+PY
+}
+
+@test "intel rel-floor: gate lifts to the highest work peer — max work -> fable gate" {
+    # "The gate is never cheaper than the work it gates" now holds by construction
+    # above the static opus floor too.
+    [[ "$(_resolve_in_segment '{"role":"craft-gate"}' '[{"role":"work","intelligence_tier":"max"}]')" == "fable" ]] || fail "gate must lift to fable when a work peer runs fable"
+}
+
+@test "intel rel-floor: opus work does not change the gate (static floor already opus)" {
+    [[ "$(_resolve_in_segment '{"role":"craft-gate"}' '[{"role":"work"}]')" == "opus" ]] || fail "opus work -> opus gate (unchanged)"
+    [[ "$(_resolve_in_segment '{"role":"craft-gate"}' '[{"role":"gather","intelligence_tier":"tiny"}]')" == "opus" ]] || fail "tiny work never drags the gate below the static floor"
+}
+
+@test "intel rel-floor: deep-role peers do NOT lift the gate (work peers only)" {
+    # A max-tier sibling GATE is not 'work this gate gates' — only non-deep peers lift.
+    [[ "$(_resolve_in_segment '{"role":"craft-gate"}' '[{"role":"review","intelligence_tier":"max"}]')" == "opus" ]] || fail "a deep-role peer must not lift the gate"
+}
+
+@test "intel rel-floor: non-gate stages pass through unchanged (safe to call uniformly)" {
+    [[ "$(_resolve_in_segment '{"role":"gather","intelligence_tier":"tiny"}' '[{"role":"work","intelligence_tier":"max"}]')" == "haiku" ]] || fail "non-deep stage must pass through _resolve_model unchanged"
+}
+
+@test "intel rel-floor: explicit max on the gate survives (already >= every peer)" {
+    [[ "$(_resolve_in_segment '{"role":"craft-gate","intelligence_tier":"max"}' '[{"role":"work"}]')" == "fable" ]] || fail "explicit max gate must stay fable"
+}
+
+@test "intel rel-floor: emitted iterating JS — max work stage lifts the gate literal to fable" {
+    command -v node >/dev/null || skip "node not available"
+    cat > "$TMPROOT/intel-relfloor.yaml" <<'EOF'
+schema_version: "1.4"
+kind: workflow
+name: intel-relfloor-emit
+description: relative gate floor emit probe
+intent: "I want to confirm a max-tier work stage lifts the gate to fable in the emitted source."
+iterate: [[1, 2]]
+max_iterations: 2
+terminate_when: gate approves
+chain:
+  - {stage: 1, construct: worker, role: work, intelligence_tier: max}
+  - {stage: 2, construct: reviewer, role: craft-gate, iterates_with: 1}
+EOF
+    local js; js="$(_emit_from "$TMPROOT/intel-relfloor.yaml" 0)"
+    run node "$SYNTAX" "$js"; [[ "$status" -eq 0 ]] || fail "syntax check failed: $output"
+    grep -q 'agentType: "construct-worker", model: "fable"' "$js" || fail "max work stage should emit model:fable"
+    grep -q 'agentType: "construct-reviewer", model: "fable"' "$js" || fail "gate must lift to fable alongside fable work (relative floor)"
 }
 
 # =============================================================================
@@ -1069,13 +1145,24 @@ _cost_card() {
     # 3 iterations × 2 retry attempts = 6 ceiling calls per stage
     [ "$(echo "$output" | jq -r '.stages[0].calls_ceiling')" = "6" ]
     [ "$(echo "$output" | jq -r '.stages[1].model')" = "opus" ]
-    [ "$(echo "$output" | jq -r '.by_model.opus.calls')" = "6" ]
+    # both stages resolve opus under singleton-up (work primary + gate): 6 + 6
+    [ "$(echo "$output" | jq -r '.by_model.opus.calls')" = "12" ]
 }
 
 @test "cost-card: gate floor visible in the card — default gate costs opus, never haiku" {
     local plan='{"segments":[{"index":0,"kind":"sequential","segment_name":"s","stages":[{"stage":1,"construct":"g","role":"review","intelligence_tier":"tiny"}]}]}'
     run _cost_card "$plan"
     [ "$(echo "$output" | jq -r '.stages[0].model')" = "opus" ]
+}
+
+@test "cost-card: relative gate floor priced — max work peer lifts the gate to fable" {
+    # The card resolves with _resolve_model_in_segment, so a gate sharing a segment
+    # with max-tier work is PRICED at fable — the card can never understate a gate.
+    local plan='{"segments":[{"index":0,"kind":"iterating","segment_name":"loop","max_iterations":2,"stages":[{"stage":1,"construct":"w","role":"work","intelligence_tier":"max"},{"stage":2,"construct":"g","role":"craft-gate"}]}]}'
+    run _cost_card "$plan"
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | jq -r '.stages[0].model')" = "fable" ]
+    [ "$(echo "$output" | jq -r '.stages[1].model')" = "fable" ]
 }
 
 @test "cost-card: token-envelope env overrides scale the ceiling linearly" {
@@ -1199,5 +1286,5 @@ DAG_RESPONSES='{"general-purpose":{"output":"did the item","rationale":"stub"},"
 
 @test "dag R35: emitted tier map is the python TIER_MODEL by value (no drift)" {
     local js; js="$(_emit_dag_seg)"
-    grep -q 'TIER_MODEL_JS = {"tiny": "haiku", "cheap": "sonnet", "mid": "sonnet", "standard": "sonnet", "deep": "opus", "max": "fable"}' "$js" || fail "tier map must be emitted from the python constant"
+    grep -q 'TIER_MODEL_JS = {"tiny": "haiku", "cheap": "sonnet", "mid": "opus", "standard": "opus", "deep": "opus", "max": "fable"}' "$js" || fail "tier map must be emitted from the python constant"
 }
