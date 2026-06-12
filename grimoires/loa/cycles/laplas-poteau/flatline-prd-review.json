@@ -1,0 +1,254 @@
+{
+  "consensus_summary": {
+    "high_consensus_count": 7,
+    "disputed_count": 1,
+    "low_value_count": 0,
+    "blocker_count": 12,
+    "model_agreement_percent": 91,
+    "models": 3,
+    "tertiary_items": 0,
+    "confidence": "full"
+  },
+  "high_consensus": [
+    {
+      "id": "IMP-001",
+      "description": "Strong integration candidate. A gate described only in prose is not auditable, and adding a named PT benchmark plus manifest entry is low cost relative to the benefit of making G-5 falsifiable at close.",
+      "gpt_score": 880,
+      "opus_score": 875,
+      "tertiary_score": 900,
+      "delta": 5,
+      "average_score": 877.5,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-002",
+      "description": "Critical. An unrestricted single-model override directly reintroduces the bypass the requirement is trying to eliminate. Authorization, logging, ceremony state, and receipt semantics are necessary for the fail-closed posture to mean anything.",
+      "gpt_score": 950,
+      "opus_score": 930,
+      "tertiary_score": 950,
+      "delta": 20,
+      "average_score": 940,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-003",
+      "description": "Critical foundational check. If the hook behavior assumption is wrong, the whole enforcement design degrades to advisory. A smoke test before FR-B design work is cheap and prevents building on an invalid premise.",
+      "gpt_score": 930,
+      "opus_score": 915,
+      "tertiary_score": 920,
+      "delta": 15,
+      "average_score": 922.5,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-004",
+      "description": "High ROI because this affects the default path for legacy compositions. Undefined dispatcher behavior on missing fields is likely to cause either runtime failure or accidental permissiveness; specifying fail/default/migration behavior is essential.",
+      "gpt_score": 900,
+      "opus_score": 755,
+      "tertiary_score": 880,
+      "delta": 145,
+      "average_score": 827.5,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-005",
+      "description": "Valuable. Naming the worked example improves schema quality and avoids accidental under-testing of council, routing, and HITL behavior. Slightly less critical than enforcement gaps, but still worth integrating before schema design hardens.",
+      "gpt_score": 760,
+      "opus_score": 830,
+      "tertiary_score": 750,
+      "delta": 70,
+      "average_score": 795,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-006",
+      "description": "Valuable regression anchor. The specific BSD wc issue is narrow, but named fixtures and CI coverage prevent recurrence and may expose similar whitespace-sensitive comparisons. Cost appears modest.",
+      "gpt_score": 720,
+      "opus_score": 870,
+      "tertiary_score": 800,
+      "delta": 150,
+      "average_score": 795,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-008",
+      "description": "Critical bootstrap concern. If the operator-owned hook merge workflow is not specified, the deterministic enforcement transition can fail in a way the agent cannot repair. Commands, verification, and rollback are practical acceptance material.",
+      "gpt_score": 820,
+      "opus_score": 800,
+      "tertiary_score": 860,
+      "delta": 20,
+      "average_score": 810,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    }
+  ],
+  "disputed": [
+    {
+      "id": "IMP-012",
+      "description": "Explicit non-goals for semantic correctness prevent stakeholder over-crediting, which is a real organizational failure mode. However, the PRD already states 'receipts prove process compliance, not semantic quality,' so this is editorial reinforcement rather than a new requirement. Worthwhile for a production-facing PRD; lower priority than the structural gaps above. Would integrate as a polish pass, not a blocker.",
+      "gpt_score": 0,
+      "opus_score": 630,
+      "tertiary_score": 500,
+      "delta": 630,
+      "average_score": 630,
+      "source": "opus_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    }
+  ],
+  "low_value": [],
+  "blockers": [
+    {
+      "id": "SKP-002",
+      "concern": "Assumption A-1 — Stop `decision:block` forces continuation; PreToolUse exit 2 denies with stderr to the model — is deferred to SDD for verification. Every gatekeeper guarantee (G-1, G-2, PT-1 through PT-9) rests on these SDK behaviors being stable, version-stable, and consistent in subagent contexts.",
+      "severity": "CRITICAL",
+      "severity_score": 820,
+      "why_matters": "The core value proposition is hooks-as-law outside the context window. If Stop decision:block does not behave as assumed (e.g., version-gated, undocumented for subagent contexts, silently ignored on certain turn shapes), the gatekeeper P500 fail-closed path degrades silently and the PRD's 'deterministic' posture claim becomes as advisory as the current state.",
+      "location": "§7 Assumption A-1 · §5 failure postures · FR-B · G-1 PT-1",
+      "recommendation": "Verify A-1 behaviors against the exact Claude Code version in this repo BEFORE SDD begins, not during. Pin the SDK version. Add a CI smoke test — call it PT-0 — that exercises decision:block and exit-2 denial in isolation. If PT-0 fails, all other PTs are built on sand and CI must block.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-001",
+      "concern": "Assumption A-2 — compose-dispatch.sh is the single arming point — is stated as an assumption, not enforced by mechanism. An agent can invoke compose skills or room rooms directly without touching compose-dispatch.sh, bypassing the ready-receipt gate entirely. The problem the PRD sets out to solve (advisory posture → deterministic) recurses at its own arming entry point.",
+      "severity": "CRITICAL",
+      "severity_score": 835,
+      "why_matters": "G-4's guarantee collapses if the arming gate is a convention rather than an enforced path. FR-A wires laplas-ready into compose-dispatch, but if dispatch is optional, issue #7 (bypass is cheaper) regenerates at Phase 0: the governed corridor still has an exit ramp at the entrance.",
+      "location": "§7 Assumption A-2 · FR-A gate 0 · G-4",
+      "recommendation": "Promote A-2 from assumption to enforced invariant before SDD. The ready-receipt check must fire from a hook (SubagentStart or PreToolUse on compose-class tools) that activates regardless of which code path is taken — not only inside compose-dispatch.sh. Document the enforcement mechanism in §5 or FR-A; if it stays assumption-only, mark G-4 as advisory-grade.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-003",
+      "concern": "Break-glass (PT-9) is specified as 'sensed and incident-logged' but has no defined authorization model: who can invoke it, via what surface, and whether an agent can self-invoke it. A malfunctioning or adversarial agent that can generate a break-glass invocation has an unconditional enforcement escape.",
+      "severity": "HIGH",
+      "severity_score": 745,
+      "why_matters": "If break-glass is reachable from any in-session path, it becomes the cheapest bypass for legitimate and illegitimate use alike. An agent hitting a blocking gate repeatedly could self-invoke break-glass to escape, converting the fail-closed guarantee into a speed bump.",
+      "location": "§5 honest limits · R-2 mitigation · PT-9",
+      "recommendation": "Define the break-glass invocation surface explicitly: operator-only CLI token, signed operator override, or HITL-gated prompt. Specify that agents cannot self-invoke. Add a per-session maximum-break-glass circuit breaker so repeated invocations escalate to an incident rather than silently accumulating as individual sense events.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-003",
+      "concern": "Break-glass is specified as sensed and incident-logged, but authorization, scope, expiry, and audit requirements are not defined.",
+      "severity": "HIGH",
+      "severity_score": 760,
+      "why_matters": "An escape hatch without strict controls can become the primary bypass path, undermining the fail-closed posture while preserving only after-the-fact observability.",
+      "location": "Risks R-2; Stakeholder P1; FR-F; PT-9 references",
+      "recommendation": "Define break-glass policy before implementation: who may trigger it, required justification, allowed duration, affected surfaces, immutable logging, review flow, and whether repeated use blocks future runs.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-004",
+      "concern": "Contract Fragility: Reliance on undocumented/unstable Claude Code hook behaviors (A-1).",
+      "severity": "HIGH",
+      "severity_score": 720,
+      "why_matters": "The entire enforcement posture depends on the host honoring 'exit 2' and 'decision:block'. If a CLI update changes this behavior, the lattice could silently fail open.",
+      "location": "A-1 · Assumptions",
+      "recommendation": "Add a 'Hook Connectivity Test' to FR-A (Ready Check) that verifies the host environment correctly honors a dummy blocking hook before allowing a ceremony to arm.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-004",
+      "concern": "Council enforcement requires distinct reviewer ids, but does not define reviewer identity, key custody, anti-replay, or independence guarantees.",
+      "severity": "HIGH",
+      "severity_score": 730,
+      "why_matters": "A compromised or misconfigured runner could satisfy the letter of multi-voice review with duplicated models, stale receipts, or spoofed reviewer ids, recreating the silent downgrade risk in a new form.",
+      "location": "FR-D; G-2; FR-E",
+      "recommendation": "Specify council receipt schema, reviewer identity source, signature verification, replay protection, model/provider distinctness rules if required, and tests for duplicate, stale, and forged receipts.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-001",
+      "concern": "Hook Deadlock: Unhandled failures in 'Law' hooks block the entire development environment.",
+      "severity": "CRITICAL",
+      "severity_score": 920,
+      "why_matters": "If a hook crashes (e.g. due to missing 'jq', syntax error, or the 'BSD wc' bug noted in R-5), it will block all tool use, including the tools needed to fix the hook itself.",
+      "location": "FR-B · The lattice lands (poteau, Phase 1)",
+      "recommendation": "Implement a bootstrap 'escape' that allows the operator to bypass hooks via a verified physical action (e.g. an environment variable or a file outside the git root) that is not accessible to the agent.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-003",
+      "concern": "Key Exfiltration: Operator-held keys on the filesystem are accessible to the governed agent.",
+      "severity": "CRITICAL",
+      "severity_score": 880,
+      "why_matters": "If ed25519 keys are stored in the project directory (even with 0600 permissions), a compromised agent can read and exfiltrate them to sign its own future 'ready receipts' or 'council packets'.",
+      "location": "FR-E · Key ceremony + CAS (Phase 4)",
+      "recommendation": "Restrict key access to the hook execution environment only, or use a secure enclave/external KMS that requires a non-agent-accessible secret to sign.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-004",
+      "concern": "P-codes (P201–P606) and PT invariants (PT-1–PT-9) are used as acceptance criteria throughout every FR and Goal section, but are not defined anywhere in this document — their definitions live only in the vendored reference implementation (the zip). If the zip's semantics drift from PRD intent during FR-B, there is no in-document anchor to detect the divergence.",
+      "severity": "HIGH",
+      "severity_score": 715,
+      "why_matters": "Acceptance criteria that live only in vendored code cannot be reviewed at PRD or SDD stage. When a PT-N fails in CI, engineers must reverse-engineer intent from the zip rather than checking a spec. Specification drift between the reference impl and loa conventions becomes invisible until a runtime failure surfaces it.",
+      "location": "§2 Goals · §4 all FRs · §7 R-4",
+      "recommendation": "Add a P-code and PT-code glossary appendix to this PRD (or reference a canonical doc) that defines each code's name, what it checks, and what pass/fail means in loa's context. This is the acceptance criteria contract and must be readable without the zip before SDD can begin.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-002",
+      "concern": "State Corruption: Global paths in '.run/poteau/' create race conditions for parallel runs.",
+      "severity": "HIGH",
+      "severity_score": 780,
+      "why_matters": "The PRD specifies singleton paths like 'ready.json' and 'run-state.json'. Parallel sessions or CI runs will overwrite each other's state, leading to false refusals or security bypasses.",
+      "location": "FR-A, FR-B, FR-C",
+      "recommendation": "Mandate namespacing for all Poteau state by Run ID (matching the existing '.run/compose/<run_id>' pattern) to ensure session isolation.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-001",
+      "concern": "The PRD depends on Claude Code hook behavior as a hard security boundary before re-verifying the exact local runtime contract.",
+      "severity": "CRITICAL",
+      "severity_score": 870,
+      "why_matters": "If Stop or PreToolUse semantics differ by version, shell, platform, or future Claude Code release, the core claim that exits can be deterministically blocked may fail silently or become bypassable.",
+      "location": "Technical & non-functional; Assumption A-1; FR-B; FR-C",
+      "recommendation": "Move hook-contract verification into MVP entry criteria, pin supported Claude Code versions, add compatibility tests for each relied-on hook event, and define fail-safe behavior when the runtime contract is unknown.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-002",
+      "concern": "The bypass model is incomplete: the PRD assumes compose dispatch is the single arming point, but enforcement can be avoided if agents or operators invoke lower-level scripts, tools, or manual workflows outside compose.",
+      "severity": "CRITICAL",
+      "severity_score": 840,
+      "why_matters": "A deterministic gate only protects paths that must pass through it. If the governed corridor is not the only viable execution path, the system may appear hardened while still permitting ungoverned runs.",
+      "location": "Assumption A-2; FR-A; G-1; Scope",
+      "recommendation": "Inventory all execution entrypoints, explicitly classify each as blocked, wrapped, deprecated, or out-of-scope, and add tests proving protected operations cannot be reached without a ready receipt and run-state.",
+      "source": "tertiary_skeptic"
+    }
+  ],
+  "degraded": false,
+  "degraded_model": null,
+  "confidence": "full",
+  "phase": "prd",
+  "document": "grimoires/loa/prd.md",
+  "domain": " product requirements document laplas",
+  "tertiary_model_used": "gemini-headless",
+  "tertiary_status": "active",
+  "execution": {
+    "mode": "hitl",
+    "mode_reason": "Simstim workflow active (.run/simstim-state.json state=RUNNING)",
+    "run_id": null
+  },
+  "timestamp": "2026-06-12T22:14:29Z",
+  "metrics": {
+    "total_latency_ms": 225000,
+    "cost_cents": 0,
+    "cost_usd": 0
+  }
+}
