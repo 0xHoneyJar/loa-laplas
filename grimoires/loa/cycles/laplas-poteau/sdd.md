@@ -1,7 +1,10 @@
 # Software Design Document — Laplas + Poteau Integration
 
 > **Cycle**: laplas-poteau · **PRD**: `grimoires/loa/prd.md` (FLATLINE-REVIEWED, 12 blockers inline)
-> **Status**: DRAFT — pending Flatline SDD review (Phase 4)
+> **Status**: FLATLINE-REVIEWED (3-model: claude+codex+gemini headless · 62% agreement ·
+> 8 HIGH integrated · 6 disputed accepted (gpt+gemini consensus, opus-uncovered) ·
+> 11 blockers → 7 themes addressed inline, none overridden)
+> **Flatline artifact**: `cycles/laplas-poteau/flatline-sdd-review.json`
 > **Design inputs re-grounded**: reference impl read in full (hooks 136 lines, gatekeeper 108,
 > gen 101, ready 100, manifest 35) · this repo's seams located line-anchored
 > (`segment-emitter.py:1095` gate_head — #29's exact site · `compose-dispatch.sh` stage loop ·
@@ -49,6 +52,9 @@ loa-laplas/
 ├── scripts/compose-dispatch.sh  # MOD: gate 0 ready check + per-stage run-state
 ├── scripts/lib/segment-emitter.py      # MOD: TASK/SCOPE into gate_head (#29)
 ├── scripts/poteau-smoke.sh      # NEW — FR-B0 hook-contract smoke test
+├── scripts/council-run.sh       # NEW — FR-D council runner (§4.7)
+├── scripts/poteau-stats.sh      # NEW — FR-G telemetry aggregator (§4.10, wave 3)
+├── docs/poteau-runbook.md       # NEW — operator bootstrap runbook (§4.2, ships S1)
 └── .claude/settings.poteau.json # @generated fragment (gen output, checksummed)
 ```
 
@@ -100,6 +106,21 @@ hooks fragment lives at `.claude/settings.poteau.json` (gen output) and the oper
 merge step appends poteau's hook entries into `.claude/settings.local.json`
 (operator-owned, survives remount) — with `poteau-gen --check` verifying post-merge
 state by checksum and a one-command rollback (delete the merged block, re-verify).
+**Runbook content (IMP-002 — actionable now, shipped as `docs/poteau-runbook.md`)**:
+```bash
+# 1. generate (refuses on drift/missing deps — P401/P302)
+node poteau/bin/poteau-gen.mjs
+# 2. merge (operator-owned; agent never runs this)
+jq -s '.[0] * {hooks: (.[0].hooks // {} | . as $h | .[1].hooks | to_entries
+  | reduce .[] as $e ($h; .[$e.key] = ((.[$e.key] // []) + $e.value)))}' \
+  .claude/settings.local.json .claude/settings.poteau.json > .claude/settings.local.json.new
+mv .claude/settings.local.json.new .claude/settings.local.json
+# 3. verify (checksums + merged-state probe)
+node poteau/bin/poteau-gen.mjs --check
+# 4. rollback (one command)
+jq 'del(.hooks[][] | select(.hooks[]?.command | strings | test("poteau/hooks/")))' \
+  .claude/settings.local.json > .claude/settings.local.json.new && mv .claude/settings.local.json.new .claude/settings.local.json
+```
 **R-5 fix lands here**: `run-demo.sh` numeric compares go through `$((N))`;
 fixture `pt-fixture-portable-compare`; CI matrix ubuntu + macos.
 
@@ -112,18 +133,30 @@ minimal hook config in an isolated project dir; proves four legs mechanically:
    mutation absent on disk.
 3. **Loop guard**: `stop_hook_active` true on the second Stop of a chain.
 4. **UserPromptSubmit injection**: stdout-on-exit-0 lands in context (sentinel echo).
-Output: `.run/poteau/contract-receipt.json` {cc_version, four leg verdicts}. Any leg
-false → exit 1, CYCLE HALTS (PRD FR-B0). CI re-runs on every PR touching `poteau/` or
-the CC version pin; drift = build refusal.
+5. **Combined state (T2/SKP-006)**: a PreToolUse denial fired DURING a stop-blocked
+   continuation chain (`stop_hook_active=true`) with an active injection — the three
+   mechanisms compose; legs proven independently can still interfere.
+**Dual-mode pass criteria (IMP-015)**: all FIVE legs must pass in BOTH interactive and
+`claude -p` headless modes; the receipt records per-mode verdicts. One mode failing =
+exit 1 = HALT (R-7 is a freeze gate, enforced not advisory).
+Output: `.run/poteau/contract-receipt.json` {cc_version, mode, five leg verdicts}. Any
+leg false → exit 1, CYCLE HALTS (PRD FR-B0). CI re-runs on every PR touching `poteau/`
+or the CC version pin; drift = build refusal.
 
 ### 4.4 Dispatcher → run-state (FR-C, the quest reaches the gate)
 At cut time, per stage k the dispatcher derives from the composition (and module quest
 when present): `task` = the stage's task literals — the SAME text the emitter bakes
 into the work prompt (single source: the cut JSON, not a re-derivation); `task_ref` =
 sha256(JCS(task)); `mandated_reads` = quest.mandated_reads ∪ stage-level reads, each
-`{path, h1}` with h1 extracted MECHANICALLY (first `^# ` line of the file at cut time;
-file missing or H1-less → refusal at compile, not silence); `review_routing`
-from quest/composition (`{council: bool, min_voices}`).
+`{path, h1}` with h1 extracted MECHANICALLY — first `^# ` line AFTER skipping a YAML
+frontmatter block if present (IMP-007: this repo's docs open with `---` frontmatter;
+naive first-line extraction would mis-key every one); file missing or H1-less →
+refusal at compile, not silence; `review_routing` from quest/composition
+(`{council: bool, min_voices}`).
+**Task literal bounds (T5/IMP-008 — the quest is data, not directives)**: task ≤4000
+chars, control sequences stripped (C0/C1, ANSI), compile-time refusal P-code on
+violation; the gate prompt wraps TASK in a fenced block so a malformed quest.json
+cannot inject structural directives into the reviewer's context.
 **Legacy defaults (IMP-004, fail-closed on the load-bearing field)**: no task literals →
 refuse to arm; no review_routing → non-council, logged; no mandated_reads → empty,
 logged. Stage transition (orchestrator-driven, segment boundary): the executor copies
@@ -145,17 +178,37 @@ mandate on a stage whose party cannot staff ≥min_voices is P301 at EMIT time u
 
 ### 4.6 Gatekeeper (port + two changes)
 G1–G5 port unchanged (executable spec). Two port-time changes, both PRD blockers:
-**(B8) run-scoped state** — all paths derive from the active-run pointer
-(`.run/poteau/active-run` → `<run_id>`, session_id-stamped; hooks verify their
-session_id matches or no-op): `…/<run_id>/{run-state,packet,ready}.json`,
+**(B8+T3) run-scoped state, session-keyed pointer** — pointers live at
+`.run/poteau/by-session/<session_id>` → `{run_id, armed_at}` (hooks read their OWN
+session's pointer from hook-input session_id — parallel sessions cannot clobber each
+other, no lock needed; IMP-013's race test ships in the suite). A second `/compose`
+in an already-armed session REFUSES to re-arm with a teaching message (one ceremony
+per session); a stale pointer (run dir absent) → hooks no-op + warn loudly. All run
+paths derive from the pointer: `…/<run_id>/{run-state,packet,ready}.json`,
 `moves/incidents/receipts .jsonl`. Parallel ceremonies never share state.
+**(T1) the packet mailbox carve-out** — tool-gate denies `.run/poteau/**` mutations
+(constitutional: run-state, moves, receipts, seeds, pointers) EXCEPT exactly one slot:
+`.run/poteau/<run_id>/packet.json` — the agent MUST be able to emit its packet (the
+reference's wholesale deny would deadlock its own exit), and an agent-authored packet
+is harmless by construction: it is JUDGED by G1–G5, and receipts are minted only by
+the gatekeeper. The carve-out is data, the judgment is law.
 **(G1 extends, vocabulary preserved)** — before field checks, the gatekeeper shells
-`scripts/handoff-validate.sh` on the packet (tier-1 required = fail closed, tier-2
-warn): poteau's packet IS the construct-handoff packet; the three-tier discipline is
-one validator, not two dialects.
-**Verify-gate extension**: `compose-verify-run.sh` gains `--poteau`: receipt chain
-hash-walks clean, `gate_index` ≥ seam count, ready receipt hashes match the module —
-else verdict downgrades to `broken_run` (exit semantics unchanged).
+`scripts/handoff-validate.sh` on the packet under a 10s timeout (T7: a hanging
+validator must never stall the Stop hook — timeout → P500 fail-closed refusal that
+NAMES the hang); tier-1 required = fail closed, tier-2 warn: poteau's packet IS the
+construct-handoff packet; the three-tier discipline is one validator, not two dialects.
+**(IMP-011) receipt freshness** — each receipt additionally binds `run_id` and is
+refused if its `ts` predates the run's `armed_at` (no cross-run replay; chain order +
+prev-hash already prevent intra-run splicing).
+**Verify-gate extension, adoption-aligned (T4)**: `compose-verify-run.sh` gains
+`--poteau`. For runs that ARMED (ready receipt + run dir exist): receipt chain
+hash-walks clean, `gate_index` ≥ seam count, ready hashes match the module — else
+`broken_run`. For runs that never armed (waves 1–2 legality): legacy verification
+applies unchanged and the verdict stamps `governance: unarmed` — visible, never a
+late surprise failure (the trap SKP-002 named: full execution then predictable
+verify-fail is WORSE than honest legacy verification). Wave 3 flips DISPATCH to
+refuse unprepared ceremonies, at which point unarmed runs cannot exist — enforcement
+tightens at the door, never retroactively at the exit.
 
 ### 4.7 Council runner (FR-D)
 `gate.council.runner = "scripts/council-run.sh"` — flatline-orchestrator's headless
@@ -164,7 +217,10 @@ headless), each receiving the SAME gate prompt (incl. TASK/SCOPE), each returnin
 verdict JSON; receipts `{reviewer_id: provider+model+nonce, verdict, task_ref,
 packet_hash, ts}` appended to the packet (B6: id binds provider+model+nonce;
 anti-replay via task_ref+packet_hash binding; independence = distinct provider
-processes). The runner is invoked by the EXECUTOR at gate stages (workflow segment),
+processes). **Resilience (T6/IMP-003/IMP-005)**: 300s timeout per provider call (CI
+safety), no silent retry; if available voices < min_voices the gate stage HARD-FAILS
+with a refusal naming the dead provider and the staffing fix — degradation happens
+ONLY via the recorded `--allow-single-model` override, never as a runtime fallback. The runner is invoked by the EXECUTOR at gate stages (workflow segment),
 never by hooks (hooks cannot conduct). Gatekeeper G4 then verifies ≥min_voices
 distinct reviewer_ids — runtime half of the two-sided #30 fix.
 
@@ -180,8 +236,10 @@ replay-challengeable (`legba challenge` shape).
 ### 4.9 Liveness watchdog (FR-F, wave 2)
 `moves.jsonl` is already the heartbeat. A poll (orchestrator-side, NOT a hook —
 hooks are reactive) evaluates asson `livenessVerdict` (stall/spin) + budget
-(`rooms.default.liveness.tool_calls`, the manifest key that exists today) per the
-§3.3-amendment taxonomy (`liveness | budget`). Verdict → exit-gate-routed checkpoint
+per the §3.3-amendment taxonomy (`liveness | budget`), with concrete defaults FROM
+the manifest's existing `rooms.default.liveness` block (IMP-012): `tool_calls: 50`
+(budget), `wall_s: 600` (budget), `stall_s: 120` (liveness) — operator-tunable per
+room, never invented at runtime. Verdict → exit-gate-routed checkpoint
 packet (forced arrival is judged, never dropped — PT-8). On landing, hardness-manifest
 `compose-calls-ceiling` flips prose→hook WITH its benchmark (G-5 discipline).
 
@@ -206,10 +264,15 @@ ratification explicitly out of cycle scope).
 
 ## 6 · Data layout (run-scoped, B8)
 
+`incidents.jsonl` schema (IMP-014): `{ts, run_id, event: break_glass|max_blocks_checkpoint|
+council_waived|stale_pointer, reason, actor: operator|watchdog|system}` — one shape,
+aggregatable by FR-G. Per-run private keys are DELETED at run close (IMP-016); pubkeys
+persist in the run manifest so receipts stay verifiable after key destruction.
+
 ```
 .run/poteau/
-├── active-run                       # pointer: {run_id, session_id, armed_at}
-├── contract-receipt.json            # FR-B0 smoke result (per CC version)
+├── by-session/<session_id>          # pointer: {run_id, armed_at} (T3 — no clobber)
+├── contract-receipt.json            # FR-B0 smoke result (per CC version × mode)
 └── <run_id>/
     ├── ready.json                   # laplas receipt (3 manifest hashes)
     ├── run-state.json               # armed state: task/task_ref/reads/routing/gate_index
@@ -242,6 +305,10 @@ runbook is operator-owned (IMP-008); P-code normative source vendors with FR-B (
 | #7 benchmark | unarmed session emits no receipts → `compose-verify-run --poteau` = broken_run |
 | Settings merge | runbook verify step: `poteau-gen --check` green post-merge, post-remount |
 | Packet vocabulary | gatekeeper G1 shells handoff-validate.sh: existing 3-tier fixtures pass unchanged |
+| Pointer race (T3/IMP-013) | two concurrent sessions arm distinct runs → distinct pointers, no clobber; stale-pointer no-op test |
+| Task injection (T5) | quest.json with ANSI/structural directives → compile refusal; 4001-char task → refusal |
+| Mailbox carve-out (T1) | agent Write to packet.json ALLOWED; Write to run-state.json/receipts.jsonl DENIED (P402) |
+| Wave-2 acceptance (IMP-009) | keys deleted at close + pubkeys verify receipts (S5); watchdog fires at manifest thresholds in a fixture run (S5); README posture map lists every surface with its hardness entry (S6) |
 
 ## 9 · Sprint shape (input to Phase 5)
 
