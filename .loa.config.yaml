@@ -54,3 +54,37 @@ run_mode:
   defaults:
     max_cycles: 20
     timeout_hours: 8
+
+# =============================================================================
+# Flatline Protocol (multi-model adversarial review)
+# =============================================================================
+# Headless aliases for all three providers (proven config from loa-freeside,
+# operator decision 2026-05-25): invokes claude/codex/gemini CLIs on the
+# operator's session credentials — no API-key env vars needed.
+flatline_protocol:
+  enabled: true
+  auto_trigger: true
+  models:
+    primary: "claude-headless"
+    secondary: "codex-headless"
+    tertiary: "gemini-headless"
+  thresholds:
+    high_consensus: 700
+    dispute_delta: 300
+    low_value: 400
+    blocker: 700
+  phases:
+    prd: true
+    sdd: true
+    sprint: true
+  budget:
+    max_tokens_per_phase: 100000
+    warn_at_percent: 80
+    hard_limit_cents: 300
+    block_on_exceed: false
+
+# =============================================================================
+# Simstim (HITL workflow orchestration)
+# =============================================================================
+simstim:
+  enabled: true
