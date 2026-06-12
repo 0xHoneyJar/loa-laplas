@@ -124,11 +124,13 @@ _wrap_envelope() {
 }
 
 @test "form-c gradient flip: --legba is baked into the terminal gate when node + bridge are present" {
+    # The flip is infra-gated: dispatch omits --legba when node is absent (no-op,
+    # not breakage). Skip rather than assert in environments without node (Codex
+    # P2) — matches the repo's other node-dependent guards.
+    command -v node >/dev/null 2>&1 || skip "node not available — --legba is correctly omitted"
     _compile_json tg-legba
-    # node + scripts/legba/compose-bridge.mjs are present in this repo, so the gate
-    # verifies the Legba custody chain by construction (the gradient flip).
     echo "$COMPOSE_OUT" | jq -e '.terminal_gate.legba == true' >/dev/null \
-        || fail "terminal_gate.legba should be true when the bridge is present: $COMPOSE_OUT"
+        || fail "terminal_gate.legba should be true when node + the bridge are present: $COMPOSE_OUT"
     echo "$COMPOSE_OUT" | jq -e '.terminal_gate.cmd | test("--legba")' >/dev/null \
         || fail "terminal_gate.cmd should carry --legba: $COMPOSE_OUT"
     echo "$COMPOSE_OUT" | jq -e '.terminal_gate.argv | index("--legba") != null' >/dev/null \
