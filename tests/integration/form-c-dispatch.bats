@@ -620,6 +620,16 @@ PY
     [[ "$(_resolve_model '{"role":"explore"}')" != "haiku" ]] || fail "explore must never default to haiku (#40)"
 }
 
+@test "intel #40: explore POISONS cheapness — explore-read/explore-gather never haiku (council fold, #41)" {
+    # FAGAN council (cursor voice): 'explore-read' tokenizes to {explore, read} and
+    # would hit CHEAP via 'read' — the exact loiter class the explore removal targets.
+    # An 'explore' token anywhere in the slug forces the role out of the cheap class.
+    [[ "$(_resolve_model '{"role":"explore-read"}')" == "opus" ]] || fail "explore-read must route opus, not haiku via 'read' token"
+    [[ "$(_resolve_model '{"role":"explore-gather"}')" == "opus" ]] || fail "explore-gather must route opus, not haiku via 'gather' token"
+    # plain mechanical legs are unaffected:
+    [[ "$(_resolve_model '{"role":"read"}')" == "haiku" ]] || fail "plain read leg must stay haiku"
+}
+
 @test "intel: unrecognized/missing role with no tier -> opus (singleton default, #40)" {
     [[ "$(_resolve_model '{"role":"frobnicate"}')" == "opus" ]] || fail "unrecognized role must default to opus (singleton-up), never haiku"
     [[ "$(_resolve_model '{}')" == "opus" ]] || fail "missing role must default to opus (singleton-up)"
@@ -737,7 +747,8 @@ EOF
     [[ "$(echo "$output" | head -1)" == "opus" ]] || fail "invalid tier on primary must fall to opus (singleton-up), got $(echo "$output" | head -1)"
     echo "$output" | grep -q 'STDERR:.*invalid intelligence_tier' || fail "expected a stderr warning naming the invalid tier; got: $output"
     echo "$output" | grep -q "medium" || fail "warning should name the invalid value 'medium'"
-    echo "$output" | grep -qE 'cheap.*standard.*deep' || fail "warning should list the valid tiers"
+    # all six tiers, in order — a future drop of mid/max from the message must fail here
+    echo "$output" | grep -qE 'tiny.*cheap.*mid.*standard.*deep.*max' || fail "warning should list ALL six valid tiers"
 }
 
 @test "intel R-F004: invalid tier does NOT lift the gate floor — craft-gate+invalid still opus + warning" {
@@ -1098,6 +1109,42 @@ PY
     [[ "$(_resolve_in_segment '{"role":"craft-gate","intelligence_tier":"max"}' '[{"role":"work"}]')" == "fable" ]] || fail "explicit max gate must stay fable"
 }
 
+@test "intel rel-floor: stage appearing in its OWN peer list is skipped by identity (council fold, #41)" {
+    # The sequential path passes the WHOLE segment list (stage included) as peers —
+    # `peer is stage` must skip the self entry. Construct the shared-identity case in
+    # one interpreter (two separate json.loads can never be identity-equal).
+    run python3 - "$EMIT" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("se", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+gate = {"role": "craft-gate", "intelligence_tier": "max"}
+work = {"role": "work"}
+# gate is literally inside its own peer list; deep self must not be consulted as a peer
+print(m._resolve_model_in_segment(gate, [gate, work]))
+# non-deep stage as its own peer: passthrough, no spurious lift
+solo = {"role": "primary", "intelligence_tier": "tiny"}
+print(m._resolve_model_in_segment(solo, [solo]))
+PY
+    [[ "$status" -eq 0 ]] || fail "resolver errored: $output"
+    [[ "$(echo "$output" | sed -n 1p)" == "fable" ]] || fail "deep stage in own peer list must keep its explicit max"
+    [[ "$(echo "$output" | sed -n 2p)" == "haiku" ]] || fail "non-deep stage in own peer list must pass through unchanged"
+}
+
+@test "intel rel-floor: R-F002 token-exactness asserted at the classifier (council fold, #41)" {
+    # With else-default and deep floor both opus, model output no longer discriminates
+    # deep-classification for bare roles — assert the CLASSIFIER directly.
+    run python3 - "$EMIT" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("se", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m._role_is_deep("navigate-flow"), m._role_is_deep("preview-pane"), m._role_is_deep("craft-gate"))
+print(m._role_is_cheap("thread-merge"), m._role_is_cheap("explore-read"), m._role_is_cheap("read"))
+PY
+    [[ "$status" -eq 0 ]] || fail "classifier errored: $output"
+    [[ "$(echo "$output" | sed -n 1p)" == "False False True" ]] || fail "_role_is_deep tokenization regressed: $(echo "$output" | sed -n 1p)"
+    [[ "$(echo "$output" | sed -n 2p)" == "False False True" ]] || fail "_role_is_cheap tokenization regressed: $(echo "$output" | sed -n 2p)"
+}
+
 @test "intel rel-floor: emitted iterating JS — max work stage lifts the gate literal to fable" {
     command -v node >/dev/null || skip "node not available"
     cat > "$TMPROOT/intel-relfloor.yaml" <<'EOF'
@@ -1163,6 +1210,18 @@ _cost_card() {
     [ "$status" -eq 0 ]
     [ "$(echo "$output" | jq -r '.stages[0].model')" = "fable" ]
     [ "$(echo "$output" | jq -r '.stages[1].model')" = "fable" ]
+}
+
+@test "cost-card: preamble peer over-estimate is INTENTIONAL (ceiling >= emitted, council fold #41)" {
+    # The emitter scopes an iterating gate to its loop-WORK peers (preamble excluded);
+    # the card passes the whole segment list. A max-tier PREAMBLE therefore lifts the
+    # card's gate price (fable) above the emitted gate (opus) — the card may only ever
+    # OVER-estimate, never under. This pins the asymmetry so a future 'fix' that flips
+    # it to under-estimation fails loudly.
+    local plan='{"segments":[{"index":0,"kind":"iterating","segment_name":"loop","max_iterations":2,"stages":[{"stage":1,"construct":"p","role":"read","intelligence_tier":"max"},{"stage":2,"construct":"w","role":"work"},{"stage":3,"construct":"g","role":"craft-gate"}]}]}'
+    run _cost_card "$plan"
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | jq -r '.stages[2].model')" = "fable" ] || fail "card must price the gate at >= the highest segment peer (ceiling)"
 }
 
 @test "cost-card: token-envelope env overrides scale the ceiling linearly" {

@@ -259,8 +259,14 @@ def _role_is_cheap(role):
     """True when the role slug names a mechanical-fan-out (cheap-class) stage.
     Token-exact (R-F002) — a false cheap match is DANGEROUS (downgrades to haiku), so
     this must never be a substring match. A role is cheap iff ANY of its tokens is a
-    member of CHEAP_ROLE_TOKENS."""
-    return not _role_tokens(role).isdisjoint(CHEAP_ROLE_TOKENS)
+    member of CHEAP_ROLE_TOKENS — UNLESS the slug also carries an "explore" token:
+    explore POISONS cheapness (FAGAN council on #41, cursor voice): "explore-read" /
+    "explore-gather" would otherwise route to haiku via their mechanical token, which
+    is exactly the #40 loiter class the explore removal was meant to close."""
+    tokens = _role_tokens(role)
+    if "explore" in tokens:
+        return False
+    return not tokens.isdisjoint(CHEAP_ROLE_TOKENS)
 
 
 def _resolve_model(stage):
@@ -1166,6 +1172,9 @@ def emit_iterating_body(comp, seg, cycle_id, run_id):
 // args.items turns iteration 1 into a wave-scheduled fan-out; leaves are
 // cheap-tier task monkeys (hounfour: cheap ≡ sonnet) unless the item declares
 // its own intelligence_tier. Validation FAILS LOUD before any token is spent.
+// NOTE (singleton-up, #41): the UNDECLARED leaf default stays sonnet — the
+// cardinality contract. A leaf that EXPLICITLY declares mid/standard rides the
+// regime values (opus); fan-out authors wanting cheap legs declare tiny/cheap.
 const TIER_MODEL_JS = __TIER_MODEL_JSON__;
 const leafModel = (it) => TIER_MODEL_JS[it.intelligence_tier] || "sonnet";
 const MAX_DAG_ITEMS = 64;  // runaway guard; boundedParallel already chunks wave width
