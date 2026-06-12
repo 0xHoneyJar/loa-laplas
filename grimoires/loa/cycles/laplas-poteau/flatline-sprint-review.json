@@ -1,0 +1,312 @@
+{
+  "consensus_summary": {
+    "high_consensus_count": 7,
+    "disputed_count": 5,
+    "low_value_count": 0,
+    "blocker_count": 13,
+    "model_agreement_percent": 66,
+    "models": 3,
+    "tertiary_items": 0,
+    "confidence": "full"
+  },
+  "high_consensus": [
+    {
+      "id": "IMP-001",
+      "description": "Critical validation gap. Acceptance criteria that cite opaque P-codes cannot be independently reviewed or triaged, and the implementation cost of adding a table or appendix is very low.",
+      "gpt_score": 940,
+      "opus_score": 880,
+      "tertiary_score": 900,
+      "delta": 60,
+      "average_score": 910,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-002",
+      "description": "Critical control-plane gap. A freeze gate that is only prose will fail under pressure, while a CI/pre-merge enforcement path directly protects the highest-risk sequencing invariant.",
+      "gpt_score": 960,
+      "opus_score": 875,
+      "tertiary_score": 920,
+      "delta": 85,
+      "average_score": 917.5,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-003",
+      "description": "High-value scope clarification. Undefined IMP references make multiple sprint tasks non-actionable and force source archaeology; inlining or linking the deltas is low-cost and materially improves execution.",
+      "gpt_score": 910,
+      "opus_score": 845,
+      "tertiary_score": 950,
+      "delta": 65,
+      "average_score": 877.5,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-004",
+      "description": "Strong acceptance-test issue. A numeric target without an enumerated inventory is fragile and unverifiable, especially across CI platforms. Cost is modest if the fixtures already exist.",
+      "gpt_score": 880,
+      "opus_score": 858,
+      "tertiary_score": 890,
+      "delta": 22,
+      "average_score": 869,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-005",
+      "description": "Critical security and cleanup concern. Ambiguous key isolation plus abnormal termination leakage directly threatens the ceremony's core invariant. This should be specified before implementation.",
+      "gpt_score": 920,
+      "opus_score": 832,
+      "tertiary_score": 920,
+      "delta": 88,
+      "average_score": 876,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-006",
+      "description": "Important dependency declaration gap. If legba CAS is required for S5.2/S5.3, repo/version/CI availability must be explicit or the sprint can block on an invisible prerequisite.",
+      "gpt_score": 870,
+      "opus_score": 772,
+      "tertiary_score": 860,
+      "delta": 98,
+      "average_score": 821,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-008",
+      "description": "Valuable architectural enforcement. The invariant is important and easy to regress; a lint/static fixture gives durable protection, though implementation may require some care to avoid false positives.",
+      "gpt_score": 780,
+      "opus_score": 715,
+      "tertiary_score": 780,
+      "delta": 65,
+      "average_score": 747.5,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    }
+  ],
+  "disputed": [
+    {
+      "id": "IMP-011",
+      "description": "Strong sequencing improvement. Explicit artifact gates prevent downstream work from proceeding on incomplete schemas. Worth integrating, especially if partial sprint delivery is plausible.",
+      "gpt_score": 760,
+      "opus_score": 0,
+      "tertiary_score": 580,
+      "delta": 760,
+      "average_score": 760,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-012",
+      "description": "Valuable checkpoint clarification. Anchoring 'two sprints' to concrete sprint boundaries and naming the owner reduces compaction drift and stalled decisions, with low cost.",
+      "gpt_score": 690,
+      "opus_score": 0,
+      "tertiary_score": 600,
+      "delta": 690,
+      "average_score": 690,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-013",
+      "description": "Useful roadmap hygiene. A return trigger prevents proposal limbo, but the risk is somewhat downstream and less urgent than acceptance, dependency, or security gaps.",
+      "gpt_score": 640,
+      "opus_score": 0,
+      "tertiary_score": 550,
+      "delta": 640,
+      "average_score": 640,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-014",
+      "description": "Nice-to-have but credible. Effort calibration would expose overrun risk, especially in S3, but it is less mechanically blocking and may be subjective without sizing conventions.",
+      "gpt_score": 560,
+      "opus_score": 0,
+      "tertiary_score": 400,
+      "delta": 560,
+      "average_score": 560,
+      "source": "gpt_scored",
+      "would_integrate": false,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-015",
+      "description": "Valuable edge-case clarification. Timeout behavior differs materially between interactive and headless contexts; defining block/log/fail behavior would prevent CI ambiguity, though priority is lower than core gate definitions.",
+      "gpt_score": 610,
+      "opus_score": 0,
+      "tertiary_score": 720,
+      "delta": 610,
+      "average_score": 610,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    }
+  ],
+  "low_value": [],
+  "blockers": [
+    {
+      "id": "SKP-005",
+      "concern": "Council execution model (S4.1) is underspecified: 300s timeout per provider, trio pattern — sequential vs parallel execution is never stated. Sequential trio = 900s minimum wall time; parallel trio = 300s but with undefined partial-result handling. Either way, the 600s watchdog budget (S5.3) may be violated by normal council execution.",
+      "severity": "HIGH",
+      "severity_score": 720,
+      "why_matters": "If sequential, council adds more wall time than the entire watchdog wall_s budget, causing the watchdog to fire a budget verdict on a valid council run. If parallel, there is no specification for handling the case where one provider times out before min_voices respond. The G-5 benchmark for compose-calls-ceiling must ship in S5, but the threshold cannot be validated until the execution model is defined.",
+      "location": "Sprint 4, Tasks 4.1 and 4.3; Sprint 5, Task 5.3",
+      "recommendation": "Specify explicitly: parallel invocation with a shared 300s deadline, first-N-complete wins. Define behavior when fewer than min_voices complete within the deadline (HARD-FAIL vs downgrade-with-stamp). Instrument actual council wall time in S4 and use those measurements to calibrate the S5.3 watchdog wall_s threshold before shipping the manifest flip.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-004",
+      "concern": "Council provider HARD-FAIL with no transient retry (S4.1) means a momentary provider outage — a single 503 or timeout during the 300s window — terminates the entire cycle with no automatic recovery path.",
+      "severity": "HIGH",
+      "severity_score": 750,
+      "why_matters": "Provider APIs have SLAs below 100%. A transient failure during a potentially multi-hour cycle requires operator intervention to resume, violating the kaironic model. The plan says 'dead provider → HARD-FAIL naming it + the staffing fix' — but staffing a replacement provider mid-cycle is an operator-paced action in an autonomous workflow.",
+      "location": "Sprint 4, Task 4.1",
+      "recommendation": "Implement a 3-attempt exponential backoff (1s, 4s, 16s) before escalating to HARD-FAIL. Distinguish transient errors (5xx, connection timeout) from permanent errors (4xx auth failure, model unavailable). Only HARD-FAIL on permanent errors or after all retries are exhausted. Log the distinction and retry count in the council receipt.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-010",
+      "concern": "Council provider execution requires the same prompt to N providers, but does not define provider identity, reviewer identity uniqueness, prompt canonicalization, or protection against one backend appearing as multiple reviewers.",
+      "severity": "CRITICAL",
+      "severity_score": 820,
+      "why_matters": "The council control is meant to prevent single-voice review. Without strong identity and canonical prompt guarantees, a misconfigured or malicious runner can satisfy distinct voices syntactically while preserving a single actual reviewer.",
+      "location": "Sprint 4.1; Sprint 4.2",
+      "recommendation": "Define reviewer identity as a verified tuple of provider, model, credential namespace, and runner instance. Hash the canonical prompt once and require every council receipt to bind that hash. Add a fixture where duplicated reviewer IDs or aliased providers are refused.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-001",
+      "concern": "MVP ships with an explicit governance bypass: module-less dispatch warns and proceeds (S2.3 'wave-1 legality'). All council/gate/HITL controls added in S2–S4 are skippable in the MVP scope without any authorization check or flag.",
+      "severity": "CRITICAL",
+      "severity_score": 900,
+      "why_matters": "The bypass is exactly what every control in this cycle is designed to prevent. A module-less dispatch reaches gate execution with no laplas schema validation, no ready receipt, and no seeded stages — the gate machinery runs against an unarmed composition. If module-less becomes habitual during S1–S4 development, the enforcement surface being built is never exercised on real work, and the pattern hardens into de-facto default behavior before S6.3 can flip it.",
+      "location": "Sprint 2, Task 2.3; Cross-cutting 'Freeze gate' and 'Benchmarks close issues'",
+      "recommendation": "Replace warn-and-proceed with a flag-gated bypass (`--legacy-unmodularized`) that requires explicit invocation and stamps the receipt `governance: bypassed`. Remove the default fallback. Treat the bypass as a named break-glass, not a wave-1 default. Counter the bypass invocation in the S6.1 telemetry so the flip decision in S6.3 has honest signal.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-003",
+      "concern": "O(N^2) I/O bottleneck in Watchdog polling",
+      "severity": "HIGH",
+      "severity_score": 750,
+      "why_matters": "Polling a continuously growing 'moves.jsonl' file repeatedly from the beginning will cause severe CPU and I/O starvation on long-running tasks, eventually leading to false positive stall verdicts and process thrashing.",
+      "location": "Sprint 5 / Task 5.3 (Watchdog orchestrator-side poll)",
+      "recommendation": "The watchdog must maintain a byte-offset cursor (similar to 'tail -F') to only read new append events, or switch to an event-driven push architecture via named pipes/sockets.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-012",
+      "concern": "Override and break-glass paths are recorded, but the plan does not specify authorization checks, minimum required fields, or whether overrides can bypass CRITICAL gates like S1.1.",
+      "severity": "CRITICAL",
+      "severity_score": 860,
+      "why_matters": "An override mechanism without strict authorization and scope can become the easiest path around the governance system, invalidating enforcement guarantees.",
+      "location": "Sprint 4.2; Sprint 4.4; Cross-cutting operator seats",
+      "recommendation": "Define override authority, non-overridable gates, required justification fields, expiry, affected run IDs, and audit visibility. Explicitly state that S1.1 freeze failures and receipt forgery failures cannot be break-glassed.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-006",
+      "concern": "PR #43 (Observatory graduation) is an unresolved external dependency with a vague checkpoint ('two sprints, operator decides rebase-vs-wait') and no fallback implementation path for Sprint 3.5's acceptance criterion, which requires 'Observatory fold renders the new SOLID doors.'",
+      "severity": "HIGH",
+      "severity_score": 710,
+      "why_matters": "If #43 is not merged, S3.5 has no acceptance path — the hardness-manifest flips cannot be rendered and the sprint cannot close. 'Two sprints' is undefined (calendar days? sprint cycles?). With no fallback, the cycle can stall indefinitely at a named checkpoint that has no resolution criteria other than 'operator decides.'",
+      "location": "Cross-cutting 'Dual-state' section; Sprint 3, Task 3.5",
+      "recommendation": "Define: (a) a concrete deadline for #43 in calendar days from cycle branch creation; (b) a specified fallback for S3.5 if #43 is unmerged — stub the Observatory fold, emit a TODO manifest entry, accept the sprint on that basis; (c) an explicit rebase decision owner and the criteria that trigger each branch. Make the checkpoint a decision tree, not an open loop.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-002",
+      "concern": "Per-run key destruction (S5.1) has no specified cleanup path on abnormal process exit — crash, OOM, or signal kill during a run could leave undeleted private keys on disk indefinitely.",
+      "severity": "CRITICAL",
+      "severity_score": 870,
+      "why_matters": "If a run crashes after key provisioning but before key deletion, the private keys persist in an unspecified 'outside workspace' location. With no manifest of where keys land and no stale-key detector, recovery requires manual forensics. This is the highest-consequence failure mode in the custody sprint: the key ceremony is designed to expire keys, but the expiry is never guaranteed by the current spec.",
+      "location": "Sprint 5, Task 5.1",
+      "recommendation": "Implement key lifecycle as a trap-registered cleanup handler (POSIX `trap` on EXIT/INT/TERM/HUP), not a run-close hook. Keys must be provisioned into `mktemp -d` with an immediately registered `rm -rf` trap. Add a stale-key detector at session start that alerts on any key directories older than the `wall_s` watchdog threshold. The acceptance criterion must include a SIGKILL fixture verifying no keys survive.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-013",
+      "concern": "Per-run keys are provisioned outside the workspace and deleted at close, but the plan does not address key generation entropy, filesystem permissions, crash cleanup, or exposure through logs and child process environments.",
+      "severity": "CRITICAL",
+      "severity_score": 810,
+      "why_matters": "Signing keys are a custody root. Weak permissions or leaked environment variables can allow forged receipts that still verify against manifest pubkeys.",
+      "location": "Sprint 5.1",
+      "recommendation": "Specify key generation source, storage permissions, environment handling, log redaction, crash cleanup, and tests for world-readable keys and leaked key material. Prefer OS keychain or locked tempdirs with explicit permission checks.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-002",
+      "concern": "Private key leakage on abnormal termination",
+      "severity": "HIGH",
+      "severity_score": 780,
+      "why_matters": "Deleting keys 'at run close' assumes a graceful exit. If the process crashes, OOMs, or receives a SIGKILL, the unencrypted private keys will remain orphaned on disk, compromising the cryptographic integrity of the receipts.",
+      "location": "Sprint 5 / Task 5.1 (Key ceremony)",
+      "recommendation": "Store provisioned private keys in ephemeral memory (e.g., tmpfs/RAM disk) and implement robust POSIX signal traps (EXIT, ERR, HUP, INT, TERM) to guarantee deletion even during unhandled exceptions.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-001",
+      "concern": "Prompt injection vulnerability via fenced block escaping in segment emitter",
+      "severity": "CRITICAL",
+      "severity_score": 880,
+      "why_matters": "Embedding untrusted verbatim task literals directly into fenced blocks allows attackers or malformed inputs to prematurely close the fence (e.g., using '```') and inject arbitrary, unconstrained instructions into the gate_head prompt.",
+      "location": "Sprint 3 / Task 3.2 (Emitter TASK/SCOPE into gate_head)",
+      "recommendation": "Implement strict sanitization and backtick-escaping for the verbatim task literal, or use an isolated data binding mechanism rather than naive string interpolation.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-003",
+      "concern": "The `--allow-single-model` flag (S3.2) bypasses council mandate with no authorization check — any caller with CLI access can suppress council enforcement, and the `council_waived` stamp is recorded but not gated on caller identity or authorization.",
+      "severity": "CRITICAL",
+      "severity_score": 850,
+      "why_matters": "The council mandate is the primary governance control against single-voice decisions (issue #30). A flag that any CI job, script, or operator can pass without authentication collapses the control to opt-in. An attacker or misconfigured pipeline that knows the flag can permanently neutralize the enforcement that this cycle's most complex sprint (S4) is built to deliver.",
+      "location": "Sprint 3, Task 3.2; Sprint 4, Task 4.2",
+      "recommendation": "Require `--allow-single-model` to be accompanied by a signed break-glass token or an entry in a per-repo allowlist (`council-waiver-policy.json`). Log the POSIX user and git identity in the waiver record. Fail with a named P-code if neither is present. The incident schema (S4.4) should capture the authorization proof, not just the event.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-001",
+      "concern": "The plan makes S1.1 a hard freeze gate but does not define who can authorize halt recovery, what artifact captures redesign, or what minimum retest scope is required after a fix.",
+      "severity": "HIGH",
+      "severity_score": 720,
+      "why_matters": "A failing freeze gate can leave the cycle in an ambiguous state where agents keep modifying nearby work, or a partial fix is accepted without re-proving the full contract. That weakens the strongest safety control in the plan.",
+      "location": "Sprint 1.1; Cross-cutting freeze gate",
+      "recommendation": "Add a halt protocol: on any failed leg, block all FR-B design merges, open a redesign note or decision record, require all 10 smoke legs to rerun green after the fix, and record the recovery receipt before resuming.",
+      "source": "tertiary_skeptic"
+    }
+  ],
+  "degraded": false,
+  "degraded_model": null,
+  "confidence": "full",
+  "phase": "sprint",
+  "document": "grimoires/loa/sprint.md",
+  "domain": " branch cycle laplas poteau",
+  "tertiary_model_used": "gemini-headless",
+  "tertiary_status": "active",
+  "execution": {
+    "mode": "hitl",
+    "mode_reason": "Simstim workflow active (.run/simstim-state.json state=RUNNING)",
+    "run_id": null
+  },
+  "timestamp": "2026-06-12T23:55:31Z",
+  "metrics": {
+    "total_latency_ms": 291000,
+    "cost_cents": 0,
+    "cost_usd": 0
+  }
+}
