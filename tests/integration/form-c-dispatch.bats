@@ -1145,6 +1145,28 @@ PY
     [[ "$(echo "$output" | sed -n 2p)" == "False False True" ]] || fail "_role_is_cheap tokenization regressed: $(echo "$output" | sed -n 2p)"
 }
 
+@test "intel rel-floor: sequential floor is TEMPORAL — preceding peers lift, future peers don't (codex P2, #41)" {
+    command -v node >/dev/null || skip "node not available"
+    # review at position 1 runs BEFORE the max stage — it gates nothing of it: opus.
+    # synthesize at position 3 runs AFTER the max stage — it synthesizes its output: fable.
+    cat > "$TMPROOT/intel-seqfloor.yaml" <<'EOF'
+schema_version: "1.4"
+kind: workflow
+name: intel-seqfloor-emit
+description: temporal sequential floor probe
+intent: "I want to confirm sequential deep stages floor against preceding peers only."
+chain:
+  - {stage: 1, construct: early-reviewer, role: review}
+  - {stage: 2, construct: heavy-worker, role: primary, intelligence_tier: max}
+  - {stage: 3, construct: late-synth, role: synthesize}
+EOF
+    local js; js="$(_emit_from "$TMPROOT/intel-seqfloor.yaml" 0)"
+    run node "$SYNTAX" "$js"; [[ "$status" -eq 0 ]] || fail "syntax check failed: $output"
+    grep -q 'agentType: "construct-early-reviewer", model: "opus"' "$js" || fail "review BEFORE the max stage must stay at the static opus floor"
+    grep -q 'agentType: "construct-heavy-worker", model: "fable"' "$js" || fail "max work stage should emit fable"
+    grep -q 'agentType: "construct-late-synth", model: "fable"' "$js" || fail "synthesize AFTER the max stage must lift to fable (it synthesizes that output)"
+}
+
 @test "intel rel-floor: emitted iterating JS — max work stage lifts the gate literal to fable" {
     command -v node >/dev/null || skip "node not available"
     cat > "$TMPROOT/intel-relfloor.yaml" <<'EOF'

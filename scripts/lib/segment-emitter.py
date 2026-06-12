@@ -1334,10 +1334,13 @@ def emit_sequential_body(comp, seg, cycle_id, run_id):
         )
         prior = "" if idx == 0 else '      "PRIOR STAGE OUTPUT:\\n" + JSON.stringify(prior),'
         # Segment-aware: a deep-role stage in a sequence (e.g. a trailing
-        # synthesize/review) takes the relative floor against its peers — the
-        # synthesizer is never cheaper than what it synthesizes. Non-deep
-        # stages pass through unchanged.
-        resolved_model = _resolve_model_in_segment(st, stages)
+        # synthesize/review) takes the relative floor against the stages whose
+        # output FLOWS INTO it — strictly PRECEDING peers (codex P2 on #41: a
+        # review at position 1 cannot be gating a max stage that runs after it;
+        # whole-list scope lifted it to fable for work it never sees). Sequential
+        # output threads forward (`prior`), so stages[:idx] is exactly the
+        # reviewed set. Non-deep stages pass through unchanged.
+        resolved_model = _resolve_model_in_segment(st, stages[:idx])
         lrn = _learnings_prompt_expr(st)
         blocks.append(
             f"""  phase({js((st.get('name') or st['construct']))});
