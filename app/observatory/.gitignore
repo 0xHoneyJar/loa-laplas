@@ -1,0 +1,6 @@
+node_modules/
+.next/
+next-env.d.ts
+*.tsbuildinfo
+# build artifact — single source is observatory/engine/ (copy-engine.mjs)
+public/observatory/

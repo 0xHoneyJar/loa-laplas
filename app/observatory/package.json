@@ -1,0 +1,24 @@
+{
+  "name": "observatory-shell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Next.js shell for the Observatory engine — same-origin iframe + /api/sim. The shell never absorbs the engine (SDD §5).",
+  "scripts": {
+    "predev": "node scripts/copy-engine.mjs",
+    "prebuild": "node scripts/copy-engine.mjs",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "^15.3.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "agentation": "^1.0.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "typescript": "^5.6.0"
+  }
+}
