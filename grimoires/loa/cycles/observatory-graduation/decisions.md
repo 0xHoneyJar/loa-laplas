@@ -92,6 +92,24 @@ S3 mechanics were built (the spike preceded S3.1, not just S3.4):
 **FR-B closes.** The clew mechanics now describe the failure mode that actually
 happened, not the one we assumed.
 
+### S5 — SHARE shipped; G-3 door wired, spectate entry OPEN — 2026-06-12
+
+- **Public surface**: https://the-observatory-kappa.vercel.app — sim-first
+  (engine + `/api/sim` WITH its abuse bounds; `/api/level` does NOT ship).
+  Receipts against the LIVE URL: vector parity (rev-2 golden byte-match through
+  the public API) · out-of-range → 400 · burst → 429s · CDN MISS→HIT on repeat
+  params · production protection lifted by decision (previews stay SSO-gated);
+  no auth on /api/sim BY DECISION (SP-B1/B3) — the clamps + bucket + CDN are
+  the control. Capture: `verify/captures/s5-public-surface.png`.
+- **Redaction**: allowlist-as-code, salted-HMAC pseudonyms (salt function-scoped,
+  discarded), 7 tests incl. forged-flag refusal (IMP-011) and the SP-B2
+  same-origin matrix. Topology leakage accepted by design.
+- **G-3 (the attempt)**: the door is wired LOCAL-only per SP-B2 — deployed engine
+  refuses cross-origin `?live=`/`?level=`. To spectate a real run:
+  `node observatory/producers/serve.mjs --run .run/compose/<id>` then
+  `localhost:8787/game.html?live=/level.json&auto=1`. **The "what the watching
+  changed" entry belongs to the operator's first live spectate — OPEN.**
+
 ### S1.3 — A-2 checkpoint (dispatch gate, flatline SP-B4)
 
 _PENDING — OPERATOR decision at S1 review. S2 work order may not OPEN until this is logged._

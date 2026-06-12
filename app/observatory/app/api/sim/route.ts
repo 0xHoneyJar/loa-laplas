@@ -10,7 +10,9 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic"; // caching is done via CDN headers keyed on params
+// NOTE: no force-dynamic — reading searchParams already opts the route into
+// dynamic rendering, and force-dynamic would override our Cache-Control with
+// max-age=0, killing the CDN-as-primary-absorber design (SDD §5).
 
 const execFileP = promisify(execFile);
 
