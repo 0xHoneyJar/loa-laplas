@@ -67,8 +67,10 @@ these when the beats land):
 _PENDING — OPERATOR decision at S1 review. S2 work order may not OPEN until this is logged._
 
 Trigger criteria (IMP-001) — fire the freeside-observatory fallback if ANY hold:
-- (a) crs CI path rules reject `app/` — **evidence so far: none.** `next build` green; observatory CI workflow added with shell-build job.
-- (b) build tooling conflicts (lockfile/framework collisions) — **evidence so far: none.** Shell is a self-contained project at `app/observatory/` (own package.json + lockfile); crs root stays manifest-free by design.
-- (c) maintainer veto at S1 review — **operator's call.**
+- (a) crs CI path rules reject `app/` — **none.** `next build` green; observatory CI workflow added with shell-build job.
+- (b) build tooling conflicts (lockfile/framework collisions) — **none.** Shell is a self-contained project at `app/observatory/` (own package.json + lockfile); crs root stays manifest-free by design.
+- (c) maintainer veto at S1 review — **not cast.**
 
-Decision: _unlogged_
+**Decision (2026-06-12, operator at S1 review): ACCEPT — crs is home.** The
+freeside-observatory fallback does not fire. S2 work order may open (SP-B4 satisfied).
+Logged from operator selection at the A-2 pair-point; PR #43 carries the receipts.
