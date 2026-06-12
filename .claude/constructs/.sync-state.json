@@ -1,0 +1,16 @@
+{
+  "synced_at": "2026-06-12T19:53:10Z",
+  "packs_added": 0,
+  "packs_updated": 0,
+  "packs_removed": 0,
+  "packs_unchanged": 38,
+  "packs_total": 38,
+  "commands_registered": 0,
+  "commands_skipped": 0,
+  "skills_linked": 0,
+  "skills_skipped": 217,
+  "skills_stale_removed": 0,
+  "global_total": 25,
+  "global_store": "/Users/zksoju/.loa/constructs/packs",
+  "method": "symlink"
+}
