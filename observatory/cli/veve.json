@@ -8,6 +8,7 @@
     "runtime": "node",
     "subcommands": [
       "sim",
+      "play",
       "fold",
       "serve",
       "selftest"
@@ -94,6 +95,23 @@
       ],
       "stdin": "",
       "expect_output_hash": "sha256:b12b9ff23fb849a8257f2a42286a80517c633e5efeaab694d2c00dc3d408405c",
+      "expect_exit": 0
+    },
+    {
+      "name": "play-stuck-testifies",
+      "argv": [
+        "play",
+        "--policy",
+        "stuck",
+        "--seed",
+        "7",
+        "--rooms",
+        "6",
+        "--stuck",
+        "2"
+      ],
+      "stdin": "",
+      "expect_output_hash": "sha256:31937206209407fe009a77dad085a0c9f128d0315dbd5f7c337923f33dc64bd0",
       "expect_exit": 0
     }
   ],

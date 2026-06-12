@@ -12,10 +12,13 @@
 |---|---|---|---|---|
 | 1 | 2026-06-12 | `compose-calls-ceiling` is signage, not a gate — declared `prose` in hardness-manifest v1; budget-watchdog hook queued (s3-regrounding-spike: budget-exhaustion → involuntary clew) | `verify/captures/s2-gate-impasse.png` (phase 13: the ceiling's HOLLOW door + teaches line "a ceiling that cannot reap is signage, not a gate") | hardness-manifest.json gains the entry; S3 spike re-grounds SDD §3.3 watchdog trigger from liveness to budget/convergence |
 
+| 2 | 2026-06-12 | **Disciplined stays clew-less — its walled-room REJECTED is a feature, not a bug.** When the haiku construct-agent played the disciplined seat against the walled room, it panic-presented 25%-quality work and LEGBA barred the door (verdicts EEERE) — instead of testifying. The contrast with the stuck policy's voluntary clew IS the design lesson: the archetypes must keep their honest blind spots or the sim stops diverging. Decision: do NOT add a clew branch to disciplined/greedy; the clew is `stuck`'s distinguishing move, and a policy that presents garbage at panic renders a different (visible, judged) failure than one that testifies. | `episodes/agent-disciplined-42.{jsonl,level.json}` · `verify/captures/s4-agent-episode-morgue.png` · the EEERE story (room 3 REJECTED beat) | policies.mjs registry doc hardened; the agent's own reflection archived in the episode record |
+
 > Causality note (anti-Goodhart honesty): entry 1 was INITIATED by S1.4 forensics
 > (raw JSONL) and CONFIRMED by the rendered beat — the hollow door made the
 > declared-but-unenforced ceiling legible enough to commit the S3 hook design.
-> The cleanest G-1 entries (decision born entirely in-game) are still ahead.
+> Entry 2 was born in-game: the agent's played episode made the contrast visible
+> before any code changed.
 
 ## Cycle decisions (gates, checkpoints, diagnoses)
 

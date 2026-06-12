@@ -112,6 +112,23 @@ export function defaultLevel(L) {
   return L;
 }
 
+// rev 2 (FR-C, SDD §3.5) — the episode schema, JSON-lines. Digests only
+// (observation_digest), never raw observations — agents can't exfiltrate via
+// the conformance log (§6). One row per tick; conformance-testable.
+export const EPISODE_ACTIONS = ["read", "present", "clew"];
+export function validateEpisodeLine(o) {
+  const errs = [];
+  const E = (m) => errs.push(m);
+  if (!o || typeof o !== "object") return { ok: false, errors: ["line is not an object"] };
+  if (typeof o.episode_id !== "string" || !o.episode_id.length) E("episode_id must be a non-empty string");
+  if (!Number.isInteger(o.tick) || o.tick < 0) E("tick must be a non-negative integer");
+  if (typeof o.actor !== "string" || !o.actor.length) E("actor must be a non-empty string");
+  if (!EPISODE_ACTIONS.includes(o.action)) E(`action '${o.action}' not in enum {${EPISODE_ACTIONS.join(",")}}`);
+  if (typeof o.observation_digest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(o.observation_digest))
+    E("observation_digest must be 'sha256:<64 hex>' (JCS-sha256)");
+  return { ok: errs.length === 0, errors: errs };
+}
+
 // rev 2 (SP-B6) — sanitizeText: escape-by-default, whitelist <b>/<i> only.
 // EVERY level-sourced string the engine renders into HTML goes through this;
 // the log's raw-innerHTML path is closed to untrusted levels. A <script> in a

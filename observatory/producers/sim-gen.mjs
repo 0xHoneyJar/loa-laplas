@@ -17,7 +17,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { validateLevel, defaultLevel, SCHEMA, CONTRACT_REV } from "../contract/level-contract.mjs";
+import { validateLevel, defaultLevel, validateEpisodeLine, SCHEMA, CONTRACT_REV } from "../contract/level-contract.mjs";
+import { POLICIES, policyNames } from "./policies.mjs";
 
 // JCS-flavored digest (S3.1): sha256 over sorted-key, no-whitespace JSON.
 // Our packets are flat string/int objects — sorted JSON.stringify IS RFC 8785
@@ -47,6 +48,15 @@ const NROOMS = Math.max(2, Math.min(12, Number(opt("rooms", 6))));
 // §3.3-amendment (S3.1): --stuck N plants a QUALITY WALL at room N (not a hang —
 // returns plateau below every present threshold; the real failure mode, S1.4).
 const STUCK = Number.isInteger(Number(opt("stuck", NaN))) ? Number(opt("stuck")) : -1;
+// FR-C (S4): --policy <name> seats a pure decision function at every room.
+// Registry-only by contract (SDD-B1/B7) — obs.mjs enforces it at the door too.
+const POLICY_NAME = opt("policy", null);
+if (POLICY_NAME !== null && !POLICIES[POLICY_NAME]) {
+  console.error(`✗ unknown policy '${POLICY_NAME}' — registry: ${policyNames().join(", ")} (registry-only; file paths are a refused surface)`);
+  process.exit(2);
+}
+const EPISODE_OUT = opt("episode-out", null);
+const TICK_CAP = 40;  // the harness bound (SP-B8): the SIM enforces it; the test proves it fires
 
 // mulberry32 — tiny seeded RNG; determinism is the contract
 function rng(seed) { let a = seed >>> 0; return () => {
@@ -75,7 +85,60 @@ rooms.forEach((r, i) => { if (r.gy % 2 === 1) r.gx = 3 - (i % 4); });
 
 let reapedAt = -1;
 const clews = [];
+const episode = [];
+let globalTick = 0;
+const r2 = (x) => Math.round(x * 100) / 100;
+// ── FR-C: the policy plays every room — episode JSONL is the conformance surface ──
+const playRoom = (i) => {
+  const pol = POLICIES[POLICY_NAME];
+  const difficulty = .3 + R() * .6;
+  const wall = i === STUCK ? .25 + R() * .08 : 1;  // only the stuck room is walled; elsewhere returns diminish toward 1
+  let q = 0, clock = 0, lastGain = Infinity, action = "read";
+  for (let t = 0; t < TICK_CAP; t++) {
+    action = pol.decide({ quality: q, clock, params: pol.params, lastGain });
+    episode.push({ episode_id: `ep-${POLICY_NAME}-${SEED}`, tick: globalTick++,
+      actor: rooms[i].construct, action,
+      observation_digest: jcsDigest({ seed: SEED, room: i, tick: t, quality: r2(q), clock: r2(clock) }) });
+    if (action !== "read") break;
+    clock += .07 + R() * .05;
+    lastGain = q < wall ? (.16 + R() * .1) * (wall - q) : 0;
+    q += lastGain;
+    if (clock >= 1) { action = "flood"; break; }  // the cap the world enforces
+  }
+  rooms[i].live = Math.min(1, r2(clock));
+  seams.push([i, i + 1]);
+  if (action === "present") {
+    const verdict = q >= .72 ? "APPROVED" : q >= .45 ? "EMITTED" : "REJECTED";
+    const payload = pick(PAYLOADS);
+    envelopes.push({ from: i, to: i + 1, payload, keepers: difficulty > .75 ? 3 : difficulty > .55 ? 2 : 1,
+      verdict, wave: i, gate: gateFor(i),
+      gateline: verdict === "APPROVED" ? `LEGBA turns the key on <i>${payload}</i>… it holds.`
+        : verdict === "EMITTED" ? `the packet <i>${payload}</i> passes, seal unread — emitted, not attested.`
+        : `LEGBA bars the door — quality ${Math.round(q * 100)}% does not clear the bar.`,
+      transform: { badge: BADGES[i % BADGES.length],
+        line: `<b>${rooms[i + 1].construct}</b> receives ${payload} — quality ${Math.round(q * 100)}%` } });
+    return;
+  }
+  // clew (voluntary testimony) or flood/cap (watchdog drops it — SP-B8 in the world)
+  const voluntary = action === "clew";
+  if (!voluntary) rooms[i].live = 1;
+  let divergence = 0;
+  for (let j = envelopes.length - 1; j >= 0; j--)
+    if (envelopes[j].verdict === "APPROVED" || envelopes[j].verdict === "CHECKPOINT") { divergence = j; break; }
+  const packet = { run_id: `play-${POLICY_NAME}-${SEED}`, room: i, divergence, routing: "heal",
+    dropped_by: voluntary ? "agent" : "watchdog", ...(voluntary ? {} : { trigger: "budget" }),
+    clock: r2(clock), quality: r2(q) };
+  clews.push({ room: i, divergence, routing: "heal", dropped_by: packet.dropped_by,
+    ...(voluntary ? {} : { trigger: "budget" }), packet_digest: jcsDigest(packet) });
+  envelopes.push({ from: i, to: i + 1, payload: "distress packet", keepers: 1,
+    verdict: "IMPASSE", wave: i, gate: gateFor(i),
+    gateline: voluntary
+      ? `the envelope presents empty-handed — quality walled at ${Math.round(q * 100)}%. the agent drops the thread.`
+      : `the flood takes the chamber — the watchdog drops the thread. ◷ budget spent, quality ${Math.round(q * 100)}%.`,
+    transform: { badge: "◈", line: `routed onward — <b>${rooms[i + 1].construct}</b> receives the testimony` } });
+};
 for (let i = 0; i < NROOMS - 1; i++) {
+  if (POLICY_NAME) { playRoom(i); continue; }
   // ── the stuck room (S3.1): a quality wall. Distress is a legal, rendered move. ──
   if (i === STUCK) {
     const wall = .25 + R() * .08;              // returns asymptote — below every present bar
@@ -163,11 +226,27 @@ for (let i = 0; i < NROOMS - 1; i++) {
 if (!rooms[NROOMS - 1].live) rooms[NROOMS - 1].live = Math.round((.2 + R() * .3) * 100) / 100;
 
 const level = defaultLevel({
-  schema: SCHEMA, id: `sim-${SEED}`, name: `the gradient, played (greed ${GREED} · discipline ${DISC})`,
-  meta: { run_id: `sim-seed-${SEED}`, generated_at: `sim:${SEED}:${GREED}:${DISC}${STUCK >= 0 ? `:stuck${STUCK}` : ""}`, contract_rev: CONTRACT_REV,
-    enrage_s: 300, sources: { simulator: "sim-gen.mjs", seed: SEED, greed: GREED, discipline: DISC, ...(STUCK >= 0 ? { stuck: STUCK } : {}) } },
+  schema: SCHEMA, id: POLICY_NAME ? `play-${POLICY_NAME}-${SEED}` : `sim-${SEED}`,
+  name: POLICY_NAME ? `the rehearsal seat — ${POLICY_NAME} plays (seed ${SEED})`
+    : `the gradient, played (greed ${GREED} · discipline ${DISC})`,
+  meta: { run_id: POLICY_NAME ? `play-${POLICY_NAME}-${SEED}` : `sim-seed-${SEED}`,
+    generated_at: POLICY_NAME ? `play:${POLICY_NAME}:${SEED}${STUCK >= 0 ? `:stuck${STUCK}` : ""}` : `sim:${SEED}:${GREED}:${DISC}${STUCK >= 0 ? `:stuck${STUCK}` : ""}`,
+    contract_rev: CONTRACT_REV,
+    enrage_s: 300, sources: { simulator: "sim-gen.mjs", seed: SEED,
+      ...(POLICY_NAME ? { policy: POLICY_NAME } : { greed: GREED, discipline: DISC }),
+      ...(STUCK >= 0 ? { stuck: STUCK } : {}) } },
   rooms, seams, envelopes, ...(clews.length ? { clews } : {}),
 });
+// FR-C: the episode is validated line-by-line BEFORE it leaves (the teeth)
+if (POLICY_NAME && episode.length) {
+  for (const [li, line] of episode.entries()) {
+    const ev = validateEpisodeLine(line);
+    if (!ev.ok) { console.error(`✗ episode line ${li} violates the schema:`); ev.errors.forEach(e => console.error("  · " + e)); process.exit(2); }
+  }
+  const jsonl = episode.map(l => JSON.stringify(l)).join("\n") + "\n";
+  if (EPISODE_OUT) { writeFileSync(EPISODE_OUT, jsonl); console.error(`episode ▸ ${EPISODE_OUT} (${episode.length} ticks, schema-valid)`); }
+  else console.error(`episode: ${episode.length} ticks, schema-valid (pass --episode-out to keep it)`);
+}
 const v = validateLevel(level);
 if (!v.ok) { console.error("✗ sim emitted an invalid level:"); v.errors.forEach(e => console.error("  · " + e)); process.exit(2); }
 const json = JSON.stringify(level, null, 1);

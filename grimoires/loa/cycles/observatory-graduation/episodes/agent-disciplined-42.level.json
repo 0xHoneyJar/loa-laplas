@@ -1,0 +1,196 @@
+{
+ "schema": "obs-level/1",
+ "id": "play-disciplined-42",
+ "name": "the rehearsal seat — disciplined plays (seed 42)",
+ "meta": {
+  "run_id": "play-disciplined-42",
+  "generated_at": "play:disciplined:42:stuck3",
+  "contract_rev": 2,
+  "enrage_s": 300,
+  "sources": {
+   "simulator": "sim-gen.mjs",
+   "seed": 42,
+   "policy": "disciplined",
+   "stuck": 3
+  }
+ },
+ "rooms": [
+  {
+   "id": 0,
+   "name": "Token Mill",
+   "construct": "gecko",
+   "spr": "gecko",
+   "gx": 0,
+   "gy": 0,
+   "live": 0.36
+  },
+  {
+   "id": 1,
+   "name": "Clew Press",
+   "construct": "the-easel",
+   "spr": "easel",
+   "gx": 1,
+   "gy": 0,
+   "live": 0.37
+  },
+  {
+   "id": 2,
+   "name": "Verdict Loom",
+   "construct": "vocabulary-bank",
+   "spr": "vocab",
+   "gx": 2,
+   "gy": 0,
+   "live": 0.37
+  },
+  {
+   "id": 3,
+   "name": "Custody Ledger",
+   "construct": "k-hole",
+   "spr": "khole",
+   "gx": 3,
+   "gy": 0,
+   "live": 0.71
+  },
+  {
+   "id": 4,
+   "name": "Seam Audit",
+   "construct": "the-arcade",
+   "spr": "arcade",
+   "gx": 3,
+   "gy": 1,
+   "live": 0.38
+  },
+  {
+   "id": 5,
+   "name": "Handoff Kiln",
+   "construct": "protocol",
+   "spr": "proto",
+   "gx": 2,
+   "gy": 1,
+   "live": 0.25
+  }
+ ],
+ "seams": [
+  [
+   0,
+   1
+  ],
+  [
+   1,
+   2
+  ],
+  [
+   2,
+   3
+  ],
+  [
+   3,
+   4
+  ],
+  [
+   4,
+   5
+  ]
+ ],
+ "envelopes": [
+  {
+   "from": 0,
+   "to": 1,
+   "payload": "typed handoff",
+   "keepers": 1,
+   "verdict": "EMITTED",
+   "wave": 0,
+   "gate": {
+    "name": "handoff-validate",
+    "hardness": "prose",
+    "mechanism": "3-tier fail-closed validator — fires when wrapped via compose-handoff-wrap.sh; skipping the wrap skips it",
+    "help": "bash scripts/compose-handoff-wrap.sh at the seam",
+    "teaches": "no room finishes silently — typed handoff, 5 required fields"
+   },
+   "gateline": "the packet <i>typed handoff</i> passes, seal unread — emitted, not attested.",
+   "transform": {
+    "badge": "✚",
+    "line": "<b>the-easel</b> receives typed handoff — quality 62%"
+   }
+  },
+  {
+   "from": 1,
+   "to": 2,
+   "payload": "attested build",
+   "keepers": 1,
+   "verdict": "EMITTED",
+   "wave": 1,
+   "gate": {
+    "name": "compose-verify-run",
+    "hardness": "prose",
+    "mechanism": "warn-first exit code — verdict-bearing when invoked, nothing forces invocation",
+    "help": "bash scripts/compose-verify-run.sh <run_id>",
+    "teaches": "a result without a valid_run verdict is role-play, not a run"
+   },
+   "gateline": "the packet <i>attested build</i> passes, seal unread — emitted, not attested.",
+   "transform": {
+    "badge": "»",
+    "line": "<b>vocabulary-bank</b> receives attested build — quality 58%"
+   }
+  },
+  {
+   "from": 2,
+   "to": 3,
+   "payload": "grounded findings",
+   "keepers": 1,
+   "verdict": "EMITTED",
+   "wave": 2,
+   "gate": {
+    "name": "spiral-dispatch-guard",
+    "hardness": "hook",
+    "mechanism": "PreToolUse:Write/Edit deny (exit 2) — .loa/.claude/hooks/safety/spiral-dispatch-guard.sh:89",
+    "help": "dispatch via spiral-harness.sh, then write"
+   },
+   "gateline": "the packet <i>grounded findings</i> passes, seal unread — emitted, not attested.",
+   "transform": {
+    "badge": "⚷",
+    "line": "<b>k-hole</b> receives grounded findings — quality 56%"
+   }
+  },
+  {
+   "from": 3,
+   "to": 4,
+   "payload": "typed handoff",
+   "keepers": 2,
+   "verdict": "REJECTED",
+   "wave": 3,
+   "gate": {
+    "name": "adversarial-review-gate",
+    "hardness": "hook",
+    "mechanism": "PreToolUse:Write blocks */COMPLETED without structurally-valid adversarial-*.json (fail-open on infra error)",
+    "help": "run the adversarial review; the artefact unlocks the marker",
+    "teaches": "touch artefact.json does not satisfy structural validation"
+   },
+   "gateline": "LEGBA bars the door — quality 25% does not clear the bar.",
+   "transform": {
+    "badge": "◔",
+    "line": "<b>the-arcade</b> receives typed handoff — quality 25%"
+   }
+  },
+  {
+   "from": 4,
+   "to": 5,
+   "payload": "distilled brief",
+   "keepers": 1,
+   "verdict": "EMITTED",
+   "wave": 4,
+   "gate": {
+    "name": "zone-write-guard",
+    "hardness": "hook",
+    "mechanism": "PreToolUse:Write/Edit zone boundary deny — zone-write-guard.sh (sprint alias: path-domain-check)",
+    "help": "write inside your zone; framework zone is submodule-owned"
+   },
+   "gateline": "the packet <i>distilled brief</i> passes, seal unread — emitted, not attested.",
+   "transform": {
+    "badge": "❡",
+    "line": "<b>protocol</b> receives distilled brief — quality 63%"
+   }
+  }
+ ],
+ "clews": []
+}

@@ -26,6 +26,8 @@ jobs:
         run: node observatory/cli/obs.mjs selftest
       - name: veve vectors byte-match
         run: node observatory/cli/verify-vectors.mjs
+      - name: policy conformance + episode schema (S4)
+        run: node --test observatory/tests/policies.test.mjs
 
   shell:
     name: shell build

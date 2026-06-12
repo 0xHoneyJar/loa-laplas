@@ -22,6 +22,18 @@ const run = (script, args, opts = {}) => {
 
 switch (verb) {
   case "sim": run("sim-gen.mjs", rest); break;
+  case "play": {
+    // FR-C (SDD-B1/B7, IMP-010): policies resolve ONLY from the bundled registry.
+    // An arbitrary --policy file is a code-injection surface — refused, exit 2.
+    const pi = rest.indexOf("--policy");
+    const pv = pi >= 0 ? rest[pi + 1] ?? "" : "";
+    if (!pv) { console.error("✗ obs play needs --policy <name> (registry-only)"); process.exit(2); }
+    if (/[\\/]/.test(pv) || /\.(mjs|js|cjs|json)$/i.test(pv) || pv.startsWith(".")) {
+      console.error(`✗ registry-only: '${pv}' looks like a path — policies resolve from producers/policies.mjs (greedy, disciplined, stuck)`);
+      process.exit(2);
+    }
+    run("sim-gen.mjs", rest); break;
+  }
   case "fold": run("trace-gen.mjs", rest); break;
   case "selftest": run("trace-gen.mjs", ["--selftest"]); break;
   case "serve": {
@@ -29,7 +41,8 @@ switch (verb) {
     child.on("exit", c => process.exit(c ?? 0)); break; }
   default:
     console.error("obs — the Observatory CLI (asson-shaped)\n" +
-      "  obs sim   [--seed N --greed X --discipline Y --rooms N]\n" +
+      "  obs sim   [--seed N --greed X --discipline Y --rooms N --stuck N]\n" +
+      "  obs play  --policy <greedy|disciplined|stuck> --seed N [--rooms N --stuck N --episode-out f.jsonl]\n" +
       "  obs fold  <run-dir> [--audit f --invoke f --enrage-s N] [--live] [--url]\n" +
       "  obs serve [--run dir --port N]\n" +
       "  obs selftest");
