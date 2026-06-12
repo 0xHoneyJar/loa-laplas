@@ -10,7 +10,12 @@
 
 | # | Date | Decision | Rendered-beat citation | What changed |
 |---|---|---|---|---|
-| — | — | _no entries yet — the instrument is not yet teaching_ | — | — |
+| 1 | 2026-06-12 | `compose-calls-ceiling` is signage, not a gate — declared `prose` in hardness-manifest v1; budget-watchdog hook queued (s3-regrounding-spike: budget-exhaustion → involuntary clew) | `verify/captures/s2-gate-impasse.png` (phase 13: the ceiling's HOLLOW door + teaches line "a ceiling that cannot reap is signage, not a gate") | hardness-manifest.json gains the entry; S3 spike re-grounds SDD §3.3 watchdog trigger from liveness to budget/convergence |
+
+> Causality note (anti-Goodhart honesty): entry 1 was INITIATED by S1.4 forensics
+> (raw JSONL) and CONFIRMED by the rendered beat — the hollow door made the
+> declared-but-unenforced ceiling legible enough to commit the S3 hook design.
+> The cleanest G-1 entries (decision born entirely in-game) are still ahead.
 
 ## Cycle decisions (gates, checkpoints, diagnoses)
 
