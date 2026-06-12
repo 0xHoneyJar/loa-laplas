@@ -117,10 +117,17 @@ RT="$HOME/.loa/constructs/substrates/construct-rooms-substrate"
 6. **TERMINAL GATE — prove the run (non-optional).** After the last segment, run the
    proof-of-run gate in TERMINAL mode (`--require-executed`). This is the step that makes
    both inline role-play AND "dispatched the compile but never ran the segments"
-   worthless. Use the exact command dispatch handed you in step 1
-   (`terminal_gate.cmd` / `terminal_gate.argv`, run_id already baked):
+   worthless. **Use the exact command dispatch handed you in step 1**
+   (`terminal_gate.cmd` / `terminal_gate.argv`, run_id already baked) — do NOT
+   reconstruct it by hand. When node + the Legba bridge are present, dispatch bakes
+   `--legba` into that command (the gradient flip): the gate then also verifies the
+   **Legba custody chain** over the run's envelopes — a signed, anchored,
+   tamper-evident chain derived automatically from the handoffs. `valid_run` then
+   means the chain verified too (`checks.legba_chain == true`,
+   `legba_receipt_hash` present); a tampered or rebuilt-over-tamper run reads
+   `broken_run`. Shape (the handed cmd carries `--legba` where available):
    ```sh
-   "$RT/scripts/compose-verify-run.sh" <id> --require-executed --json
+   "$RT/scripts/compose-verify-run.sh" <id> --require-executed --legba --json
    ```
    - `valid_run` (exit 0) → segments executed + handoffs verified → present the result as
      a **completed composition**; cite the `run_id` + `envelope_digest` as the proof.

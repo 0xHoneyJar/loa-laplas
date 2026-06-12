@@ -100,14 +100,17 @@ same-host attacker, tamper-**proof** when the operator holds the receipt.
 
 ## What's still wiring (honest)
 
-- **Involuntary capture**: `legba-record-hook.mjs` is the PostToolUse hook shape
-  (LG-1: recording must be hook-enforced, not voluntary). Wiring it into the
-  compose-dispatch executor sequence — so every Form C segment records + gates +
-  turnstiles automatically — is the integration step that makes the gradient
-  flip (the governed path becomes the cheapest path). Today the CLI is driven
-  explicitly; the hook makes it structural. Note the turnstile currently
-  *records* ordering post-hoc; it *refuses* a skipped segment only once recording
-  is on the dispatch path.
+- **Gradient flip (DONE, envelope level)**: `compose-dispatch.sh --form-c` now
+  bakes `--legba` into the terminal gate it hands the executor (when node + this
+  bridge are present), so every governed run's proof-of-run gate verifies the
+  Legba custody chain BY CONSTRUCTION — the agent cannot reach `valid_run`
+  without a verifying, anchored chain, and the chain is auto-derived from the
+  envelopes it already produces. The governed path is now the cheapest path.
+- **Move-level involuntary capture (still wiring)**: `legba-record-hook.mjs` is
+  the PostToolUse hook shape (LG-1) for recording each *tool call* as it happens
+  (vs the envelope-level chain the dispatch flip already enforces). The turnstile
+  *refuses* a skipped segment only once per-tool recording is on the dispatch
+  path; the envelope chain *records + verifies* ordering today.
 - **compose-verify-run chain extension**: DONE — `compose-verify-run.sh --legba`
   derives + verifies the chain (the seam the comment reserved is closed).
 - **Full RFC-8785 JCS**: the canonicalizer here is the documented subset (flat
