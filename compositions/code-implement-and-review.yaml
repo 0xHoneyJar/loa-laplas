@@ -110,15 +110,12 @@ terminate_when: >
 # self-contained unit one sonnet worker can ship and the gate can anchor a finding
 # to. The emitter is deterministic and never shells out to derive items — the
 # EXECUTOR populates them (segment-emitter.py:949-950).
-dag_fanout:
-  capable: true
-  work_stage: 1            # role: primary — the fanned leaf
-  gate_stage: 2            # role: craft-gate — fires once on the merged diff
-  executor_populates: "args.items[]"
-  leaf_tier_default: sonnet
-  gate_tier: opus
-  gate_fires: "once per convergence cycle on the merged diff; findings anchored to [item-id]"
-  backward_compatible: "no items[] -> single-context implement->gate path, unchanged"
+# (The fan-out contract is the COMMENT above — deliberately NOT a structured key:
+#  the host composition schema is additionalProperties:false at the top level, so a
+#  dag_fanout: key fails validate-before-spend. The declaration: capable=true,
+#  work_stage=1 (role:primary), gate_stage=2 (role:craft-gate, opus, fires once),
+#  leaf_tier=sonnet, backward-compatible with no items[]. The runtime carries the
+#  machinery; this block documents the contract for the driver + the next maintainer.)
 
 # ================================================================
 # Stages

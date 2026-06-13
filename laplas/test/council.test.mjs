@@ -8,6 +8,7 @@ import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { pubPem } from "../../poteau/bin/reviewer-keys.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const REPO = join(here, "..", "..");
@@ -45,7 +46,13 @@ test("S4.1 — council-run seats 2 distinct voices, receipts bind task_ref + pac
 });
 
 test("S4.2 #30 runtime — council receipts CLEAR P204 (the worked example's green path opens)", () => {
-  const rs = seed(); // worked example: review_routing.council=true, min_voices=2
+  const rs = seed();
+  // code-implement-and-review is now council:false (compose-speed S1, single opus gate).
+  // This test exercises the council GREEN path, so provision an explicit council
+  // contract with the reviewer PUBLIC keys the council runner signs against — the
+  // gatekeeper verifies the signatures against these (FR-E). Same keyset (repo default
+  // or POTEAU_REVIEWERS) the council() runner reads its private keys from.
+  rs.review_routing = { council: true, min_voices: 2, reviewer_keys: ["claude", "codex", "gemini"].map(pubPem) };
   const base = { verdict: "APPROVED", rationale: "# construct-rooms-substrate — objectives met within scope", task_ref: rs.task_ref, conformance: { in_scope: true } };
   // before: no council receipts → P204 (proven in benchmarks.test.mjs)
   assert.equal(judge(rs, base).code, "P204");

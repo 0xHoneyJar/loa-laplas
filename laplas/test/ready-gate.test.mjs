@@ -49,8 +49,11 @@ test("P602 — tool required but dungeon lacks it; refusal names the loadout fix
 });
 
 test("P603 — council under-staffed; refusal names #30 + add voices", () => {
-  const party = good("party"); party.members = party.members.filter(m => m.role !== "reviewer-b");
-  const r = has(ready({ party }).refusals, "P603");
+  // code-implement-and-review is council:false now (compose-speed S1, single opus gate);
+  // assert an explicit council mandate so the under-staffed check has something to bite.
+  const quest = good("quest"); quest.review_routing = { council: true, min_voices: 2 };
+  const party = good("party"); // S1 staffs ONE council seat (reviewer) — under the min of 2
+  const r = has(ready({ quest, party }).refusals, "P603");
   assert.ok(r); assert.match(r.refusal, /add voices|#30|council/i);
 });
 
