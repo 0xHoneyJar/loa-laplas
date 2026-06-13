@@ -92,3 +92,11 @@ proven core — the natural fresh-context continuation.
   shelled with 10s timeout in the gatekeeper) is defense-in-depth on an already-
   fail-closed path — deferred to the port-completion pass. Neither blocks #29/#31/#7/#30
   closure (all proven).
+
+## S3.5 manifest flips — correctly DEFERRED to merge (fail-honest)
+The poteau gates (tool-gate/P402, exit-gate/P101, gatekeeper/P201-204) are hook-CAPABLE
+but NOT active until the operator merges the lattice (runbook, operator-gated). Declaring
+them "hook" in hardness-manifest.json now would violate the fail-honest doctrine the cycle
+is built on ("declare reality, not aspiration"). The flip ships WITH the merge-for-keeps
+(post-S3.3), each entry citing its demo benchmark (G-5 standing rule). loa-tool-mandate's
+successor relationship (advisory→poteau tool-gate) is the headline flip when it lands.
