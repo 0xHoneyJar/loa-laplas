@@ -579,6 +579,26 @@ _clean_poteau_run() {
     [[ "$got" == "$want" ]] || fail "packet task_ref ($got) != armed run-state task_ref ($want)"
 }
 
+@test "session-link (T3): dispatch --module binds CLAUDE_CODE_SESSION_ID -> run_id so the exit-gate resolves the real run" {
+    [[ -f "$PILOT" ]] || skip "pilot composition missing"
+    local mod="$SUBSTRATE_ROOT/modules/code-implement-and-review/module.json"
+    [[ -f "$mod" ]] || skip "code-implement-and-review module missing"
+    export LOA_PROJECT_ROOT="$TMPROOT"
+    [[ -n "$SCHEMA" ]] && export LOA_COMPOSE_SCHEMA="$SCHEMA"
+    # The exit-gate's last mile: prompt-arm only ADOPTS a pre-armed run and fires
+    # BEFORE dispatch, so for a one-shot /compose the dispatcher is the only actor
+    # holding both the session id (env) and the freshly-minted run_id. Gate-0 runs
+    # FIRST (before the cut), so the pointer is written even if downstream cut/emit
+    # has issues — assert ONLY the binding here.
+    local sess="bats-sess-$$" rid="slink$$"
+    CLAUDE_CODE_SESSION_ID="$sess" bash "$DISPATCH" "$PILOT" --module "$mod" --form-c --run-id "$rid" --json >/dev/null 2>&1 || true
+    local ptr="$SUBSTRATE_ROOT/.run/poteau/by-session/$sess" got_rid=""
+    [[ -f "$ptr" ]] && got_rid="$(jq -r '.run_id' "$ptr")"
+    rm -f "$ptr"
+    _clean_poteau_run "$rid"
+    [[ "$got_rid" == "$rid" ]] || fail "session-link not written: by-session/$sess -> '$got_rid' (expected '$rid')"
+}
+
 @test "poteau-wire: an UNARMED run emits NO poteau packet (wave-1 legality preserved)" {
     [[ -f "$HWRAP" ]] || skip "handoff-wrap missing"
     export LOA_PROJECT_ROOT="$TMPROOT"
