@@ -23,9 +23,17 @@ esac
 # The agent must be able to emit its packet (a wholesale deny would deadlock its
 # own exit); the packet is harmless by construction — JUDGED by G1–G5, receipts
 # minted only by the gatekeeper. The carve-out is data; the judgment is law.
-if printf '%s' "$TARGET" | grep -Eq '\.run/poteau/[^[:space:]/]+/packet\.json' ; then
+#
+# SECURITY (audit finding): the carve-out is the ONE hole in the constitutional
+# deny — it must be airtight. Two defenses against substring/traversal bypass:
+#   (1) ANY '..' in the target → never carve out (path traversal closed, even
+#       though packet.json/../ fails at the OS with ENOTDIR — defense in depth).
+#   (2) packet.json must be the FINAL path component ($-anchored), not a
+#       substring — so '.../packet.json/../run-state.json' does NOT open the gate.
+if ! printf '%s' "$TARGET" | grep -q '\.\.' \
+   && printf '%s' "$TARGET" | grep -Eq '\.run/poteau/[^[:space:]/]+/packet\.json([[:space:]]|$)' ; then
   if ! printf '%s' "$TARGET" | sed -E 's#\.run/poteau/[^[:space:]/]+/packet\.json##g' | grep -q '\.run/poteau/'; then
-    exit 0  # only packet.json paths mentioned — the mailbox is open
+    exit 0  # only a final-component packet.json path, no traversal — the mailbox is open
   fi
 fi
 for P in ".claude/" ".run/poteau/" "poteau/manifest/" "poteau/hooks/" "poteau/bin/"; do

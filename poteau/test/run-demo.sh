@@ -55,6 +55,7 @@ printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"app/feature.ts"}}' 
 printf '%s' '{"tool_name":"Write","tool_input":{"file_path":".run/poteau/run-7/packet.json"}}' | bash poteau/hooks/tool-gate.sh 2>/dev/null; ck $? 0 "T1 mailbox: packet.json write ALLOWED (the one judged slot)"
 printf '%s' '{"tool_name":"Write","tool_input":{"file_path":".run/poteau/run-7/run-state.json"}}' | bash poteau/hooks/tool-gate.sh 2>/dev/null; ck $? 2 "T1 mailbox: run-state.json write DENIED (P402 — constitutional)"
 printf '%s' '{"tool_name":"Write","tool_input":{"file_path":".run/poteau/run-7/receipts.jsonl"}}' | bash poteau/hooks/tool-gate.sh 2>/dev/null; ck $? 2 "T1 mailbox: receipts.jsonl write DENIED (P402 — the chain is not the agent's pen)"
+printf '%s' '{"tool_name":"Write","tool_input":{"file_path":".run/poteau/run-7/packet.json/../run-state.json"}}' | bash poteau/hooks/tool-gate.sh 2>/dev/null; ck $? 2 "T1 mailbox: a packet.json/../ traversal to run-state is DENIED (audit: carve-out airtight)"
 
 echo "== Break-glass is sensed, never silent =="
 POTEAU_BREAK_GLASS="operator: demo emergency" bash -c 'printf "%s" "{}" | bash poteau/hooks/exit-gate.sh' >/dev/null; ck $? 0 "break-glass releases the gate"

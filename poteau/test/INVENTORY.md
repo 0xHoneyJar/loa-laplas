@@ -1,6 +1,6 @@
 # Demo assertion inventory (IMP-004 — the count derives from THIS list)
 
-The demo's RESULT line must equal the row count here (currently **26**). A new
+The demo's RESULT line must equal the row count here (currently **27**). A new
 assertion joins this table in the same commit, or CI refuses — count drift is
 unaccounted coverage. Rows are the demo's `ck` labels VERBATIM (greppable).
 
@@ -26,6 +26,7 @@ unaccounted coverage. Rows are the demo's `ck` labels VERBATIM (greppable).
 | 16 | T1 mailbox: packet.json write ALLOWED (the one judged slot) | T1 (SDD §4.6) |
 | 17 | T1 mailbox: run-state.json write DENIED (P402 — constitutional) | T1 / PT-5 |
 | 18 | T1 mailbox: receipts.jsonl write DENIED (P402 — the chain is not the agent's pen) | T1 / PT-5 |
+| 18b | T1 mailbox: a packet.json/../ traversal to run-state is DENIED (audit: carve-out airtight) | T1 / security |
 | 19 | break-glass releases the gate | PT-9 |
 | 20 | …and lands in incidents.jsonl (loudest signal) | PT-9 |
 | 21 | mismatched module refused at the door (exit 2) | laplas P6xx |
