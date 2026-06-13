@@ -18,11 +18,21 @@
 # gate.max_stop_blocks_per_turn (default 3) — checkpoint, never imprison.
 # =============================================================================
 INPUT=$(cat)
+mkdir -p .run/poteau
+
+# RUN_DIR resolution (T3 run-scoping): this session's by-session pointer →
+# .run/poteau/<run_id>/ (dispatcher-armed). Falls back to the flat
+# .run/poteau/ during the port (reference shape). Break-glass incidents land
+# at the resolved RUN_DIR so they're attributable to the run.
+SESSION=$(printf '%s' "$INPUT" | jq -r '.session_id // "local"' 2>/dev/null)
 RUN_DIR=".run/poteau"
-mkdir -p "$RUN_DIR"
+if [ -f ".run/poteau/by-session/$SESSION" ]; then
+  _rid=$(jq -r '.run_id // ""' ".run/poteau/by-session/$SESSION" 2>/dev/null)
+  [ -n "$_rid" ] && [ -f ".run/poteau/$_rid/run-state.json" ] && RUN_DIR=".run/poteau/$_rid"
+fi
 
 if [ -n "$POTEAU_BREAK_GLASS" ]; then
-  echo "{\"ts\":\"$(date -u +%FT%TZ)\",\"event\":\"break_glass\",\"reason\":\"$POTEAU_BREAK_GLASS\"}" >> "$RUN_DIR/incidents.jsonl"
+  echo "{\"ts\":\"$(date -u +%FT%TZ)\",\"event\":\"break_glass\",\"reason\":\"$POTEAU_BREAK_GLASS\",\"actor\":\"operator\"}" >> "$RUN_DIR/incidents.jsonl"
   exit 0
 fi
 
@@ -40,7 +50,7 @@ BLOCKS=$(jq -r '.stop_blocks // 0' "$RUN_DIR/run-state.json" 2>/dev/null); BLOCK
 PB="${POTEAU_ROOT:-poteau}"  # repo-convention delta: package root overridable
 MAX=$(jq -r '.gate.max_stop_blocks_per_turn // 3' "$PB/manifest/poteau.manifest.json" 2>/dev/null); MAX=${MAX:-3}
 if [ "$ACTIVE" = "true" ] && [ "$BLOCKS" -ge "$MAX" ]; then
-  echo "{\"ts\":\"$(date -u +%FT%TZ)\",\"event\":\"max_blocks_checkpoint\",\"blocks\":$BLOCKS}" >> "$RUN_DIR/incidents.jsonl"
+  echo "{\"ts\":\"$(date -u +%FT%TZ)\",\"event\":\"max_blocks_checkpoint\",\"blocks\":$BLOCKS,\"actor\":\"watchdog\"}" >> "$RUN_DIR/incidents.jsonl"
   exit 0   # checkpoint-and-release: liveness > imprisonment; incident is loud
 fi
 

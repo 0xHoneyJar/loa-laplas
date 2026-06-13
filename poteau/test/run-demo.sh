@@ -44,7 +44,7 @@ OUT=$(printf '%s' '{"stop_hook_active":true}' | bash poteau/hooks/exit-gate.sh)
 [ -z "$OUT" ] && grep -q max_blocks_checkpoint .run/poteau/incidents.jsonl; ck $? 0 "4th block in one chain → checkpoint-and-release + incident (liveness > imprisonment)"
 jq -n --arg t "$TASKREF" '{verdict:"complete", rationale:"# DPR Methodology — grounded: curve scales per level...", task_ref:$t, conformance:{in_scope:true, note:"dpr only"}}' > .run/poteau/packet.json
 printf '%s' '{"stop_hook_active":false}' | bash poteau/hooks/exit-gate.sh >/dev/null; ck $? 0 "fresh turn resets chain; conforming+grounded packet → receipt minted"
-test -s .run/poteau/receipts.jsonl; ck $? 0 "receipt chain exists on disk"
+test -s .run/poteau/demo-run/receipts.jsonl; ck $? 0 "receipt chain exists on disk (run-scoped)"
 jq -e '.gate_index==1 and .stop_blocks==0' .run/poteau/run-state.json >/dev/null; ck $? 0 "run state advanced (gate_index=1)"
 
 echo "== P402: the law protecting the law =="

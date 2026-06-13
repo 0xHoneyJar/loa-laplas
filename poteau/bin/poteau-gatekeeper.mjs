@@ -37,6 +37,12 @@ const refuse = (code, teach) => {  // refusals teach: what failed, the fix, the 
   process.stdout.write(JSON.stringify({ pass: false, code, refusal: teach }) + '\n');
   process.exit(2);
 };
+// custody refusals fail CLOSED with exit 5 (distinct from the policy refusals'
+// exit 2) — an internal/custody fault refuses, never waves through (P500).
+const custodyRefuse = (teach) => {
+  process.stdout.write(JSON.stringify({ pass: false, code: 'P500', refusal: teach }) + '\n');
+  process.exit(5);
+};
 
 let input;
 try { input = JSON.parse(readFileSync(0, 'utf8')); }
@@ -76,33 +82,48 @@ if (rs.review_routing?.council === true) {
     refuse('P204', `This surface mandates a council (min ${rs.review_routing.min_voices ?? 2} voices); packet carries ${voices.size}. Single-model review FORBIDDEN here — attach council receipts or route through the council runner. Silent downgrade is the one failure this gate exists to prevent.`);
 }
 
-// G5 — mint the receipt (legba shape: signed, chained)
-const keyPath = process.env.POTEAU_KEY ?? '.run/poteau/gate.key';
-let priv;
-if (existsSync(keyPath)) priv = createPrivateKey(readFileSync(keyPath));
-else {
-  const kp = generateKeyPairSync('ed25519');
-  mkdirSync(dirname(keyPath), { recursive: true });
-  writeFileSync(keyPath, kp.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
-  writeFileSync(keyPath + '.pub', kp.publicKey.export({ type: 'spki', format: 'pem' }));
-  priv = kp.privateKey;
+// G5 — mint the receipt (legba shape: signed, chained). CUSTODY: the whole
+// block fails CLOSED — any throw (corrupt key, bad digest) → P500 exit 5, never
+// an uncaught exit-1 wave-through (bridgebuilder finding).
+try {
+  // run-scoped chain (bridgebuilder/B8): each ceremony OWNS its chain at
+  // .run/poteau/<run_id>/receipts.jsonl. An unarmed session (no run_id) must
+  // produce ABSENCE of receipts, not an "unarmed" one verify-gate would mistake
+  // for forgery — so refuse rather than mint unscoped.
+  if (!rs.run_id) custodyRefuse('gatekeeper: armed mint requires run_state.run_id — refusing to mint an unscoped receipt. An unarmed session produces NO receipts (verify-gate stamps governance:unarmed); arm via the dispatcher gate 0.');
+  const runDir = '.run/poteau/' + rs.run_id;
+  mkdirSync(runDir, { recursive: true });
+  const keyPath = process.env.POTEAU_KEY ?? '.run/poteau/gate.key';  // shared until FR-E per-run keys
+  let priv;
+  if (existsSync(keyPath)) priv = createPrivateKey(readFileSync(keyPath));
+  else {
+    const kp = generateKeyPairSync('ed25519');
+    mkdirSync(dirname(keyPath), { recursive: true });
+    writeFileSync(keyPath, kp.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+    writeFileSync(keyPath + '.pub', kp.publicKey.export({ type: 'spki', format: 'pem' }));
+    priv = kp.privateKey;
+  }
+  const chainPath = runDir + '/receipts.jsonl';
+  let prev = null;
+  if (existsSync(chainPath)) {
+    const lines = readFileSync(chainPath, 'utf8').trim().split('\n').filter(Boolean);
+    if (lines.length) prev = JSON.parse(lines[lines.length - 1]).receipt_hash;
+  }
+  const receipt = {
+    receipt_kind: 'poteau_gate_pass', poteau_version: '0.1.0',
+    run_id: rs.run_id, gate_index: rs.gate_index ?? 0,
+    prev_receipt_hash: prev,
+    task_ref: packet.task_ref ?? null,
+    packet_hash: sha(jcs(packet)),
+    checks: { task_conformance: !!rs.task, grounding: (rs.mandated_reads ?? []).length, council: !!rs.review_routing?.council },
+    ts: new Date().toISOString(),
+  };
+  // IMP-011 freshness: the run-scoped chain already makes cross-run replay
+  // structurally impossible; additionally refuse a receipt predating arming.
+  if (rs.armed_at && receipt.ts < rs.armed_at) custodyRefuse('gatekeeper: receipt ts predates run armed_at (clock skew or replay) — refused (IMP-011).');
+  const sealed = { receipt, signature: sign(null, Buffer.from(jcs(receipt)), priv).toString('base64'), receipt_hash: sha(jcs(receipt)) };
+  writeFileSync(chainPath, (existsSync(chainPath) ? readFileSync(chainPath, 'utf8') : '') + JSON.stringify(sealed) + '\n');
+  process.stdout.write(JSON.stringify({ pass: true, receipt_hash: sealed.receipt_hash, gate_index: receipt.gate_index }) + '\n');
+} catch (e) {
+  custodyRefuse('gatekeeper: receipt mint failed (' + (e && e.message ? e.message : e) + ') — custody fails closed, never waved through.');
 }
-const chainPath = '.run/poteau/receipts.jsonl';
-let prev = null;
-if (existsSync(chainPath)) {
-  const lines = readFileSync(chainPath, 'utf8').trim().split('\n').filter(Boolean);
-  if (lines.length) prev = JSON.parse(lines[lines.length - 1]).receipt_hash;
-}
-const receipt = {
-  receipt_kind: 'poteau_gate_pass', poteau_version: '0.1.0',
-  run_id: rs.run_id ?? 'unarmed', gate_index: rs.gate_index ?? 0,
-  prev_receipt_hash: prev,
-  task_ref: packet.task_ref ?? null,
-  packet_hash: sha(jcs(packet)),
-  checks: { task_conformance: !!rs.task, grounding: (rs.mandated_reads ?? []).length, council: !!rs.review_routing?.council },
-  ts: new Date().toISOString(),
-};
-const sealed = { receipt, signature: sign(null, Buffer.from(jcs(receipt)), priv).toString('base64'), receipt_hash: sha(jcs(receipt)) };
-mkdirSync('.run/poteau', { recursive: true });
-writeFileSync(chainPath, (existsSync(chainPath) ? readFileSync(chainPath, 'utf8') : '') + JSON.stringify(sealed) + '\n');
-process.stdout.write(JSON.stringify({ pass: true, receipt_hash: sealed.receipt_hash, gate_index: receipt.gate_index }) + '\n');
