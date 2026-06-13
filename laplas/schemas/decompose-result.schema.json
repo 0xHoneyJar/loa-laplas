@@ -1,0 +1,14 @@
+{
+  "$comment": "decompose-result.schema.json — the typed stdout envelope of decompose.mjs (sprint §0.1). A discriminated union on `type`; the house validate-schema.mjs is a draft-07 SUBSET (no oneOf), so the arms are modelled as optional properties keyed by type. The internal 'fail' outcome of dagValidate is NOT a stdout result — it maps to exit 3 — so it is excluded here.",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": { "type": "string", "enum": ["dag", "serial", "refusal"] },
+    "items": { "type": "array" },
+    "rel_policy": { "type": "object" },
+    "decomposition_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "fallback_reason": { "type": "string", "enum": ["LOW_CONFIDENCE", "INDIVISIBLE", "LLM_EMPTY"] },
+    "refusal_reason": { "type": "string", "enum": ["SANITIZE_REJECT", "DOMAIN_AMBIGUOUS", "ROSTER_INVALID", "LLM_FAILURE", "GOAL_TOO_LARGE", "DETECTOR_TIMEOUT", "EMPTY"] },
+    "detail": { "type": "string" }
+  }
+}
