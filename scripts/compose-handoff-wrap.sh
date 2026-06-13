@@ -172,7 +172,21 @@ if [[ -n "${RUN_ID:-}" && -f "$POTEAU_DIR/run-state.json" ]]; then
                  ("Stage " + $idx + " (" + $slug + ") produced its handoff."))
             ),
             task_ref: (if $task_ref == "" then null else $task_ref end),
-            conformance: { in_scope: true, note: ($slug + " stage " + $idx + " output within composition scope") },
+            # in_scope is DERIVED from the gate verdict — NOT stamped true (review C1:
+            # an unconditional in_scope:true makes P202 vacuous, asserting a conformance
+            # judgment no construct made). A gate that did not affirm (CHANGES_REQUIRED/
+            # REJECTED/DENIED/IMPASSE) → in_scope:false → P202 refuses, which is correct.
+            # Non-verdict (work) stages carry the composition-scope assertion (the gate
+            # downstream is the real conformance check). FULL conformance — the construct
+            # asserting task-match + scope from its OWN output — remains the construct-
+            # participation follow-up (applies to P201/P202/P203, not an executor stamp).
+            conformance: {
+                in_scope: (
+                    ($inner.verdict // "complete") as $v |
+                    ($v == "APPROVED" or $v == "CHECKPOINT" or $v == "EMITTED" or $v == "complete")
+                ),
+                note: ($slug + " stage " + $idx + ": in_scope derived from verdict " + ($inner.verdict // "complete"))
+            },
             composition_run_id: .composition_run_id,
             stage_index: .stage_index,
             construct_slug: .construct_slug
