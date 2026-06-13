@@ -17,12 +17,35 @@ TARGET=""
 case "$TOOL" in
   Write|Edit|MultiEdit) TARGET=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // ""' 2>/dev/null) ;;
   Bash)                 TARGET=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // ""' 2>/dev/null) ;;
+  Read|NotebookRead)
+    # Reads are otherwise UNGATED — but the FR-E reviewer signing keys are the one
+    # read that enables council forgery (a held private key → self-signed votes).
+    _rt=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // ""' 2>/dev/null)
+    printf '%s' "$_rt" | grep -q '\.run/poteau/reviewers/' && { echo "POTEAU DENIED (P402): .run/poteau/reviewers/ holds reviewer SIGNING keys — no run participant may read them (a held key forges a council). They are provisioned out-of-band; the gatekeeper verifies the public keys only." >&2; exit 2; }
+    exit 0 ;;
   *) exit 0 ;;
 esac
+# FR-E (bug-20260612-b2936d): reviewer PRIVATE keys are unreadable by ANY tool —
+# a Write/Edit/Bash touching them is denied here (the Read path is handled above).
+# FENCE-grade (subshell-bypassable); hard isolation is keeping the keys off the
+# shared FS (a deployment property — see poteau/bin/reviewer-keys.mjs).
+if printf '%s' "$TARGET" | grep -q '\.run/poteau/reviewers/'; then
+  echo "POTEAU DENIED (P402): .run/poteau/reviewers/ holds reviewer SIGNING keys — not readable or writable by a run participant. A held private key forges a council; the keys are provisioned out-of-band." >&2
+  exit 2
+fi
 # T1 (SDD §4.6) — THE PACKET MAILBOX: the ONE writable slot under .run/poteau/.
 # The agent must be able to emit its packet (a wholesale deny would deadlock its
 # own exit); the packet is harmless by construction — JUDGED by G1–G5, receipts
 # minted only by the gatekeeper. The carve-out is data; the judgment is law.
+#
+# AUTHOR ISOLATION (bug-20260612-b2936d): we deliberately DO NOT restrict *who*
+# writes packet.json to "the wire only" — on a shared filesystem the hook cannot
+# distinguish the executor from a run-participant subagent (same user, same tree),
+# so such a restriction would be FORM, not substance — the very failure class this
+# bug is about. Author/judge isolation is enforced where it CAN be: in the
+# gatekeeper (G4), which requires the packet's PASS to carry valid Ed25519 council
+# signatures from provisioned reviewer keys. A self-reflecting agent may write any
+# packet here; it cannot make one MINT without reviewer keys it does not hold.
 #
 # SECURITY (audit finding): the carve-out is the ONE hole in the constitutional
 # deny — it must be airtight. Two defenses against substring/traversal bypass:

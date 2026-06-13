@@ -17,6 +17,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { extractH1 } from "./extract-h1.mjs";
+import { pubPem } from "../../poteau/bin/reviewer-keys.mjs";
 
 const jcs = (v) => v === null || typeof v !== "object" ? JSON.stringify(v)
   : Array.isArray(v) ? "[" + v.map(jcs).join(",") + "]"
@@ -49,7 +50,18 @@ for (const r of quest.mandated_reads ?? []) {
   mandated_reads.push({ path: r.path, h1: actual });
 }
 
-const review_routing = quest.review_routing ?? { council: false };
+const review_routing = { ...(quest.review_routing ?? { council: false }) };
+// FR-E (bug-20260612-b2936d): a council mandate must be CRYPTOGRAPHICALLY
+// verifiable, not runner-grade (fabricable strings — the forgery this closes).
+// Provision the reviewer PUBLIC keys the gatekeeper (G4) verifies against, one
+// per provider. The matching PRIVATE keys are held by the council runner, out of
+// the governed agent's read reach (tool-gate denies .run/poteau/reviewers/).
+// Without provisioned keys a council:true run fails CLOSED (P204) — by design.
+if (review_routing.council === true) {
+  const providers = review_routing.providers ?? ["claude", "codex", "gemini"];
+  review_routing.providers = providers;
+  review_routing.reviewer_keys = providers.map((p) => pubPem(p));
+}
 
 const runState = {
   run_id: process.env.POTEAU_RUN_ID ?? "unarmed",

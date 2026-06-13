@@ -12,19 +12,25 @@
  *   G2 TASK CONFORMANCE (#29): packet.task_ref must hash-match run_state.task, and
  *      packet.conformance must assert scope. The gate cannot approve work it never
  *      compared to the task — so the task travels INTO the verdict, mechanically.
- *   G3 PROOF OF GROUNDING (#31): for each run_state.mandated_reads entry, the packet
- *      rationale must OPEN with that document's literal H1 (h1_echo mode). A read that
- *      left no echo is presumed unread. Mechanical, no semantic judgment.
- *   G4 COUNCIL HONOR (#30, runtime half): if run_state.review_routing mandates a
- *      council, the packet must carry council receipts (>=2 distinct reviewer ids);
- *      a single voice on a mandated council surface refuses.
+ *   G3 GROUNDING HEURISTIC (#31; honestly reframed by bug-20260612-b2936d): the
+ *      packet rationale must echo each mandated read's H1. A WEAK signal, not a
+ *      proof — the H1 lives in the readable run_state, so it proves the string was
+ *      reproduced, not that the doc was read. Catches the agent that ignored the
+ *      mandate; does not prove grounding. See the G3 block for the declared limit.
+ *   G4 COUNCIL HONOR (#30, runtime half; hardened by bug-20260612-b2936d): if
+ *      run_state.review_routing mandates a council, each council receipt must carry
+ *      a valid Ed25519 SIGNATURE from a distinct PROVISIONED reviewer key (verified
+ *      against run_state.review_routing.reviewer_keys) — not a fabricable id string.
+ *      This is the gate's own G5 signature discipline turned inward, and it is what
+ *      restores author/judge isolation (a work agent can write any packet but cannot
+ *      sign for reviewer keys it does not hold).
  *   G5 mint: ed25519-signed gate receipt, chained to prev receipt (legba shape).
  *
  * Zero-dep, node:crypto only. Key ceremony: per-repo key at .run/poteau/gate.key
  * (generated on first run; production: provisioned per room, versioned, public
  * keys published — see PROMPT.md Phase 4).
  */
-import { createHash, generateKeyPairSync, sign, createPrivateKey, createPublicKey } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign, verify, createPrivateKey, createPublicKey } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -64,22 +70,61 @@ if (rs.task) {
     refuse('P202', 'Packet.conformance.in_scope must be explicitly asserted (true) with a one-line scope note. Verdict rule: CHANGES_REQUIRED if the diff does not implement the TASK within SCOPE, regardless of internal quality.');
 }
 
-// G3 — proof of grounding (#31: reads leave echoes)
+// G3 — grounding HEURISTIC (#31). HONEST LIMIT (bug-20260612-b2936d): the H1
+// lives in run_state.mandated_reads[].h1 (readable), so this checks the H1 string
+// was REPRODUCED, not that the document was read or the reasoning grounded in it.
+// It is a weak signal — it catches the agent that ignored the mandate entirely —
+// NOT a proof. Any grounding proof an agent can produce by reading the doc it can
+// also produce by reading the run-state if the proof is embedded there; closing
+// this absolutely requires an out-of-band check (the gatekeeper reading the actual
+// file), which is deferred. We keep the signal but DO NOT over-claim "proof".
 if ((rs.mandated_reads ?? []).length) {
   const rationale = String(packet.rationale ?? '');
   for (const read of rs.mandated_reads) {
     const h1 = String(read.h1 ?? '').trim();
     if (!h1) continue;
     if (!rationale.includes(h1))
-      refuse('P203', `Mandated read not evidenced: rationale must quote the H1 of "${read.path}" verbatim — open your rationale with: ${h1} — then ground your reasoning in it. A read that left no echo is presumed unread (0/4 becomes 4/4 by mechanism, not memory).`);
+      refuse('P203', `Mandated read not evidenced: rationale must quote the H1 of "${read.path}" verbatim — open your rationale with: ${h1} — then ground your reasoning in it. (Heuristic: a missing echo signals the mandate was ignored; a present echo is necessary but not sufficient.)`);
   }
 }
 
-// G4 — council honor (#30, runtime half)
+// G4 — council honor (#30, runtime half). SUBSTANCE not FORM (bug-20260612-b2936d):
+// a council receipt must be a real Ed25519 SIGNATURE from a DISTINCT provisioned
+// reviewer key, not a fabricable reviewer_id string. Forging a string is trivial;
+// forging a signature against a key you do not hold is not. This is the legba/G5
+// discipline the gate uses on its OWN receipt, turned inward on the council inputs,
+// and it is what restores author/judge isolation: a work agent may WRITE any packet
+// (the mailbox stays open) but cannot make one PASS without the reviewer keys.
+//   DECLARED LIMIT (a deployment property the gatekeeper cannot enforce): this holds
+//   ONLY while reviewer PRIVATE keys live outside the governed agent's filesystem
+//   reach — held by the council runner / provisioned per room. If a deployment writes
+//   reviewer private keys into the agent-readable run dir, forgery returns. The PUBLIC
+//   keys in run_state.review_routing.reviewer_keys are safe to be readable.
+let councilVoices = 0;
 if (rs.review_routing?.council === true) {
-  const voices = new Set((packet.council_receipts ?? []).map(r => r.reviewer_id));
-  if (voices.size < (rs.review_routing.min_voices ?? 2))
-    refuse('P204', `This surface mandates a council (min ${rs.review_routing.min_voices ?? 2} voices); packet carries ${voices.size}. Single-model review FORBIDDEN here — attach council receipts or route through the council runner. Silent downgrade is the one failure this gate exists to prevent.`);
+  const min = rs.review_routing.min_voices ?? 2;
+  const pems = rs.review_routing.reviewer_keys ?? [];
+  let keys;
+  try { keys = pems.map(p => createPublicKey(p)); }
+  catch { custodyRefuse('gatekeeper: review_routing.reviewer_keys holds an unparseable public key — custody fails closed, never waved through.'); }
+  if (!keys.length)
+    refuse('P204', `This surface mandates a council (min ${min} voices) but no reviewer public keys are provisioned (run_state.review_routing.reviewer_keys is empty). A council that cannot be verified cannot be honored — provision reviewer keys via the council runner.`);
+  // Each reviewer signs the canonical {task_ref,verdict} it attests. Count DISTINCT
+  // reviewer keys with a valid signature (a receipt is bound to at most one key).
+  const councilPayload = Buffer.from(jcs({ task_ref: packet.task_ref ?? null, verdict: packet.verdict }));
+  const verified = new Set();
+  for (const r of (packet.council_receipts ?? [])) {
+    if (!r || typeof r.signature !== 'string') continue;
+    let sig; try { sig = Buffer.from(r.signature, 'base64'); } catch { continue; }
+    for (let i = 0; i < keys.length; i++) {
+      if (verified.has(i)) continue;
+      let ok = false; try { ok = verify(null, councilPayload, keys[i], sig); } catch { ok = false; }
+      if (ok) { verified.add(i); break; }
+    }
+  }
+  councilVoices = verified.size;
+  if (councilVoices < min)
+    refuse('P204', `This surface mandates a council (min ${min} distinct voices); the packet carries ${councilVoices} VALID reviewer signature(s). Fabricated reviewer_id strings no longer pass — each council receipt must carry an Ed25519 signature over the canonical {task_ref,verdict} it attests, from a DISTINCT provisioned reviewer key. The council runner holds those private keys; a self-reflecting work agent cannot sign for them. Silent downgrade is the one failure this gate exists to prevent.`);
 }
 
 // G5 — mint the receipt (legba shape: signed, chained). CUSTODY: the whole
@@ -115,7 +160,7 @@ try {
     prev_receipt_hash: prev,
     task_ref: packet.task_ref ?? null,
     packet_hash: sha(jcs(packet)),
-    checks: { task_conformance: !!rs.task, grounding: (rs.mandated_reads ?? []).length, council: !!rs.review_routing?.council },
+    checks: { task_conformance: !!rs.task, grounding: (rs.mandated_reads ?? []).length, council: (rs.review_routing?.council === true ? councilVoices : false) },
     ts: new Date().toISOString(),
   };
   // IMP-011 freshness: the run-scoped chain already makes cross-run replay

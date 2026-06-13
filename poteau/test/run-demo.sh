@@ -38,7 +38,7 @@ OUT=$(printf '%s' '{"stop_hook_active":true}' | bash poteau/hooks/exit-gate.sh)
 echo "$OUT" | jq -e '.reason|contains("AGAINST THE TASK")' >/dev/null; ck $? 0 "wrong task_ref → P201 (gate sees the task, #29)"
 jq -n --arg t "$TASKREF" '{verdict:"complete", rationale:"work is coherent", task_ref:$t, conformance:{in_scope:true}}' > .run/poteau/packet.json
 OUT=$(printf '%s' '{"stop_hook_active":true}' | bash poteau/hooks/exit-gate.sh)
-echo "$OUT" | jq -e '.reason|contains("presumed unread")' >/dev/null; ck $? 0 "no H1 echo → P203 (proof-of-grounding, #31)"
+echo "$OUT" | jq -e '.reason|contains("Mandated read not evidenced")' >/dev/null; ck $? 0 "no H1 echo → P203 (grounding heuristic, #31)"
 printf '%s' '{"stop_hook_active":true}' | bash poteau/hooks/exit-gate.sh >/dev/null  # 3rd block in chain
 OUT=$(printf '%s' '{"stop_hook_active":true}' | bash poteau/hooks/exit-gate.sh)
 [ -z "$OUT" ] && grep -q max_blocks_checkpoint .run/poteau/incidents.jsonl; ck $? 0 "4th block in one chain → checkpoint-and-release + incident (liveness > imprisonment)"
@@ -67,5 +67,18 @@ node laplas/bin/laplas-ready.mjs laplas/test/fixtures/module-bad.json 2>/tmp/rea
 N=$(( $(grep -o 'P60[1-6]' /tmp/ready-bad.json | sort -u | wc -l) )); ck "$N" 6 "all six preparation failures named (P601-P606), each with the fix"  # R-5: $((…)) strips BSD wc padding (pt-fixture-portable-compare)
 node laplas/bin/laplas-ready.mjs laplas/test/fixtures/module-good.json >/dev/null; ck $? 0 "complete module passes the ready check"
 jq -e '.receipt.quest_hash and .receipt.party_hash and .receipt.dungeon_hash' .run/poteau/ready.json >/dev/null; ck $? 0 "ready receipt binds all three manifest hashes"
+
+echo "== FORGERY REGRESSION: self-reflected packet must REFUSE; only signed council mints (bug-20260612-b2936d) =="
+# Reproduces the live forgery (run 20260613-b115bb): a single work agent reflecting
+# the readable run-state into a packet with FABRICATED unsigned council strings.
+node poteau/test/forge-fixture.mjs >/dev/null 2>&1
+FRS=$(cat .run/poteau/forge/run-state.json)
+# RED — the forgery: must REFUSE (was a clean mint before the G4 signature fix).
+OUT=$(jq -n --argjson rs "$FRS" --argjson p "$(cat .run/poteau/forge/forged-packet.json)" '{run_state:$rs, packet:$p}' | node poteau/bin/poteau-gatekeeper.mjs); RC=$?
+ck "$RC" 2 "FORGERY: self-reflected packet (unsigned council strings) REFUSES — gate proves substance not form"
+echo "$OUT" | jq -e '.code=="P204"' >/dev/null; ck $? 0 "…refusal names the council-signature failure (P204), not a vacuous pass"
+# GREEN — genuine council: real Ed25519 signatures from 2 distinct provisioned keys.
+OUT=$(jq -n --argjson rs "$FRS" --argjson p "$(cat .run/poteau/forge/signed-packet.json)" '{run_state:$rs, packet:$p}' | node poteau/bin/poteau-gatekeeper.mjs); RC=$?
+ck "$RC" 0 "GREEN: genuinely signed distinct-reviewer council receipts MINT (green path preserved)"
 
 echo; echo "RESULT: $PASS passed, $FAIL failed"; [ $FAIL -eq 0 ]
