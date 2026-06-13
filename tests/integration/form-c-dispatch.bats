@@ -504,6 +504,74 @@ EOF
 }
 
 # -----------------------------------------------------------------------------
+# Poteau mailbox wire (SDD §3 step 4 / §4.6): a gate-seam handoff is translated
+# into the poteau packet so the exit-gate finds it and the gatekeeper MINTS,
+# instead of blocking on P101. P101 + P201 enforce on a REAL handoff seed.
+# The poteau dir is substrate-pinned (gate-0/verify-run/exit-gate all agree),
+# so these arm a unique run-id under the real .run/poteau and clean it up.
+# -----------------------------------------------------------------------------
+
+# Seed an armed run-state for $1 (run_id) under the substrate-pinned poteau dir,
+# mirroring the dispatcher's gate-0 seeder output (task + matching task_ref).
+_arm_poteau_run() {
+    local rid="$1" potdir="$SUBSTRATE_ROOT/.run/poteau/$1"
+    mkdir -p "$potdir"
+    node -e '
+      const {createHash}=require("crypto");
+      const jcs=v=>v===null||typeof v!=="object"?JSON.stringify(v):Array.isArray(v)?"["+v.map(jcs).join(",")+"]":"{"+Object.keys(v).sort().map(k=>JSON.stringify(k)+":"+jcs(v[k])).join(",")+"}";
+      const task={module:"test",objectives:["do the thing"]};
+      const rs={run_id:process.argv[1],armed_at:new Date().toISOString(),gate_index:0,stop_blocks:0,task,task_ref:"sha256:"+createHash("sha256").update(jcs(task)).digest("hex"),mandated_reads:[],review_routing:{council:false}};
+      require("fs").writeFileSync(process.argv[2],JSON.stringify(rs,null,2));
+    ' "$rid" "$potdir/run-state.json"
+}
+_clean_poteau_run() {
+    local potdir="$SUBSTRATE_ROOT/.run/poteau/$1"
+    [[ -n "$1" && -d "$potdir" ]] && find "$potdir" -type f -delete 2>/dev/null; rmdir "$potdir" 2>/dev/null; return 0
+}
+
+@test "poteau-wire: an armed run's gate-seam handoff emits a packet the gatekeeper MINTS (P101+P201)" {
+    [[ -f "$HWRAP" ]] || skip "handoff-wrap missing"
+    [[ -f "$SUBSTRATE_ROOT/poteau/bin/poteau-gatekeeper.mjs" ]] || skip "gatekeeper missing"
+    local rid="ptw-mint-$$"
+    _arm_poteau_run "$rid"
+    local seed='{"construct_slug":"fagan","output_type":"Verdict","invocation_mode":"room","stage_index":1,"verdict":{"verdict":"CHANGES_REQUIRED","findings":[{"severity":"MAJOR","anchor":"a","issue":"i","fix":"f"}]}}'
+    run bash -c "printf '%s' '$seed' | bash '$HWRAP' --seed - --cycle-id cyc --run-id '$rid' --json"
+    [[ "$status" -eq 0 ]] || { _clean_poteau_run "$rid"; fail "wrap failed: $output"; }
+    echo "$output" | jq -e '.poteau_packet != null' >/dev/null || { _clean_poteau_run "$rid"; fail "no poteau_packet emitted: $output"; }
+    local potdir="$SUBSTRATE_ROOT/.run/poteau/$rid"
+    [[ -f "$potdir/packet.json" ]] || { _clean_poteau_run "$rid"; fail "packet.json not at the mailbox"; }
+    # the gatekeeper must MINT (exit 0) on this packet — P101 + P201 satisfied
+    run bash -c "jq -n --argjson rs \"\$(cat '$potdir/run-state.json')\" --argjson p \"\$(cat '$potdir/packet.json')\" '{run_state:\$rs, packet:\$p}' | node '$SUBSTRATE_ROOT/poteau/bin/poteau-gatekeeper.mjs'"
+    local gk_status="$status"
+    _clean_poteau_run "$rid"
+    [[ "$gk_status" -eq 0 ]] || fail "gatekeeper did not mint on the wired packet (exit $gk_status): $output"
+    echo "$output" | jq -e '.pass == true' >/dev/null || fail "gatekeeper verdict not pass: $output"
+}
+
+@test "poteau-wire: task_ref is copied from the armed run-state (P201 holds by construction)" {
+    [[ -f "$HWRAP" ]] || skip "handoff-wrap missing"
+    local rid="ptw-taskref-$$"
+    _arm_poteau_run "$rid"
+    local want; want="$(jq -r '.task_ref' "$SUBSTRATE_ROOT/.run/poteau/$rid/run-state.json")"
+    local seed='{"construct_slug":"noether","output_type":"Verdict","invocation_mode":"room","stage_index":0,"verdict":{"output":"x","rationale":"done"}}'
+    bash -c "printf '%s' '$seed' | bash '$HWRAP' --seed - --cycle-id cyc --run-id '$rid' --json" >/dev/null 2>&1
+    local got; got="$(jq -r '.task_ref' "$SUBSTRATE_ROOT/.run/poteau/$rid/packet.json")"
+    _clean_poteau_run "$rid"
+    [[ "$got" == "$want" ]] || fail "packet task_ref ($got) != armed run-state task_ref ($want)"
+}
+
+@test "poteau-wire: an UNARMED run emits NO poteau packet (wave-1 legality preserved)" {
+    [[ -f "$HWRAP" ]] || skip "handoff-wrap missing"
+    export LOA_PROJECT_ROOT="$TMPROOT"
+    local rid="ptw-unarmed-$$"   # no run-state seeded → nothing to gate
+    local seed='{"construct_slug":"artisan","output_type":"Verdict","invocation_mode":"room","stage_index":0,"verdict":{"output":"x","rationale":"done"}}'
+    run bash -c "printf '%s' '$seed' | bash '$HWRAP' --seed - --cycle-id cyc --run-id '$rid' --json"
+    [[ "$status" -eq 0 ]] || fail "wrap failed on unarmed run: $output"
+    echo "$output" | jq -e '.poteau_packet == null' >/dev/null || fail "unarmed run should emit no poteau packet: $output"
+    [[ ! -f "$SUBSTRATE_ROOT/.run/poteau/$rid/packet.json" ]] || { _clean_poteau_run "$rid"; fail "unarmed run wrote a packet"; }
+}
+
+# -----------------------------------------------------------------------------
 # Clew at the seam (injection-safe)
 # -----------------------------------------------------------------------------
 

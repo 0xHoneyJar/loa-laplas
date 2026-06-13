@@ -102,6 +102,15 @@ RT="$HOME/.loa/constructs/substrates/construct-rooms-substrate"
    ```sh
    printf '%s' '<seed-json>' | "$RT/scripts/compose-handoff-wrap.sh" --seed - --cycle-id <c> --run-id <id> --json
    ```
+   **This step ALSO arms the poteau exit-gate** when the run was dispatched `--module`
+   (gate-0 seeded `.run/poteau/<id>/run-state.json`): the wrap translates the handoff
+   into the poteau mailbox packet at `.run/poteau/<id>/packet.json` (verdict + rationale
+   + `task_ref` copied from the armed run-state + `conformance`). So when a construct
+   agent's `SubagentStop` fires the exit-gate, it FINDS the packet and mints a chained
+   receipt instead of blocking on P101. The `--json` output's `poteau_packet` field
+   confirms it was emitted (`null` = unarmed run, nothing to gate). **Do not hand-write
+   the packet** — the wrap is the only place it is minted, so `task_ref` cannot drift
+   (P201 holds by construction).
 
 5. **AT EACH SEAM** (`segment.ends_at_seam`) — the only human-in-the-loop step. Surface
    `seam.surface` via **AskUserQuestion** (state-viz first, ≤6 lines, emoji-led ≤4 options).
