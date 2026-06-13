@@ -80,5 +80,8 @@ echo "$OUT" | jq -e '.code=="P204"' >/dev/null; ck $? 0 "…refusal names the co
 # GREEN — genuine council: real Ed25519 signatures from 2 distinct provisioned keys.
 OUT=$(jq -n --argjson rs "$FRS" --argjson p "$(cat .run/poteau/forge/signed-packet.json)" '{run_state:$rs, packet:$p}' | node poteau/bin/poteau-gatekeeper.mjs); RC=$?
 ck "$RC" 0 "GREEN: genuinely signed distinct-reviewer council receipts MINT (green path preserved)"
+# REPLAY — the SAME genuine signatures stapled onto a DIFFERENT packet must REFUSE.
+OUT=$(jq -n --argjson rs "$FRS" --argjson p "$(cat .run/poteau/forge/replay-packet.json)" '{run_state:$rs, packet:$p}' | node poteau/bin/poteau-gatekeeper.mjs); RC=$?
+ck "$RC" 2 "REPLAY: genuine signatures on a DIFFERENT packet REFUSE — signatures bind to packet content (C-REPLAY)"
 
 echo; echo "RESULT: $PASS passed, $FAIL failed"; [ $FAIL -eq 0 ]

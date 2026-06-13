@@ -66,20 +66,35 @@ const forged = {
 };
 writeFileSync(dir + '/forged-packet.json', JSON.stringify(forged, null, 2));
 
-// The green path: identical, but council_receipts carry REAL signatures over the
-// canonical {task_ref,verdict} payload from the two distinct reviewer keys.
-const councilPayload = Buffer.from(jcs({ task_ref, verdict }));
-const sigB64 = (kp) => sign(null, councilPayload, kp.privateKey).toString('base64');
-const signed = {
+// The green path: real signatures over the PACKET CONTENT HASH (C-REPLAY) — the
+// reviewers sign sha(jcs(packet WITHOUT council_receipts)), from two distinct keys.
+const signedCore = {
   verdict,
   rationale: H1 + ' — grounded review of the diff against the task.',
   task_ref,
   conformance: { in_scope: true, note: 'councilled' },
+};
+const packetHash = sha(jcs(signedCore));
+const sigB64 = (kp) => sign(null, Buffer.from(packetHash), kp.privateKey).toString('base64');
+const signed = {
+  ...signedCore,
   council_receipts: [
-    { reviewer_id: 'rev-1', signature: sigB64(rev1) },
-    { reviewer_id: 'rev-2', signature: sigB64(rev2) },
+    { reviewer_id: 'rev-1', signature: sigB64(rev1), packet_hash: packetHash },
+    { reviewer_id: 'rev-2', signature: sigB64(rev2), packet_hash: packetHash },
   ],
 };
 writeFileSync(dir + '/signed-packet.json', JSON.stringify(signed, null, 2));
+
+// The REPLAY attack (review C-REPLAY): the SAME genuine signatures stapled onto a
+// DIFFERENT packet (same task_ref+verdict, different work content). The gatekeeper
+// recomputes a different content hash → the signatures do not verify → P204.
+const replayed = {
+  verdict,
+  rationale: H1 + ' — DIFFERENT work; no real council ran for THIS packet.',
+  task_ref,
+  conformance: { in_scope: true, note: 'replayed' },
+  council_receipts: signed.council_receipts,
+};
+writeFileSync(dir + '/replay-packet.json', JSON.stringify(replayed, null, 2));
 
 console.log('forge fixture written to ' + dir);

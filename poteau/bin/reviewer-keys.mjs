@@ -16,12 +16,15 @@
  *   governed agent's reach (separate process or host). The code provides the
  *   mechanism; the deployment must provide the isolation.
  *
- * The signed payload is the gatekeeper's canonical council payload, byte-for-byte:
- *   jcs({ task_ref, verdict })   — keys sorted, the same jcs the gatekeeper uses.
+ * The signed payload is the PACKET CONTENT HASH (review C-REPLAY): the reviewer
+ * signs the packet_hash = sha(jcs(packet WITHOUT council_receipts)). Binding to the
+ * packet — not {task_ref,verdict} — is what makes the signature non-replayable: a
+ * signature for packet P does not verify for any other packet P′. The gatekeeper
+ * recomputes the same hash and verifies against it.
  *
  * CLI:
- *   reviewer-keys.mjs pub  <provider>                 → ensure keypair, print SPKI pub PEM
- *   reviewer-keys.mjs sign <provider> <task_ref> <v>  → ensure keypair, print base64 Ed25519 sig
+ *   reviewer-keys.mjs pub  <provider>                → ensure keypair, print SPKI pub PEM
+ *   reviewer-keys.mjs sign <provider> <packet_hash>  → ensure keypair, print base64 Ed25519 sig
  * env POTEAU_REVIEWERS overrides the keyset dir (default <repo>/.run/poteau/reviewers).
  */
 import { generateKeyPairSync, sign as edSign, createPrivateKey, createPublicKey } from 'node:crypto';
@@ -31,10 +34,6 @@ import { fileURLToPath } from 'node:url';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const KEYSET = process.env.POTEAU_REVIEWERS || join(REPO, '.run', 'poteau', 'reviewers');
-
-const jcs = (v) => v === null || typeof v !== 'object' ? JSON.stringify(v)
-  : Array.isArray(v) ? '[' + v.map(jcs).join(',') + ']'
-  : '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + jcs(v[k])).join(',') + '}';
 
 // A provider id must be a safe filename component (no traversal / separators).
 const safe = (p) => { if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(p) || p.includes('..')) throw new Error(`unsafe reviewer id: ${p}`); return p; };
@@ -57,20 +56,20 @@ export function pubPem(provider) {
   return readFileSync(pubPath, 'utf8');
 }
 
-// Sign the gatekeeper's canonical council payload jcs({task_ref,verdict}).
-export function signCouncil(provider, taskRef, verdict) {
+// Sign the packet content hash (C-REPLAY: binds the receipt to THIS packet).
+export function signCouncil(provider, packetHash) {
+  if (!packetHash) throw new Error('signCouncil requires a packet_hash to sign');
   const { privPath } = ensureKeypair(provider);
   const priv = createPrivateKey(readFileSync(privPath));
-  const payload = Buffer.from(jcs({ task_ref: taskRef ?? null, verdict }));
-  return edSign(null, payload, priv).toString('base64');
+  return edSign(null, Buffer.from(String(packetHash)), priv).toString('base64');
 }
 
 // CLI
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const [cmd, provider, taskRef, verdict] = process.argv.slice(2);
+  const [cmd, provider, packetHash] = process.argv.slice(2);
   try {
     if (cmd === 'pub') process.stdout.write(pubPem(provider).trim() + '\n');
-    else if (cmd === 'sign') process.stdout.write(signCouncil(provider, taskRef, verdict) + '\n');
-    else { console.error('usage: reviewer-keys.mjs pub <provider> | sign <provider> <task_ref> <verdict>'); process.exit(64); }
+    else if (cmd === 'sign') process.stdout.write(signCouncil(provider, packetHash) + '\n');
+    else { console.error('usage: reviewer-keys.mjs pub <provider> | sign <provider> <packet_hash>'); process.exit(64); }
   } catch (e) { console.error('reviewer-keys: ' + (e && e.message ? e.message : e)); process.exit(1); }
 }

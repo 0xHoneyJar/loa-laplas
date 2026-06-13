@@ -12,7 +12,7 @@ per-provider reviewer key, the seeder **provisions** the matching public keys, a
 tool-gate read-fence keeps reviewer **private** keys out of the governed agent's reach.
 
 **Result:** a self-reflected packet now REFUSES (P204); a genuinely-signed
-distinct-reviewer council still MINTS. Demo 30/30, laplas 35/35, bats 94/94.
+distinct-reviewer council still MINTS. Demo 31/31, laplas 35/35, bats 94/94.
 
 **Author/judge isolation, reframed:** we deliberately do NOT restrict *who* writes
 `packet.json` (unenforceable on a shared FS — would be form, not substance). Isolation
@@ -58,6 +58,28 @@ keys a self-reflecting agent does not hold.
      write-gating is not used); (c) **honest grounding**: G3 reframed as a heuristic with
      the declared run-state-copyability limit (`poteau-gatekeeper.mjs:67-78`).
 
+## Review Feedback Addressed (iteration 2)
+
+**C-REPLAY (senior lead, BLOCKING)** — *"council signatures are replayable (not bound
+to the packet)."* Confirmed and fixed.
+
+- Root cause: G4 verified the signature over `jcs({task_ref, verdict})` — the task,
+  not the packet. Genuine signatures replayed onto a different packet with the same
+  `(task_ref, verdict)` minted (`pass:true`).
+- Fix: the reviewer now signs the **packet content hash** = `sha(jcs(packet WITHOUT
+  council_receipts))`; the gatekeeper recomputes it and verifies against it.
+  - `poteau/bin/reviewer-keys.mjs:signCouncil` — signs an opaque packet_hash.
+  - `scripts/council-run.sh` — signs `PACKET_HASH` (the work-packet hash it computes).
+  - `poteau/bin/poteau-gatekeeper.mjs` G4 — `const {council_receipts,...packetCore}=packet;
+    verify over Buffer.from(sha(jcs(packetCore)))`.
+- Verified: the exact replay repro now REFUSES (`P204`, 0 valid signatures);
+  `poteau/test/forge-fixture.mjs` emits `replay-packet.json`; `run-demo.sh` row 28
+  ("REPLAY … REFUSE") asserts it. Green path still mints (demo row 27, laplas S4.2).
+- Concern 2 (decorative packet_hash) is resolved by the same change — packet_hash is
+  now load-bearing. Concern 3 (provider/key coupling) left as the noted non-blocking
+  follow-up (the seeder records `review_routing.providers`; deriving the runner's list
+  from it is a clean future tightening).
+
 ## Tasks Completed
 
 | File | Change |
@@ -73,7 +95,8 @@ keys a self-reflecting agent does not hold.
 
 ## Testing Summary
 
-- **Demo** (`POTEAU_SRC=$(pwd)/poteau bash poteau/test/run-demo.sh`): 30 passed, 0 failed.
+- **Demo** (`POTEAU_SRC=$(pwd)/poteau bash poteau/test/run-demo.sh`): 31 passed, 0 failed
+  (incl. row 28 replay-refusal).
 - **Laplas** (`node --test laplas/test/*.test.mjs`): 35 passed, 0 failed (S4.2 council
   green path mints with signed receipts; benchmarks P204 still refuses no-council).
 - **Bats** (`bats tests/integration/form-c-dispatch.bats`): 94 ok, 0 not ok.

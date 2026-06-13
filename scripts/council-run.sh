@@ -48,9 +48,9 @@ PACKET_HASH=$(node -e '
   const jcs=v=>v===null||typeof v!=="object"?JSON.stringify(v):Array.isArray(v)?"["+v.map(jcs).join(",")+"]":"{"+Object.keys(v).sort().map(k=>JSON.stringify(k)+":"+jcs(v[k])).join(",")+"}";
   console.log("sha256:"+createHash("sha256").update(jcs(JSON.parse(fs.readFileSync(process.argv[1],"utf8")))).digest("hex"));
 ' "$PACKET_FILE")
-# FR-E: the reviewer signs the gatekeeper's canonical council payload — the PACKET's
-# {task_ref,verdict}. Read the packet verdict once for signing.
-PKT_VERDICT=$(jq -r '.verdict // empty' "$PACKET_FILE")
+# C-REPLAY: the reviewer signs the PACKET CONTENT HASH (PACKET_HASH above), not
+# {task_ref,verdict} — binding the receipt to THIS packet so it cannot be replayed
+# onto another. The gatekeeper recomputes the same hash and verifies against it.
 
 NONCE=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n')
 RECEIPTS="[]"
@@ -74,11 +74,12 @@ run_provider() {
     done
   fi
   if [[ -z "$verdict" ]]; then return 0; fi
-  # FR-E: sign the canonical {task_ref,verdict} with this provider's reviewer key.
+  # FR-E + C-REPLAY: sign the PACKET CONTENT HASH with this provider's reviewer key.
   # The gatekeeper (G4) verifies this signature against the provisioned reviewer
-  # PUBLIC key — a fabricated reviewer_id string no longer counts as a voice.
+  # PUBLIC key over the SAME hash — a fabricated string is not a voice, and a
+  # genuine signature cannot be replayed onto a different packet.
   local sig
-  sig=$(node "$REVIEWER_KEYS" sign "$p" "$TASK_REF" "$PKT_VERDICT" 2>/dev/null) || return 0
+  sig=$(node "$REVIEWER_KEYS" sign "$p" "$PACKET_HASH" 2>/dev/null) || return 0
   [[ -n "$sig" ]] || return 0
   jq -nc --arg p "$p" --arg v "$verdict" --arg t "$TASK_REF" --arg h "$PACKET_HASH" --arg n "$NONCE" --arg s "$sig" \
     '{reviewer_id:($p+":headless:"+$n), provider:$p, verdict:$v, task_ref:$t, packet_hash:$h, signature:$s, ts:(now|todate)}'

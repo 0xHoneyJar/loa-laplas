@@ -109,9 +109,13 @@ if (rs.review_routing?.council === true) {
   catch { custodyRefuse('gatekeeper: review_routing.reviewer_keys holds an unparseable public key — custody fails closed, never waved through.'); }
   if (!keys.length)
     refuse('P204', `This surface mandates a council (min ${min} voices) but no reviewer public keys are provisioned (run_state.review_routing.reviewer_keys is empty). A council that cannot be verified cannot be honored — provision reviewer keys via the council runner.`);
-  // Each reviewer signs the canonical {task_ref,verdict} it attests. Count DISTINCT
-  // reviewer keys with a valid signature (a receipt is bound to at most one key).
-  const councilPayload = Buffer.from(jcs({ task_ref: packet.task_ref ?? null, verdict: packet.verdict }));
+  // C-REPLAY: each reviewer signs the PACKET CONTENT HASH — sha(jcs(packet WITHOUT
+  // council_receipts)). Recomputing it HERE and verifying against it binds every
+  // signature to THIS packet: a genuine signature from another packet (even same
+  // task_ref/verdict) does not verify. Count DISTINCT reviewer keys with a valid
+  // signature (a receipt binds to at most one key).
+  const { council_receipts: _cr, ...packetCore } = packet;
+  const councilPayload = Buffer.from(sha(jcs(packetCore)));
   const verified = new Set();
   for (const r of (packet.council_receipts ?? [])) {
     if (!r || typeof r.signature !== 'string') continue;
@@ -124,7 +128,7 @@ if (rs.review_routing?.council === true) {
   }
   councilVoices = verified.size;
   if (councilVoices < min)
-    refuse('P204', `This surface mandates a council (min ${min} distinct voices); the packet carries ${councilVoices} VALID reviewer signature(s). Fabricated reviewer_id strings no longer pass — each council receipt must carry an Ed25519 signature over the canonical {task_ref,verdict} it attests, from a DISTINCT provisioned reviewer key. The council runner holds those private keys; a self-reflecting work agent cannot sign for them. Silent downgrade is the one failure this gate exists to prevent.`);
+    refuse('P204', `This surface mandates a council (min ${min} distinct voices); the packet carries ${councilVoices} VALID reviewer signature(s) over THIS packet's content hash. Fabricated strings and replayed signatures from other packets no longer pass — each council receipt must carry an Ed25519 signature over sha(jcs(packet without council_receipts)), from a DISTINCT provisioned reviewer key. The council runner holds those private keys; a self-reflecting work agent cannot sign for them. Silent downgrade is the one failure this gate exists to prevent.`);
 }
 
 // G5 — mint the receipt (legba shape: signed, chained). CUSTODY: the whole
