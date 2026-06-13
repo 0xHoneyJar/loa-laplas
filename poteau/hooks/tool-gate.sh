@@ -19,6 +19,15 @@ case "$TOOL" in
   Bash)                 TARGET=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // ""' 2>/dev/null) ;;
   *) exit 0 ;;
 esac
+# T1 (SDD §4.6) — THE PACKET MAILBOX: the ONE writable slot under .run/poteau/.
+# The agent must be able to emit its packet (a wholesale deny would deadlock its
+# own exit); the packet is harmless by construction — JUDGED by G1–G5, receipts
+# minted only by the gatekeeper. The carve-out is data; the judgment is law.
+if printf '%s' "$TARGET" | grep -Eq '\.run/poteau/[^[:space:]/]+/packet\.json' ; then
+  if ! printf '%s' "$TARGET" | sed -E 's#\.run/poteau/[^[:space:]/]+/packet\.json##g' | grep -q '\.run/poteau/'; then
+    exit 0  # only packet.json paths mentioned — the mailbox is open
+  fi
+fi
 for P in ".claude/" ".run/poteau/" "poteau/manifest/" "poteau/hooks/" "poteau/bin/"; do
   if printf '%s' "$TARGET" | grep -q "$P"; then
     if [ "$TOOL" = "Bash" ]; then

@@ -37,7 +37,8 @@ if [ "$ACTIVE" != "true" ]; then
   jq '.stop_blocks = 0' "$RUN_DIR/run-state.json" > "$RUN_DIR/.rs.tmp" && mv "$RUN_DIR/.rs.tmp" "$RUN_DIR/run-state.json"
 fi
 BLOCKS=$(jq -r '.stop_blocks // 0' "$RUN_DIR/run-state.json" 2>/dev/null); BLOCKS=${BLOCKS:-0}
-MAX=$(jq -r '.gate.max_stop_blocks_per_turn // 3' poteau/manifest/poteau.manifest.json 2>/dev/null); MAX=${MAX:-3}
+PB="${POTEAU_ROOT:-poteau}"  # repo-convention delta: package root overridable
+MAX=$(jq -r '.gate.max_stop_blocks_per_turn // 3' "$PB/manifest/poteau.manifest.json" 2>/dev/null); MAX=${MAX:-3}
 if [ "$ACTIVE" = "true" ] && [ "$BLOCKS" -ge "$MAX" ]; then
   echo "{\"ts\":\"$(date -u +%FT%TZ)\",\"event\":\"max_blocks_checkpoint\",\"blocks\":$BLOCKS}" >> "$RUN_DIR/incidents.jsonl"
   exit 0   # checkpoint-and-release: liveness > imprisonment; incident is loud
@@ -48,7 +49,7 @@ PACKET="null"
 
 VERDICT=$(jq -n --argjson rs "$(cat "$RUN_DIR/run-state.json")" --argjson p "$PACKET" \
   '{run_state:$rs, packet:(if $p == null then null else $p end)}' \
-  | node poteau/bin/poteau-gatekeeper.mjs 2>>"$RUN_DIR/gatekeeper.err")
+  | node "$PB/bin/poteau-gatekeeper.mjs" 2>>"$RUN_DIR/gatekeeper.err")
 GK_EXIT=$?
 
 if [ $GK_EXIT -eq 0 ]; then

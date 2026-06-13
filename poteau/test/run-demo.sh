@@ -40,6 +40,9 @@ printf '%s' '{"tool_name":"Edit","tool_input":{"file_path":".claude/settings.pot
 printf '%s' '{"tool_name":"Bash","tool_input":{"command":"echo x > poteau/manifest/poteau.manifest.json"}}' | bash poteau/hooks/tool-gate.sh 2>/dev/null; ck $? 2 "Bash redirect into manifest denied"
 printf '%s' '{"tool_name":"Bash","tool_input":{"command":"cat poteau/manifest/poteau.manifest.json"}}' | bash poteau/hooks/tool-gate.sh 2>/dev/null; ck $? 0 "reading the manifest allowed (narrow closed surface)"
 printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"app/feature.ts"}}' | bash poteau/hooks/tool-gate.sh 2>/dev/null; ck $? 0 "ordinary work allowed (wide open default)"
+printf '%s' '{"tool_name":"Write","tool_input":{"file_path":".run/poteau/run-7/packet.json"}}' | bash poteau/hooks/tool-gate.sh 2>/dev/null; ck $? 0 "T1 mailbox: packet.json write ALLOWED (the one judged slot)"
+printf '%s' '{"tool_name":"Write","tool_input":{"file_path":".run/poteau/run-7/run-state.json"}}' | bash poteau/hooks/tool-gate.sh 2>/dev/null; ck $? 2 "T1 mailbox: run-state.json write DENIED (P402 — constitutional)"
+printf '%s' '{"tool_name":"Write","tool_input":{"file_path":".run/poteau/run-7/receipts.jsonl"}}' | bash poteau/hooks/tool-gate.sh 2>/dev/null; ck $? 2 "T1 mailbox: receipts.jsonl write DENIED (P402 — the chain is not the agent's pen)"
 
 echo "== Break-glass is sensed, never silent =="
 POTEAU_BREAK_GLASS="operator: demo emergency" bash -c 'printf "%s" "{}" | bash poteau/hooks/exit-gate.sh' >/dev/null; ck $? 0 "break-glass releases the gate"
@@ -48,7 +51,7 @@ jq -e 'select(.event=="break_glass")' .run/poteau/incidents.jsonl >/dev/null; ck
 
 echo "== LAPLAS READY CHECK: quest + party + dungeon agree, or the ceremony does not start =="
 node laplas/bin/laplas-ready.mjs laplas/test/fixtures/module-bad.json 2>/tmp/ready-bad.json; ck $? 2 "mismatched module refused at the door (exit 2)"
-N=$(grep -o 'P60[1-6]' /tmp/ready-bad.json | sort -u | wc -l); ck "$N" 6 "all six preparation failures named (P601-P606), each with the fix"
+N=$(( $(grep -o 'P60[1-6]' /tmp/ready-bad.json | sort -u | wc -l) )); ck "$N" 6 "all six preparation failures named (P601-P606), each with the fix"  # R-5: $((…)) strips BSD wc padding (pt-fixture-portable-compare)
 node laplas/bin/laplas-ready.mjs laplas/test/fixtures/module-good.json >/dev/null; ck $? 0 "complete module passes the ready check"
 jq -e '.receipt.quest_hash and .receipt.party_hash and .receipt.dungeon_hash' .run/poteau/ready.json >/dev/null; ck $? 0 "ready receipt binds all three manifest hashes"
 
