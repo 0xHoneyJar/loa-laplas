@@ -1,0 +1,19 @@
+{
+  "name": "fidelity-relay",
+  "version": "1.0.0",
+  "rel": "competitive",
+  "objectives": [
+    "Inscribe the taste intent the shipped surface is audited against (declare).",
+    "Compare the shipped surface to the declared taste and name every drift (validate).",
+    "Confirm whether each drift is intentional or fix-required (confirm)."
+  ],
+  "requires": { "roles": ["auditor", "validator"] },
+  "review_routing": { "council": false },
+  "gates": [
+    { "id": "fidelity-gate", "room": "validate", "construct": "crucible" },
+    { "id": "operator-confirm", "room": "confirm", "hitl": "operator-approval" }
+  ],
+  "mandated_reads": [
+    { "path": "observatory/VERIFY.md", "h1": "# VERIFY — the G-2 checklist" }
+  ]
+}
