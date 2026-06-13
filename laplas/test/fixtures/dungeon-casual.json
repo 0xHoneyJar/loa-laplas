@@ -1,0 +1,1 @@
+{ "name": "sketchpad", "rel": "casual", "tools": ["ledger-cli"], "rooms": [{ "id": "studio" }] }

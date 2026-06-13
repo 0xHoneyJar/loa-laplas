@@ -1,0 +1,12 @@
+{
+  "name": "treasury-archaeology",
+  "version": "1.0.0",
+  "rel": "competitive",
+  "requires": { "roles": ["auditor", "scribe"], "tools": ["ledger-cli", "lexicon-lint"] },
+  "review_routing": { "council": true, "min_voices": 2 },
+  "gates": [
+    { "id": "gate-provenance", "room": "vault" },
+    { "id": "gate-signoff", "room": "vault", "hitl": "operator-approval" }
+  ],
+  "mandated_reads": [{ "path": "doctrine/words-with-teeth.md", "h1": "# Words With Teeth" }]
+}
