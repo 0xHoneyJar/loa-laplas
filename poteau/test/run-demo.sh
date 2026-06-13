@@ -6,8 +6,15 @@ say(){ printf '  %-52s %s\n' "$1" "$2"; }
 ck(){ if [ "$1" = "$2" ]; then PASS=$((PASS+1)); say "$3" "PASS"; else FAIL=$((FAIL+1)); say "$3" "FAIL (got $1 want $2)"; fi }
 
 echo "== PT-GEN-3: refuse-to-compile on unhonorable council mandate (P301 / issue #30) =="
-node poteau/bin/poteau-gen.mjs >/dev/null 2>&1; ck $? 4 "gen without council runner refuses (exit 4)"
-node poteau/bin/poteau-gen.mjs --allow-single-model >/dev/null 2>&1; ck $? 0 "explicit --allow-single-model compiles (recorded)"
+# S4.4: the manifest now declares gate.council.runner (scripts/council-run.sh),
+# so the council mandate is HONORABLE — gen compiles clean (#30's compile half
+# closed). The P301 guard must STILL bite when the runner is removed.
+node poteau/bin/poteau-gen.mjs >/dev/null 2>&1; ck $? 0 "gen WITH the council runner compiles clean (council honorable — #30 compile half closed)"
+jq 'del(.gate.council.runner)' poteau/manifest/poteau.manifest.json > .run/poteau/m-norunner.json 2>/dev/null
+POTEAU_MANIFEST_OVERRIDE=1 node -e 'const fs=require("fs");const m=JSON.parse(fs.readFileSync(".run/poteau/m-norunner.json","utf8"));fs.writeFileSync("poteau/manifest/poteau.manifest.json",JSON.stringify(m,null,2));'
+node poteau/bin/poteau-gen.mjs >/dev/null 2>&1; ck $? 4 "gen with the runner REMOVED still refuses P301 (the #30 compile guard bites)"
+node poteau/bin/poteau-gen.mjs --allow-single-model >/dev/null 2>&1; ck $? 0 "explicit --allow-single-model compiles the runner-less mandate (recorded downgrade)"
+jq '.gate.council.runner="scripts/council-run.sh"' poteau/manifest/poteau.manifest.json > .run/poteau/m.tmp && mv .run/poteau/m.tmp poteau/manifest/poteau.manifest.json  # restore honorable
 
 echo "== PT-GEN-2: drift refusal (P401) =="
 echo '{"tampered":true}' > .claude/settings.poteau.json

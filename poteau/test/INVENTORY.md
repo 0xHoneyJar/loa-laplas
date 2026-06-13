@@ -1,14 +1,15 @@
 # Demo assertion inventory (IMP-004 — the count derives from THIS list)
 
-The demo's RESULT line must equal the row count here (currently **25**). A new
+The demo's RESULT line must equal the row count here (currently **26**). A new
 assertion joins this table in the same commit, or CI refuses — count drift is
 unaccounted coverage. Rows are the demo's `ck` labels VERBATIM (greppable).
 
 | # | Assertion (verbatim ck label) | Invariant / issue |
 |---|---|---|
 | 0 | prompt-arm injects the gradient + adopts the dispatcher-armed run (does NOT create run-state) | S3.3 port · hooks-cannot-conduct |
-| 1 | gen without council runner refuses (exit 4) | PT-4 compile half · #30 · P301 |
-| 2 | explicit --allow-single-model compiles (recorded) | PT-4 override path |
+| 1 | gen WITH the council runner compiles clean (council honorable — #30 compile half closed) | PT-4 · #30 · S4.4 |
+| 1b | gen with the runner REMOVED still refuses P301 (the #30 compile guard bites) | PT-4 compile half · P301 |
+| 2 | explicit --allow-single-model compiles the runner-less mandate (recorded downgrade) | PT-4 override path |
 | 3 | hand-edited generated file refuses (exit 3) | PT-6 · P401 |
 | 4 | --force regenerates | PT-6 escape hatch |
 | 5 | no packet → Stop blocked, refusal names the fix | PT-1 · #7 · P101 |

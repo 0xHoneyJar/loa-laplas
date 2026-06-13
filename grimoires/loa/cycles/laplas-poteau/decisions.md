@@ -100,3 +100,27 @@ them "hook" in hardness-manifest.json now would violate the fail-honest doctrine
 is built on ("declare reality, not aspiration"). The flip ships WITH the merge-for-keeps
 (post-S3.3), each entry citing its demo benchmark (G-5 standing rule). loa-tool-mandate's
 successor relationship (advisory→poteau tool-gate) is the headline flip when it lands.
+
+## S4 — THE COUNCIL: #30 closes, both halves (2026-06-12)
+- **council-run.sh** (S4.1, FR-D): fires N≥2 distinct provider CLIs (claude/codex/
+  gemini headless) PARALLEL, 300s/provider timeout, one retry (U4); receipts bind
+  reviewer_id(provider+nonce)+task_ref+packet_hash (B6); distinctness runner-grade,
+  attested by the runner (U3); under-staffed → exit 4 NAMING the dead provider (T6).
+  COUNCIL_RUN_MOCK test hook (no real LLM spend in CI).
+- **#30 runtime closure, end-to-end** (S4.2): the worked example's P204 (proven
+  blocking in S3) now CLEARS once council-run attaches ≥2 receipts → gatekeeper mints.
+  3 council tests green.
+- **#30 compile closure** (S4.4): manifest declares gate.council.runner → poteau-gen
+  compiles clean (no --allow-single-model needed — the mandate is honorable). Demo
+  updated to prove P301 STILL bites when the runner is removed (26/26).
+- **incidents schema** (IMP-014): laplas/schemas/incident.schema.json — one shape
+  {ts, run_id, event, reason, actor}; validated against the demo's REAL break_glass
+  incident. 2 tests.
+- **Remaining (honest)**: U2 override authz ({actor,reason} required on
+  --allow-single-model, recorded as council_waived) is a poteau-gen enrichment — the
+  override RECORDS today (console.error) but doesn't yet demand {actor,reason}; the
+  exit-gate's break_glass incident omits `actor` (schema allows it optional). Both are
+  enrichment on a closed mechanism, the port-completion pass.
+
+**#30 is CLOSED both halves. All four cycle issues (#7/#29/#30/#31) now have a
+mechanical gate, proven by test.**

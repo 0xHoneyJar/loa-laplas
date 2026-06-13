@@ -2,30 +2,41 @@
   "$schema": "./poteau.manifest.schema.json",
   "poteau_version": "0.1.0",
   "comment": "SOURCE OF TRUTH (projen discipline): edit THIS file, run `node poteau/bin/poteau-gen.mjs`, never hand-edit generated outputs. Generated files carry @generated markers and a checksum; the gen tool refuses to overwrite drifted files without --force (drift = hand-edit = layer leakage).",
-
-  "run_commands": ["/compose", "/simstim", "/spiral"],
-
-  "protected_paths": [".claude/", ".run/poteau/", "poteau/manifest/"],
-
+  "run_commands": [
+    "/compose",
+    "/simstim",
+    "/spiral"
+  ],
+  "protected_paths": [
+    ".claude/",
+    ".run/poteau/",
+    "poteau/manifest/"
+  ],
   "rooms": {
     "default": {
       "rel": "competitive",
       "entry_token_required": true,
-      "liveness": { "tool_calls": 50, "wall_s": 600, "stall_s": 120 }
+      "liveness": {
+        "tool_calls": 50,
+        "wall_s": 600,
+        "stall_s": 120
+      }
     }
   },
-
   "gate": {
     "task_in_prompt": true,
     "conformance_required": true,
-    "proof_of_grounding": { "enabled": true, "mode": "h1_echo" },
+    "proof_of_grounding": {
+      "enabled": true,
+      "mode": "h1_echo"
+    },
     "council": {
       "honor_review_routing": true,
-      "on_unhonorable_mandate": "refuse_to_compile"
+      "on_unhonorable_mandate": "refuse_to_compile",
+      "runner": "scripts/council-run.sh"
     },
     "max_stop_blocks_per_turn": 3
   },
-
   "failure_posture": {
     "comment": "Two hook classes with OPPOSITE failure postures, both deliberate. SAFETY FENCES (loa house pattern) fail-open: a jq crash must not deny-of-service the agent. CUSTODY GATES fail-closed: a gate bypassable by inducing a crash is not a gate. Break-glass exists, is env-gated, and is the loudest signal in the system.",
     "safety_fences_fail": "open",
