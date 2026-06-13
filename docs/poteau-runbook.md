@@ -43,8 +43,11 @@ jq -e '[.hooks // {} | to_entries[].value[].hooks[]?.command // ""]
   .claude/settings.local.json && echo "ROLLED BACK clean"
 ```
 
-New sessions pick up settings changes at launch (settings snapshot-at-start is
-the first layer of hook-config protection — restart the session after merge).
+**Hot-reload (VERIFIED CC 2.1.176, S1.3)**: `settings.local.json` reloads WITHIN a
+live session — the merge arms enforcement immediately, no restart. The corollary
+proved itself: once armed, the agent's OWN attempt to revert hook config is denied
+by tool-gate (P402) — the rollback must run in YOUR shell (`!`-prefix or a terminal),
+outside the agent's tool path. That denial is the lattice working, not a bug.
 
 ## Break-glass (B3 — memorize this one)
 
