@@ -27,3 +27,7 @@
 
 ## Decision Log
 <!-- Major decisions with rationale -->
+
+## laplas-poteau cycle (2026-06-12)
+- Hounfour module-format ascension PROPOSAL: `grimoires/loa/proposals/hounfour-module-format-ascension.md` (schemas attached, trinity framing). Return trigger: S6 close or +30 days (2026-07-12). loa-hounfour is local — operator files when ready (the kit proposes; hounfour ratifies).
+- S2 close = the PR #43 (observatory) rebase-vs-stack checkpoint (U7).
