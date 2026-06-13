@@ -1,0 +1,58 @@
+# Poteau + Laplas CI (S1.4) — THE FREEZE GATE IS MECHANICAL (IMP-002):
+# mark the `contract` job a required branch-protection check; law that fails
+# on this runtime cannot merge. Demo runs on BOTH platforms (R-5).
+name: poteau
+
+on:
+  pull_request:
+    paths:
+      - "poteau/**"
+      - "laplas/**"
+      - "scripts/poteau-smoke.sh"
+      - ".github/workflows/poteau.yml"
+
+env:
+  LANG: C
+  TZ: UTC
+
+jobs:
+  demo:
+    name: invariant demo (PT-1..9 + laplas)
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: demo — every invariant proven
+        run: POTEAU_SRC=$(pwd)/poteau bash poteau/test/run-demo.sh
+      - name: inventory reconciles (IMP-004 — no unaccounted coverage)
+        run: |
+          ROWS=$(grep -c '^| [0-9]' poteau/test/INVENTORY.md)
+          GOT=$(POTEAU_SRC=$(pwd)/poteau bash poteau/test/run-demo.sh 2>/dev/null | grep RESULT | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+')
+          echo "inventory=$ROWS demo=$GOT"
+          [ "$ROWS" = "$GOT" ] || { echo "count drift: assertion not in INVENTORY.md (or vice versa)"; exit 1; }
+
+  contract:
+    name: FR-B0 hook-contract smoke (FREEZE GATE — required check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+      - name: smoke — 5 legs, headless, mechanical
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::warning::ANTHROPIC_API_KEY absent — freeze gate cannot run in CI; the LOCAL receipt is authoritative until the secret lands (poteau/test/contract-receipt.local.json, committed evidence)"
+            test -f poteau/test/contract-receipt.local.json && jq -e '.pass == true' poteau/test/contract-receipt.local.json
+          else
+            bash scripts/poteau-smoke.sh --mode headless
+          fi
