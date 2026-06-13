@@ -40,3 +40,36 @@ merge → live-enforce → agent-rollback-DENIED → operator-rollback → clean
 bootstrap demonstrated). Merge stays OUT until S3.3 ports prompt-arm's
 ready-receipt requirement (arming on raw `/compose` is premature). The
 hot-reload finding is a NEW FR-B0 leg for S-review, not a blocker.
+
+## S2-close checkpoint (U7) — 2026-06-12
+Operator decision: **keep PR #44 STACKED** on cycle/observatory-graduation (PR #43,
+still open). Clean if #43 lands first; reviewed/merged in order. No rebase now.
+Continue authorized into S3.
+
+## S3 — #29/#31 reframe: the mechanisms PRE-EXIST; S3 is the wiring (2026-06-12)
+
+Grounding at the #29 fix site (`segment-emitter.py:1095`) found the prompt-level
+fix ALREADY SHIPPED: lines 1195–1200 inject `TASK`, `SCOPE`, and the exact
+conformance clause issue #29's "Fix" section requested — and `JSON.stringify(task)`
+makes it injection-safe (the U1 schema fence is belt-and-suspenders). The gatekeeper's
+mechanical halves (P201 task-match, P203 H1-echo) are vendored and demo-proven
+(run-demo.sh:26,29). So neither issue needs its mechanism BUILT.
+
+**What S3 actually adds — the wiring** (the gap between "demo proves it on a
+hand-built fixture" and "it fires in a live compose run"):
+- **S3.1 seeder** (`laplas/lib/seed-runstate.mjs`): at gate-0 the dispatcher derives
+  the armed contract from the module's quest — task/task_ref (JCS-sha256),
+  mandated_reads (H1 re-extracted MECHANICALLY at seed time; a stale declared h1 →
+  refuse), review_routing. IMP-004 fail-closed: no objectives → exit 3, dispatch
+  refuses (an armed run with no task is ungateable — #29). Wired into compose-dispatch.
+- **Benchmarks on REAL seeded state** (`benchmarks.test.mjs`, 6/6): #29 wrong
+  task_ref→P201 · #29 no in_scope→P202 · #31 missing echo→P203 · **#30 single-voice
+  on the council-mandated worked example→P204** (the worked example demands a council
+  S4 staffs — so its green path correctly blocks at P204 today). The issues now close
+  against a contract derived from a real module, not a fixture.
+
+**Honest status**: #29 and #31 are MECHANICALLY CLOSED on seeded state. The
+remaining S3 port-time work (T3 by-session pointers, T7 handoff-validate timeout,
+IMP-011 receipt freshness, prompt-arm ready-receipt requirement, sandwich lint) and
+S3.4's verify-gate `--poteau` + #7 unarmed benchmark are integration polish on a
+proven core — the natural fresh-context continuation.

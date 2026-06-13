@@ -213,6 +213,18 @@ if [[ -n "$MODULE_PATH" ]]; then
     if ( cd "$SUBSTRATE_ROOT" && node "$LAPLAS_READY" "$_abs_module" ) >/dev/null 2>"$_ready_err"; then
         mkdir -p "$POTEAU_READY_DIR"
         cp "$SUBSTRATE_ROOT/.run/poteau/ready.json" "$POTEAU_READY_DIR/ready.json"  # bind run-scoped (B8)
+        # S3.1: seed the armed contract (task/task_ref/mandated_reads/review_routing)
+        # so poteau's gatekeeper judges against a REAL task (#29 P201, #31 P203).
+        # IMP-004: no objectives → seeder exit 3 → dispatch refuses (fail-closed
+        # on the load-bearing field — an armed run with no task is ungateable).
+        _seeder="$SUBSTRATE_ROOT/laplas/lib/seed-runstate.mjs"
+        if [[ -f "$_seeder" ]]; then
+            if ! POTEAU_RUN_ID="$RUN_ID" node "$_seeder" "$_abs_module" "$POTEAU_READY_DIR/run-state.json" >/dev/null 2>"$_ready_err"; then
+                echo "[gate-0] ARMING REFUSED — cannot seed run-state:" >&2
+                cat "$_ready_err" >&2; rm -f "$_ready_err"; exit 2
+            fi
+            echo "[gate-0] armed: run-state seeded (task + reads + routing) at .run/poteau/$RUN_ID/run-state.json" >&2
+        fi
         echo "[gate-0] laplas ready ✓ — receipt bound at .run/poteau/$RUN_ID/ready.json" >&2
     else
         echo "[gate-0] CEREMONY REFUSED — quest/party/dungeon do not agree:" >&2
