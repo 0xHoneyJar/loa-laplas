@@ -1,0 +1,38 @@
+# Data Models (JSON Schemas) — extracted 2026-06-12
+
+## data/schemas/construct-manifest-v4.schema.json — "Construct Manifest v4"
+required: schema_version, slug, name, version, description
+props (27): adapter, author, commands, composes_with, description, events, executable,
+  gates, license, name, persona_path, personas, quick_start, reads, requirements,
+  runtime, schema_version, short_description, skills, slug, streams, tags, tools,
+  type, version, visibility, writes
+note: substrate reads ONLY tools.{allowlist,denylist,required} + adapter.{...} (README.md:126)
+
+## data/trajectory-schemas/construct-handoff.schema.json — "Construct Handoff Packet"
+required: construct_slug, output_type, verdict, invocation_mode, cycle_id
+props (24): + agent_id, composition_run_id, created_at, domain, evidence, gates_failed,
+  gates_passed, input_refs, kaironic_context, open_questions, output_refs, persona,
+  pushback_invitation, schema_version, source_provenance, stage_index,
+  transcript_excerpt, transcript_path, translation_note, verdict
+gate: scripts/handoff-validate.sh (3-tier: required fail-closed / recommended warn / optional)
+
+## data/trajectory-schemas/room-activation-packet.schema.json — "Room Activation Packet"
+required: room_id, cycle_id, construct_slug, mode, invocation_path,
+  expected_output_type, created_at, created_by
+props (16): + allowed_skills, composition_run_id, expected_handoff_path,
+  forbidden_context, inputs, persona, schema_version, stage_index
+gate: scripts/room-packet-validate.sh
+
+## data/trajectory-schemas/pair-relay-composition.schema.json — "Pair-Relay Composition Descriptor"
+required: schema_version, pattern, artifact_name, sequence, surface_mode
+props (8): + convergence_criteria, domain, max_cycles
+gate: scripts/pair-relay-validate.sh
+
+## scripts/clew/learnings-construct.schema.json — "Construct-Clew Ledger Line"
+required: id, tier, type, trigger, target, verified, distilled_at
+props (16): + captured_at, captured_by, distill_status, genome_hash, genome_seq,
+  proposed_pr, run_id, solution, tags
+store: per-construct LEARNINGS.jsonl
+
+## Legba runtime shapes (PROVISIONAL, scripts/legba/ — tracks loa-hounfour#118)
+SpanMove / GateToken / RunReceipt — defined in legba-core.mjs, not JSON-schema'd locally

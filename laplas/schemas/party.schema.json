@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://loa-hounfour/laplas/party/1",
+  "title": "Party — the WHO (roles, seats, tiers, HITL slots)",
+  "type": "object",
+  "required": ["name", "members"],
+  "additionalProperties": true,
+  "properties": {
+    "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "members": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Each member is an agent seat (work|council) or a HITL slot — the operator is a party slot, not ambient magic.",
+      "items": {
+        "type": "object",
+        "required": ["role", "kind"],
+        "additionalProperties": true,
+        "properties": {
+          "role": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "enum": ["agent", "hitl"] },
+          "seat": { "type": "string", "enum": ["work", "council"] },
+          "tier": { "type": "string", "enum": ["opus", "sonnet", "haiku", "fable", "external"] },
+          "slot": { "type": "string" }
+        }
+      }
+    }
+  }
+}

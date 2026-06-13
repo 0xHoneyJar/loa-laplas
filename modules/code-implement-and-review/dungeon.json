@@ -1,0 +1,11 @@
+{
+  "name": "fan-out-and-gate-corridor",
+  "rel": "competitive",
+  "tools": ["codex"],
+  "rooms": [
+    { "id": "fan-out", "_note": "the wave: N independent work items run in parallel as cheap-tier (sonnet) leaves — RFC #35 args.items, Kahn-wave scheduled" },
+    { "id": "review", "_note": "the seam: the merged diff meets ONE opus FAGAN craft-gate + the operator HITL slot; findings anchor to [item-id]" }
+  ],
+  "budgets": { "tool_calls": 120, "wall_s": 600, "stall_s": 120 },
+  "_budget_note": "Wave-aware sizing (sprint-compose-speed S1): tool_calls bumped 50->120 to cover ~N parallel sonnet leaves in the fan-out room plus the single opus gate; wall_s unchanged (leaves run concurrently, so parallelism does not extend wall-clock). Tune against the S3 A/B benchmark."
+}

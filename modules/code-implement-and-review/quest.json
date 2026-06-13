@@ -1,0 +1,21 @@
+{
+  "name": "code-implement-and-review",
+  "version": "1.1.0",
+  "rel": "competitive",
+  "objectives": [
+    "Decompose the operator's task into independent work items and implement each within the declared scope; avoid scope creep. Independent items run in parallel as cheap-tier (sonnet) workers; a single item with no decomposition still runs as one worker.",
+    "Run ONE adversarial craft-gate review of the MERGED diff and iterate (max 3, only on CHANGES_REQUIRED) until the verdict is APPROVED on merit — never auto-approving a cap as a clean pass. The gate reviews merged output once per convergence cycle (not once per item) and anchors each finding to its work item."
+  ],
+  "requires": {
+    "roles": ["implementer", "reviewer"],
+    "tools": ["codex"]
+  },
+  "review_routing": { "council": false },
+  "gates": [
+    { "id": "craft-gate", "room": "review", "construct": "fagan", "skill": "reviewing-diffs" },
+    { "id": "operator-seam", "room": "review", "hitl": "operator-approval" }
+  ],
+  "mandated_reads": [
+    { "path": "README.md", "h1": "# construct-rooms-substrate" }
+  ]
+}

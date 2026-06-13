@@ -1,0 +1,8 @@
+{
+  "name": "auditor-and-validator",
+  "members": [
+    { "role": "auditor", "seat": "work", "tier": "opus", "kind": "agent" },
+    { "role": "validator", "seat": "work", "tier": "opus", "kind": "agent" },
+    { "role": "operator", "slot": "operator-approval", "kind": "hitl" }
+  ]
+}

@@ -123,12 +123,14 @@ DRY_RUN=0
 OUTPUT_JSON=0
 SEAM_ROLES="${LOA_SEAM_ROLES:-hard-stop,craft-gate,gate}"  # Form C cut: seam roles
 INJECT_HANDOFFS=()  # cycle-craft-cluster B.4: bats test hook, "<stage>:<path>"
+MODULE_PATH=""      # laplas (S2.3): dispatch gate 0 — the ready check
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --interactive) MODE="interactive"; shift ;;
         --headless) MODE="headless"; shift ;;
         --form-c|--workflow) MODE="workflow"; shift ;;
+        --module) MODULE_PATH="$2"; shift 2 ;;
         --seam-roles) SEAM_ROLES="$2"; shift 2 ;;
         --run-id) RUN_ID="$2"; shift 2 ;;
         --stage) ONE_STAGE="$2"; shift 2 ;;
@@ -187,6 +189,69 @@ ENVELOPES_DIR="$RUN_DIR/envelopes"
 PROMPTS_DIR="$RUN_DIR/dispatch-prompts"
 
 mkdir -p "$RUN_DIR" "$ENVELOPES_DIR" "$PROMPTS_DIR" "$ROOMS_DIR"
+
+# =============================================================================
+# DISPATCH GATE 0 — the laplas ready check (S2.3 / SDD §4.1). No ceremony arms
+# without quest+party+dungeon agreeing. Refusals are PASSED THROUGH verbatim
+# (the P6xx text already teaches the fix — never re-worded). A composition
+# WITHOUT a module is wave-1 legal: warn (unprepared ceremony) and proceed —
+# #7's incentive logic (never make the governed path heavier than the on-ramp).
+# Wave 3 flips this to refuse (sprint S6.3).
+# =============================================================================
+# Anchor to SUBSTRATE_ROOT (the repo root, deterministic) — laplas-ready writes
+# its receipt relative to node's CWD; running it FROM SUBSTRATE_ROOT pins the
+# write to a known .run/poteau, independent of PROJECT_ROOT (which is the
+# consumer parent in standalone dev) or the caller's CWD.
+LAPLAS_READY="$SUBSTRATE_ROOT/laplas/bin/laplas-ready.mjs"
+POTEAU_READY_DIR="$SUBSTRATE_ROOT/.run/poteau/$RUN_ID"
+if [[ -n "$MODULE_PATH" ]]; then
+    _abs_module="$(cd "$(dirname "$MODULE_PATH")" 2>/dev/null && pwd)/$(basename "$MODULE_PATH")"
+    if [[ ! -f "$_abs_module" ]]; then
+        echo "ERROR: --module not found: $MODULE_PATH" >&2; exit 1
+    fi
+    _ready_err="$(mktemp)"
+    if ( cd "$SUBSTRATE_ROOT" && node "$LAPLAS_READY" "$_abs_module" ) >/dev/null 2>"$_ready_err"; then
+        mkdir -p "$POTEAU_READY_DIR"
+        cp "$SUBSTRATE_ROOT/.run/poteau/ready.json" "$POTEAU_READY_DIR/ready.json"  # bind run-scoped (B8)
+        # S3.1: seed the armed contract (task/task_ref/mandated_reads/review_routing)
+        # so poteau's gatekeeper judges against a REAL task (#29 P201, #31 P203).
+        # IMP-004: no objectives → seeder exit 3 → dispatch refuses (fail-closed
+        # on the load-bearing field — an armed run with no task is ungateable).
+        _seeder="$SUBSTRATE_ROOT/laplas/lib/seed-runstate.mjs"
+        if [[ -f "$_seeder" ]]; then
+            if ! POTEAU_RUN_ID="$RUN_ID" node "$_seeder" "$_abs_module" "$POTEAU_READY_DIR/run-state.json" >/dev/null 2>"$_ready_err"; then
+                echo "[gate-0] ARMING REFUSED — cannot seed run-state:" >&2
+                cat "$_ready_err" >&2; rm -f "$_ready_err"; exit 2
+            fi
+            echo "[gate-0] armed: run-state seeded (task + reads + routing) at .run/poteau/$RUN_ID/run-state.json" >&2
+            # T3 session->run link (the exit-gate's last mile): bind THIS CC
+            # session to the armed run so the exit-gate (Stop) resolves run_id
+            # from its session_id. prompt-arm only ADOPTS a pre-armed run, and it
+            # fires BEFORE this dispatch — so for a one-shot /compose the
+            # DISPATCHER is the only actor holding BOTH the session id
+            # (CLAUDE_CODE_SESSION_ID env == the Stop payload's session_id) AND
+            # the freshly-minted run_id. Same {run_id,armed_at} shape prompt-arm
+            # writes; the exit-gate reads by-session/<session> -> run_id verbatim.
+            _sess="${CLAUDE_CODE_SESSION_ID:-local}"
+            mkdir -p "$SUBSTRATE_ROOT/.run/poteau/by-session"
+            jq -n --arg r "$RUN_ID" --arg a "$(date -u +%FT%TZ)" '{run_id:$r, armed_at:$a}' \
+                > "$SUBSTRATE_ROOT/.run/poteau/by-session/$_sess" 2>/dev/null || true
+            echo "[gate-0] session linked: by-session/$_sess -> $RUN_ID (exit-gate will enforce this run's exits)" >&2
+        fi
+        echo "[gate-0] laplas ready ✓ — receipt bound at .run/poteau/$RUN_ID/ready.json" >&2
+    else
+        echo "[gate-0] CEREMONY REFUSED — quest/party/dungeon do not agree:" >&2
+        cat "$_ready_err" >&2   # P6xx pass-through, verbatim (refusals teach)
+        rm -f "$_ready_err"
+        exit 2
+    fi
+    rm -f "$_ready_err"
+elif [[ -n "${POTEAU_VERBOSE:-}" ]]; then
+    # Module-less is the legacy default (wave-1 legality) — SILENT by default so it
+    # doesn't pollute stdout/stderr for the 90% of existing runs (the governance:unarmed
+    # stamp at verify time is the honest signal). Opt into the notice with POTEAU_VERBOSE.
+    echo "[gate-0] unprepared ceremony (no --module) — proceeding (wave-1 legality; governance: unarmed)" >&2
+fi
 
 # Initialize logger
 log_event() {

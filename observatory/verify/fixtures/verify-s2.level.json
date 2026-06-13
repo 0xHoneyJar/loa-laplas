@@ -1,0 +1,152 @@
+{
+ "schema": "obs-level/1",
+ "id": "verify-s2",
+ "name": "the vocabulary, rendered",
+ "meta": {
+  "run_id": "verify-s2-fixture",
+  "generated_at": "fixture",
+  "contract_rev": 2,
+  "enrage_s": 300
+ },
+ "rooms": [
+  {
+   "id": 0,
+   "name": "Forge",
+   "construct": "noether",
+   "spr": "noether",
+   "gx": 0,
+   "gy": 0,
+   "live": 0.4
+  },
+  {
+   "id": 1,
+   "name": "Gate Argument",
+   "construct": "the-arcade",
+   "spr": "arcade",
+   "gx": 1,
+   "gy": 0,
+   "live": 0.5
+  },
+  {
+   "id": 2,
+   "name": "Impasse Chamber",
+   "construct": "k-hole",
+   "spr": "khole",
+   "gx": 2,
+   "gy": 0,
+   "live": 0.6
+  },
+  {
+   "id": 3,
+   "name": "Proof Cellar",
+   "construct": "gecko",
+   "spr": "gecko",
+   "gx": 3,
+   "gy": 0,
+   "live": 0.3
+  }
+ ],
+ "seams": [
+  [
+   0,
+   1
+  ],
+  [
+   1,
+   2
+  ],
+  [
+   2,
+   3
+  ]
+ ],
+ "envelopes": [
+  {
+   "from": 0,
+   "to": 1,
+   "payload": "<script>alert(1)</script> sealed contract",
+   "keepers": 2,
+   "verdict": "APPROVED",
+   "gateline": "<script>alert(1)</script> LEGBA turns the key — the seal <b>holds</b>.",
+   "gate": {
+    "name": "spiral-dispatch-guard",
+    "hardness": "hook",
+    "mechanism": "PreToolUse deny (exit 2)",
+    "help": "dispatch via spiral-harness.sh, then write"
+   },
+   "transform": {
+    "badge": "⚷",
+    "line": "<b>the-arcade</b> receives the sealed contract"
+   },
+   "wave": 0
+  },
+  {
+   "from": 1,
+   "to": 2,
+   "payload": "unattested build",
+   "keepers": 1,
+   "verdict": "REJECTED",
+   "gateline": "LEGBA bars the door — the seal is unread.",
+   "gate": {
+    "name": "compose-verify-run",
+    "hardness": "prose",
+    "mechanism": "warn-first exit code",
+    "help": "compose-verify-run.sh <run_id>",
+    "teaches": "run compose-verify-run.sh <run_id> — a result without valid_run is role-play"
+   },
+   "transform": {
+    "badge": "✗",
+    "line": "returned"
+   },
+   "wave": 1
+  },
+  {
+   "from": 1,
+   "to": 2,
+   "payload": "empty hands, honest words",
+   "keepers": 1,
+   "verdict": "IMPASSE",
+   "gateline": "the envelope presents empty-handed.",
+   "gate": {
+    "name": "compose-calls-ceiling",
+    "hardness": "prose",
+    "mechanism": "declared, unenforced",
+    "teaches": "a ceiling that cannot reap is signage, not a gate"
+   },
+   "transform": {
+    "badge": "◈",
+    "line": "routed onward"
+   },
+   "wave": 2
+  },
+  {
+   "from": 2,
+   "to": 3,
+   "payload": "golden vectors",
+   "keepers": 1,
+   "verdict": "APPROVED",
+   "gateline": "LEGBA squints at the vectors… they hold.",
+   "gate": {
+    "name": "beads-preflight",
+    "hardness": "unknown",
+    "mechanism": "no attribution",
+    "help": "br list --status open"
+   },
+   "transform": {
+    "badge": "✦",
+    "line": "<b>gecko</b> shelves the proof"
+   },
+   "wave": 3
+  }
+ ],
+ "clews": [
+  {
+   "room": 1,
+   "divergence": 0,
+   "routing": "heal",
+   "dropped_by": "watchdog",
+   "trigger": "budget",
+   "packet_digest": "sha256:abababababababababababababababababababababababababababababababab"
+  }
+ ]
+}

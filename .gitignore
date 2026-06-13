@@ -1,0 +1,23 @@
+
+# LOA SUBMODULE SYMLINKS (added by mount-submodule.sh)
+# Symlinks to .loa/ submodule — recreated on mount
+.claude/scripts
+.claude/protocols
+.claude/hooks
+.claude/data
+.claude/schemas
+.claude/loa/CLAUDE.loa.md
+.claude/loa/reference
+.claude/loa/feedback-ontology.yaml
+.claude/loa/learnings
+.claude/settings.json
+.claude/checksums.json
+.loa-state/
+.claude.backup.*
+
+# Beads (derived db — issues.jsonl is the source of truth)
+.beads/beads.db*
+.beads/last-touched
+
+# Run mode state
+.run/

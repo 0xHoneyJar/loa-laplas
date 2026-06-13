@@ -1,0 +1,316 @@
+{
+  "consensus_summary": {
+    "high_consensus_count": 8,
+    "disputed_count": 6,
+    "low_value_count": 0,
+    "blocker_count": 11,
+    "model_agreement_percent": 62,
+    "models": 3,
+    "tertiary_items": 0,
+    "confidence": "full"
+  },
+  "high_consensus": [
+    {
+      "id": "IMP-001",
+      "description": "High-value consistency fix with low implementation cost. A required script referenced later but absent from the layout is likely to cause missed implementation and broken verification.",
+      "gpt_score": 890,
+      "opus_score": 880,
+      "tertiary_score": 900,
+      "delta": 10,
+      "average_score": 885,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-002",
+      "description": "Critical because the settings merge and rollback path mitigates a concrete clobber hazard. A forward reference to a nonexistent runbook makes the mitigation non-actionable.",
+      "gpt_score": 940,
+      "opus_score": 920,
+      "tertiary_score": 950,
+      "delta": 20,
+      "average_score": 930,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-003",
+      "description": "A timeout is essential for CI safety around headless provider calls. Low cost, high operational benefit, and prevents indefinite stalls.",
+      "gpt_score": 910,
+      "opus_score": 860,
+      "tertiary_score": 880,
+      "delta": 50,
+      "average_score": 885,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-004",
+      "description": "This resolves an important ambiguity in legacy compatibility behavior. The impact is real, though narrower than CI/security blockers because it affects a specific mandated_reads edge case.",
+      "gpt_score": 820,
+      "opus_score": 820,
+      "tertiary_score": 850,
+      "delta": 0,
+      "average_score": 820,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-005",
+      "description": "Council minimum voice behavior is core to the feature guarantee. Defining hard-fail or degradation behavior is necessary to avoid silently weakening review quality.",
+      "gpt_score": 900,
+      "opus_score": 760,
+      "tertiary_score": 890,
+      "delta": 140,
+      "average_score": 830,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-007",
+      "description": "Important compatibility fix for markdown files with frontmatter. It is highly practical and likely to avoid false refusals, though less system-critical than the high-priority gate and security issues.",
+      "gpt_score": 780,
+      "opus_score": 800,
+      "tertiary_score": 850,
+      "delta": 20,
+      "average_score": 790,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-008",
+      "description": "Bounding task literal injection protects reviewer context quality and observability. Valuable, but the exact risk depends on expected task sizes and model context margins.",
+      "gpt_score": 710,
+      "opus_score": 720,
+      "tertiary_score": 750,
+      "delta": 10,
+      "average_score": 715,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-009",
+      "description": "Mechanical acceptance criteria for later sprints improve delivery discipline and reduce subjective completion. Strong process value with moderate implementation cost.",
+      "gpt_score": 760,
+      "opus_score": 770,
+      "tertiary_score": 720,
+      "delta": 10,
+      "average_score": 765,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    }
+  ],
+  "disputed": [
+    {
+      "id": "IMP-011",
+      "description": "Receipt replay protection is a real integrity concern. Binding receipts to run_id or freshness is low-cost and strengthens the stated anti-replay guarantee.",
+      "gpt_score": 800,
+      "opus_score": 0,
+      "tertiary_score": 870,
+      "delta": 800,
+      "average_score": 800,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-012",
+      "description": "Concrete watchdog thresholds are required for implementation and tuning. This is close to critical because the feature is otherwise only conceptual, but defaults can be iterated after initial release.",
+      "gpt_score": 790,
+      "opus_score": 0,
+      "tertiary_score": 840,
+      "delta": 790,
+      "average_score": 790,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-013",
+      "description": "Concurrent active-run races can route hooks to the wrong run, which is a serious correctness and observability failure. A lock or explicit policy plus test is warranted.",
+      "gpt_score": 830,
+      "opus_score": 0,
+      "tertiary_score": 780,
+      "delta": 830,
+      "average_score": 830,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-014",
+      "description": "A field schema for incidents.jsonl is needed for consistent aggregation and auditability. Valuable, especially because other JSONL files are specified in detail.",
+      "gpt_score": 700,
+      "opus_score": 0,
+      "tertiary_score": 720,
+      "delta": 700,
+      "average_score": 700,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-015",
+      "description": "Pass criteria for both modes would make the mitigation enforceable. Worth adding, but the risk is scoped to a freeze gate rather than runtime correctness.",
+      "gpt_score": 620,
+      "opus_score": 0,
+      "tertiary_score": 500,
+      "delta": 620,
+      "average_score": 620,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-016",
+      "description": "Per-run private key cleanup reduces custody surface and is prudent security hygiene. Valuable, though the urgency depends on local threat model and key permissions.",
+      "gpt_score": 690,
+      "opus_score": 0,
+      "tertiary_score": 760,
+      "delta": 690,
+      "average_score": 690,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    }
+  ],
+  "low_value": [],
+  "blockers": [
+    {
+      "id": "SKP-001",
+      "concern": "Agent can mutate its own governance state",
+      "severity": "CRITICAL",
+      "severity_score": 850,
+      "why_matters": "The agent operates in the workspace where `.run/poteau/<run_id>/` is stored. If `tool-gate.sh` (or the underlying framework) does not explicitly deny mutations to `.run/poteau/`, a compromised or errant agent could overwrite its `run-state.json`, `moves.jsonl`, or `packet.json` to bypass gates or falsify council routing.",
+      "location": "§4.6 Gatekeeper & §6 Data layout",
+      "recommendation": "Explicitly add `.run/poteau/` to the constitutional deny-list in `tool-gate.sh` (PreToolUse) to prevent the agent from modifying its own enforcement state.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-006",
+      "concern": "FR-B0 smoke test verifies four legs independently but never exercises their combined state — specifically a PreToolUse denial during a stop-blocked loop where stop_hook_active=true, tool denied, and a UserPromptSubmit injection are simultaneously active",
+      "severity": "HIGH",
+      "severity_score": 710,
+      "why_matters": "Each leg passes in isolation but the G1–G5 chain depends on all hooks sharing run-state.json with correct sequencing. A regression where tool-gate and exit-gate concurrently write run-state produces a race undetectable by isolated leg tests. The contract-receipt.json records individual leg verdicts but provides no integration verdict. Shipping the hook lattice with only isolated coverage means the first real armed ceremony is the integration test.",
+      "location": "§4.3 (FR-B0: four legs, contract-receipt.json), §4.6 (G1–G5 gate chain with shared run-state)",
+      "recommendation": "Add a 5th integration leg to FR-B0: a scripted multi-turn headless session that runs a full mini-ceremony (arm → one tool-gate denial → stop block → exit gate pass → receipt minted). The receipt from this leg is archived as the integration contract receipt. This leg catches hook ordering conflicts and shared-state races that isolated legs cannot surface.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-002",
+      "concern": "Incremental adoption creates a guaranteed-failure trap",
+      "severity": "HIGH",
+      "severity_score": 750,
+      "why_matters": "If compositions without a module warn and proceed (4.1) but unarmed sessions cannot mint `valid_run` (4.6), operators will endure full execution time only to predictably fail at verification. This frustrates users and wastes API tokens.",
+      "location": "§4.1 Ready check at dispatch gate 0 AND §4.6 Gatekeeper",
+      "recommendation": "Align the verification gate's enforcement with the dispatcher's adoption phase. If the dispatcher allows unarmed runs during wave 1/2, `compose-verify-run.sh` must also allow them (skip Poteau checks), or the dispatcher must fail-closed immediately.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-003",
+      "concern": "TASK literals are injected verbatim into the gate prompt (§4.5 gate_head) with no sanitization, length cap, or encoding constraint specified — a malformed or adversarially-crafted quest.json can inject structural prompt directives directly into the model-side reviewer's context",
+      "severity": "HIGH",
+      "severity_score": 760,
+      "why_matters": "The gate prompt is the primary enforcement surface. Task literals containing role-switching instructions, jailbreak patterns, or content exceeding the reviewer model's context window cause the gate to behave adversarially or silently truncate the task and judge against a fragment. Neither failure mode is caught by the FR-B0 smoke test, which uses controlled fixtures. In shared-module environments (hounfour migration, §5) the trust boundary for quest.json widens significantly.",
+      "location": "§4.5 (gate_head TASK verbatim injection), §4.4 (task literal source from cut JSON), §5 (module format shared via hounfour)",
+      "recommendation": "Define a task literal format in the laplas schema: max 4096 bytes per item, printable UTF-8 only, no null bytes or ASCII control characters below 0x20. laplas-ready.mjs validates format as P608 (invalid_task_literal) at gate 0. The emitter's gate_head injection bracket-quotes the literal (e.g., within ``` delimiters or a [TASK]…[/TASK] wrapper) to prevent structural bleedthrough into the reviewing model's instruction space.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-002",
+      "concern": "The active-run pointer is a single mutable file, which is fragile for parallel sessions, crashes, stale pointers, and concurrent runs even with session_id stamping.",
+      "severity": "HIGH",
+      "severity_score": 780,
+      "why_matters": "A stale or overwritten active-run pointer can cause hooks to no-op, attach moves to the wrong run, or block the wrong session. This directly threatens run isolation and receipt integrity.",
+      "location": "Sections 3, 4.6, 6",
+      "recommendation": "Replace or supplement `.run/poteau/active-run` with per-session scoped state keyed by session_id, use atomic writes and lock files, and require hooks to resolve state from an immutable session binding rather than a global mutable pointer.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-003",
+      "concern": "The design permits compositions without a module to proceed with only a warning, while later verification distinguishes valid armed runs from broken or unarmed runs.",
+      "severity": "HIGH",
+      "severity_score": 720,
+      "why_matters": "Incremental adoption creates a mixed enforcement regime where users may believe poteau/laplas guarantees apply to runs that were never prepared. This weakens the mental model and can hide policy bypasses until prove time.",
+      "location": "Section 4.1 Ready check at dispatch gate 0",
+      "recommendation": "Define explicit run classes such as `unprepared_run`, `prepared_unarmed`, and `valid_run`; surface them in dispatch output, receipts, and verify results. Require CI and release gates to reject unprepared runs even if local interactive use only warns.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-001",
+      "concern": "The design relies on Claude hook semantics that are explicitly unverified and may differ between headless and interactive modes, yet many downstream guarantees assume those hooks block, inject, and continue exactly as expected.",
+      "severity": "CRITICAL",
+      "severity_score": 910,
+      "why_matters": "If Stop, PreToolUse, or UserPromptSubmit behavior differs across modes or versions, the enforcement layer can silently fail while receipts and run verification still appear meaningful. This undermines the core safety model.",
+      "location": "Sections 3, 4.3, 10 R-7",
+      "recommendation": "Make FR-B0 a hard prerequisite before any vendoring or integration work, pin the exact Claude Code version under test, require both headless and interactive smoke receipts, and define refusal behavior if the runtime version changes without a fresh smoke pass.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-001",
+      "concern": "active-run pointer (.run/poteau/active-run) is a single file: parallel /compose invocations in the same session race to overwrite it, and the last writer's run_id wins — the losing run's hooks then no-op on session_id mismatch (§4.6) while the winning run inherits a gate_index that may reflect the loser's partial advancement",
+      "severity": "CRITICAL",
+      "severity_score": 900,
+      "why_matters": "Two concurrent ceremonies share one pointer. The session_id guard catches the loser's hook calls but does not prevent the winner from reading a gate_index that was advanced by the other ceremony's receipts. verify-gate --poteau reports broken_run only after both runs complete, by which time one run may have exited with a forged gate-pass receipt.",
+      "location": "§4.6 (active-run pointer, session_id match guard), §6 (data layout: .run/poteau/active-run)",
+      "recommendation": "Replace the single active-run file with a per-session slot keyed by a randomly-minted session nonce (16 bytes, hex) written with O_EXCL atomic create. The session_id already lives in run-state; promote it to the concurrency fence. Alternatively enforce single-active via a flock lockfile and emit P505 (ceremony_already_active) on contention. Document the mutual-exclusion contract explicitly in the data layout section.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-002",
+      "concern": "compositions without a module field skip gate 0 entirely — no laplas-ready check, no receipt binding, no run-scoped stage seeds — yet compose-verify-run.sh --poteau will later report broken_run on a run that was permitted to complete, training operators to treat broken_run as a routine noise signal",
+      "severity": "CRITICAL",
+      "severity_score": 880,
+      "why_matters": "Any operator or automation that omits module from a composition runs without ceremony preparation for the entirety of waves 1 and 2. If teams build module-less composition habits before the wave 3 refuse flip, that flip becomes a breaking change against established patterns. The gate's entire value proposition — that a valid_run implies a gated ceremony — is false for module-less runs during the adoption window.",
+      "location": "§4.1 (dispatch gate 0: 'compositions without a module proceed'), §9 (sprint shape — wave 3 flip to refuse)",
+      "recommendation": "Wave 1 should emit a distinct P609 (unprepared_ceremony) exit-2 refusal for module-less compositions unless an explicit --allow-no-module flag is passed and recorded in the run manifest. Gate telemetry (FR-G stub) must track --allow-no-module usage from day 1. Remove the flag in wave 3 rather than silently flipping fail-closed, so removal is auditable and adoption can be measured beforehand.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-004",
+      "concern": "council-run.sh requires N≥2 distinct providers but the SDD specifies no timeout, retry policy, or failure action when a provider CLI is unavailable, rate-limited, or returns a non-verdict error — the runner may block indefinitely or silently drop a provider and proceed with a sub-quorum result",
+      "severity": "HIGH",
+      "severity_score": 750,
+      "why_matters": "Provider unavailability (rate limit, network failure, version mismatch) is routine in CI. If the runner blocks on a hanging provider the entire gate hangs. If it silently drops the failing provider and proceeds with N=1, the independence guarantee is violated while G4's min_voices check may still pass if the absent reviewer's output is simply missing rather than negated. A P204 (insufficient_voices) refusal in this case would be correct but is not specified.",
+      "location": "§4.7 (council runner: 'N≥2 distinct provider CLIs'), §4.6 (G4 min_voices verification)",
+      "recommendation": "Define per-provider timeout (default 120s, configurable via COUNCIL_PROVIDER_TIMEOUT), retry count (2), and failure action: any provider that exhausts retries produces P302 (quorum_failure) — not a pass. Add P302 to error-codes.json. Council receipts must record failed providers with their failure reason alongside successful ones. Specify which providers are required vs. optional in the manifest's party.members[].seat field.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-005",
+      "concern": "handoff-validate.sh is shelled from the gatekeeper (§4.6) with no specified timeout — a hanging validator blocks the Stop/SubagentStop hook indefinitely, violating B4 (P500 never hangs), with no documented recovery path",
+      "severity": "HIGH",
+      "severity_score": 720,
+      "why_matters": "B4 is listed as an NFR but is delegated to an external shell script without a mechanical timeout. If handoff-validate.sh stalls (filesystem hang, subprocess deadlock, network call in a future tier-2 check), the stop hook never returns and the Claude Code session wedges. Unlike break-glass paths, a hung stop hook has no operator-accessible recovery short of killing the session and losing the run state.",
+      "location": "§4.6 (gatekeeper G1: 'shells handoff-validate.sh'), §7 (B4 NFR: 'P500 refuses, never hangs')",
+      "recommendation": "Wrap the handoff-validate.sh invocation with `timeout ${POTEAU_VALIDATE_TIMEOUT:-30}s`. Any non-zero exit from timeout maps to P501 (validator_timeout), which triggers the same break-glass checkpoint path as a gate refusal. Add a 5th smoke test leg in FR-B0 that verifies a timing-out validator produces P501 and does not block the stop hook beyond 2× the configured timeout.",
+      "source": "tertiary_skeptic"
+    }
+  ],
+  "degraded": false,
+  "degraded_model": null,
+  "confidence": "full",
+  "phase": "sdd",
+  "document": "grimoires/loa/sdd.md",
+  "domain": " 1 architecture overview claude",
+  "tertiary_model_used": "gemini-headless",
+  "tertiary_status": "active",
+  "execution": {
+    "mode": "hitl",
+    "mode_reason": "Simstim workflow active (.run/simstim-state.json state=RUNNING)",
+    "run_id": null
+  },
+  "timestamp": "2026-06-12T23:45:08Z",
+  "metrics": {
+    "total_latency_ms": 365000,
+    "cost_cents": 0,
+    "cost_usd": 0
+  }
+}

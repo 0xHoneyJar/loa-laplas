@@ -1,0 +1,132 @@
+{
+  "veve_version": "0.2.0",
+  "name": "obs",
+  "version": "0.2.0",
+  "summary": "Observatory CLI: sim (seeded gradient forward-model, golden-vectored, rev-2 gate blocks), fold (real compose run -> obs-level/1 rev 2, hardness-manifest joined), serve (live tail). Classed by worst case; vectors pin the deterministic subset (sim + manifest together).",
+  "binary": {
+    "entry": "obs.mjs",
+    "runtime": "node",
+    "subcommands": [
+      "sim",
+      "play",
+      "fold",
+      "serve",
+      "selftest"
+    ]
+  },
+  "determinism": {
+    "class": "attestable",
+    "declared_by": "author",
+    "ambient": [
+      "filesystem_outside_cwd",
+      "clock",
+      "network"
+    ]
+  },
+  "io": {
+    "input": "argv",
+    "output": "stdout_json",
+    "exit_codes": {
+      "0": "ok",
+      "1": "tool failure",
+      "2": "contract violation or unknown verb (caller error)"
+    }
+  },
+  "vectors": [
+    {
+      "name": "sim-greedy-reaps",
+      "argv": [
+        "sim",
+        "--seed",
+        "7",
+        "--greed",
+        ".9",
+        "--discipline",
+        ".1",
+        "--rooms",
+        "6"
+      ],
+      "stdin": "",
+      "expect_output_hash": "sha256:09322674105f6a7914f0409e392d4ff829aba84ce4c9ee309a020678a6093838",
+      "expect_exit": 0
+    },
+    {
+      "name": "sim-disciplined-ships",
+      "argv": [
+        "sim",
+        "--seed",
+        "7",
+        "--greed",
+        ".2",
+        "--discipline",
+        ".9",
+        "--rooms",
+        "6"
+      ],
+      "stdin": "",
+      "expect_output_hash": "sha256:9f6e9ef314df8820ac641e2a3ac761e4dc3a085d7a11a1276cadfcb38383e1dd",
+      "expect_exit": 0
+    },
+    {
+      "name": "sim-default-seed-42",
+      "argv": [
+        "sim",
+        "--seed",
+        "42"
+      ],
+      "stdin": "",
+      "expect_output_hash": "sha256:8f881152fee407a8bb93b1747805d0d027bacace6bb200166c5158920a023fc0",
+      "expect_exit": 0
+    },
+    {
+      "name": "sim-stuck-clew-heals",
+      "argv": [
+        "sim",
+        "--seed",
+        "7",
+        "--greed",
+        ".2",
+        "--discipline",
+        ".9",
+        "--rooms",
+        "6",
+        "--stuck",
+        "2"
+      ],
+      "stdin": "",
+      "expect_output_hash": "sha256:b12b9ff23fb849a8257f2a42286a80517c633e5efeaab694d2c00dc3d408405c",
+      "expect_exit": 0
+    },
+    {
+      "name": "play-stuck-testifies",
+      "argv": [
+        "play",
+        "--policy",
+        "stuck",
+        "--seed",
+        "7",
+        "--rooms",
+        "6",
+        "--stuck",
+        "2"
+      ],
+      "stdin": "",
+      "expect_output_hash": "sha256:31937206209407fe009a77dad085a0c9f128d0315dbd5f7c337923f33dc64bd0",
+      "expect_exit": 0
+    }
+  ],
+  "ladder": {
+    "level": 1,
+    "promoted_from": "grimoires/loa/observatory/{sim-gen,trace-gen,serve}.mjs (session scripts)",
+    "evidence_runs": [
+      "run:obs-panel-20260611:valid_run",
+      "run:sim-seed-7:gradient-divergence-proof",
+      "run:observatory-graduation-s2:rev2-revector"
+    ]
+  },
+  "liveness": {
+    "timeout_s": 30,
+    "expected_p95_s": 2,
+    "mode": "oneshot"
+  }
+}

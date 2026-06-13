@@ -1,0 +1,40 @@
+# Demo assertion inventory (IMP-004 — the count derives from THIS list)
+
+The demo's RESULT line must equal the row count here (currently **32**). A new
+assertion joins this table in the same commit, or CI refuses — count drift is
+unaccounted coverage. Rows are the demo's `ck` labels VERBATIM (greppable).
+
+| # | Assertion (verbatim ck label) | Invariant / issue |
+|---|---|---|
+| 0 | prompt-arm injects the gradient + adopts the dispatcher-armed run (does NOT create run-state) | S3.3 port · hooks-cannot-conduct |
+| 1 | gen WITH the council runner compiles clean (council honorable — #30 compile half closed) | PT-4 · #30 · S4.4 |
+| 1b | gen with the runner REMOVED still refuses P301 (the #30 compile guard bites) | PT-4 compile half · P301 |
+| 2 | explicit --allow-single-model compiles the runner-less mandate (recorded downgrade) | PT-4 override path |
+| 3 | hand-edited generated file refuses (exit 3) | PT-6 · P401 |
+| 4 | --force regenerates | PT-6 escape hatch |
+| 5 | no packet → Stop blocked, refusal names the fix | PT-1 · #7 · P101 |
+| 6 | wrong task_ref → P201 (gate sees the task, #29) | PT-2 · #29 |
+| 7 | no H1 echo → P203 (grounding heuristic, #31) | PT-3 · #31 |
+| 8 | 4th block in one chain → checkpoint-and-release + incident (liveness > imprisonment) | PT-8 |
+| 9 | fresh turn resets chain; conforming+grounded packet → receipt minted | PT-2/3 green path |
+| 10 | receipt chain exists on disk | G5 / legba shape |
+| 11 | run state advanced (gate_index=1) | lifecycle |
+| 12 | Edit on .claude/ denied (exit 2) | PT-5 · P402 |
+| 13 | Bash redirect into manifest denied | PT-5 |
+| 14 | reading the manifest allowed (narrow closed surface) | PT-5 narrow-closed |
+| 15 | ordinary work allowed (wide open default) | posture split |
+| 16 | T1 mailbox: packet.json write ALLOWED (the one judged slot) | T1 (SDD §4.6) |
+| 17 | T1 mailbox: run-state.json write DENIED (P402 — constitutional) | T1 / PT-5 |
+| 18 | T1 mailbox: receipts.jsonl write DENIED (P402 — the chain is not the agent's pen) | T1 / PT-5 |
+| 18b | T1 mailbox: a packet.json/../ traversal to run-state is DENIED (audit: carve-out airtight) | T1 / security |
+| 19 | break-glass releases the gate | PT-9 |
+| 20 | …and lands in incidents.jsonl (loudest signal) | PT-9 |
+| 21 | mismatched module refused at the door (exit 2) | laplas P6xx |
+| 22 | all six preparation failures named (P601-P606), each with the fix | laplas · R-5 fixture |
+| 23 | complete module passes the ready check | laplas green path |
+| 24 | ready receipt binds all three manifest hashes | laplas receipt |
+| 25 | FORGERY: self-reflected packet (unsigned council strings) REFUSES — gate proves substance not form | bug-20260612-b2936d / G4 |
+| 26 | …refusal names the council-signature failure (P204), not a vacuous pass | bug-20260612-b2936d / G4 |
+| 27 | GREEN: genuinely signed distinct-reviewer council receipts MINT (green path preserved) | bug-20260612-b2936d / green |
+| 28 | REPLAY: genuine signatures on a DIFFERENT packet REFUSE — signatures bind to packet content (C-REPLAY) | bug-20260612-b2936d / replay |
+| 29 | CROSS-RUN REPLAY: genuine packet+sigs under a DIFFERENT run_id REFUSE — sigs bind to run+gate (audit) | bug-20260612-b2936d / freshness |

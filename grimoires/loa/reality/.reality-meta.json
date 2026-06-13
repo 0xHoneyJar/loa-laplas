@@ -1,0 +1,13 @@
+{
+  "generated_at": "2026-06-12T20:08:01Z",
+  "generator": "riding-codebase",
+  "ride_type": "full",
+  "branch": "feat/issue-40-cognitive-load-routing",
+  "head": "e22f4329b613bee766bab083412462a847da0e5f",
+  "loa_version": "v1.176.6",
+  "staleness_days": 7,
+  "token_counts_estimated": {
+    "total": 2441
+  },
+  "files": ["index.md", "api-surface.md", "types.md", "interfaces.md", "structure.md", "entry-points.md", "architecture-overview.md", "api-routes.txt", "data-models.txt", "env-vars.txt", "tech-debt.txt", "test-files.txt", "structure-raw.txt", "hygiene-report.md"]
+}

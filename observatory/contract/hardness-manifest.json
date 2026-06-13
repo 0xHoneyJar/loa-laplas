@@ -1,0 +1,57 @@
+{
+  "manifest_rev": 1,
+  "substrate": "construct-rooms-substrate",
+  "_doctrine": "Hardness is DECLARED data, never inferred at render time. hook = a mechanism fires without consent (PreToolUse deny, blocking exit). prose = the gate exists but invocation is voluntary or warn-first. unknown → renders HOLLOW (fail-honest). OSTROM-owned; editing this file is a gate-design decision — cite the rendered beat in decisions.md. Every mechanism claim below was grounded in the named file before declaration (2026-06-12).",
+  "gates": {
+    "handoff-validate": {
+      "hardness": "prose",
+      "mechanism": "3-tier fail-closed validator — fires when wrapped via compose-handoff-wrap.sh; skipping the wrap skips it",
+      "help": "bash scripts/compose-handoff-wrap.sh at the seam",
+      "teaches": "no room finishes silently — typed handoff, 5 required fields"
+    },
+    "compose-verify-run": {
+      "hardness": "prose",
+      "mechanism": "warn-first exit code — verdict-bearing when invoked, nothing forces invocation",
+      "help": "bash scripts/compose-verify-run.sh <run_id>",
+      "teaches": "a result without a valid_run verdict is role-play, not a run"
+    },
+    "spiral-dispatch-guard": {
+      "hardness": "hook",
+      "mechanism": "PreToolUse:Write/Edit deny (exit 2) — .loa/.claude/hooks/safety/spiral-dispatch-guard.sh:89",
+      "help": "dispatch via spiral-harness.sh, then write"
+    },
+    "adversarial-review-gate": {
+      "hardness": "hook",
+      "mechanism": "PreToolUse:Write blocks */COMPLETED without structurally-valid adversarial-*.json (fail-open on infra error)",
+      "help": "run the adversarial review; the artefact unlocks the marker",
+      "teaches": "touch artefact.json does not satisfy structural validation"
+    },
+    "zone-write-guard": {
+      "hardness": "hook",
+      "mechanism": "PreToolUse:Write/Edit zone boundary deny — zone-write-guard.sh (sprint alias: path-domain-check)",
+      "help": "write inside your zone; framework zone is submodule-owned"
+    },
+    "legba-custody-chain": {
+      "hardness": "prose",
+      "mechanism": "exit-1 verify (legba.mjs:107) on the governed path (#39); skipping the governed path skips it",
+      "help": "node scripts/legba/legba.mjs verify <run-dir>",
+      "teaches": "challenge = fraud-proof by re-execution: legba.mjs challenge <run-dir> --span N --seq K"
+    },
+    "beads-preflight": {
+      "hardness": "prose",
+      "mechanism": "skill-prose task lifecycle (implement/review read beads via instructions; no hook fires on skip)",
+      "help": "br list --status open before claiming done"
+    },
+    "compose-calls-ceiling": {
+      "hardness": "prose",
+      "mechanism": "DECLARED in Form-C manifest, unenforced at runtime — proven hollow live (declared 2, actual 68; S1.4 decisions.md)",
+      "help": "none yet — budget-exhaustion → watchdog clew is the S3 re-grounding spike",
+      "teaches": "a ceiling that cannot reap is signage, not a gate"
+    },
+    "block-destructive-bash": {
+      "hardness": "hook",
+      "mechanism": "PreToolUse:Bash deny on destructive patterns — .loa/.claude/hooks/safety/block-destructive-bash.sh",
+      "help": "scope the command; destructive forms need explicit operator action"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://loa-hounfour/laplas/incident/1",
+  "title": "Incident — one shape for every sensed override/checkpoint (IMP-014)",
+  "type": "object",
+  "required": ["ts", "event"],
+  "additionalProperties": true,
+  "properties": {
+    "ts": { "type": "string", "minLength": 1 },
+    "run_id": { "type": "string" },
+    "event": { "type": "string", "enum": ["break_glass", "max_blocks_checkpoint", "council_waived", "stale_pointer"] },
+    "reason": { "type": "string" },
+    "actor": { "type": "string", "enum": ["operator", "watchdog", "system"] },
+    "blocks": { "type": "integer" }
+  }
+}

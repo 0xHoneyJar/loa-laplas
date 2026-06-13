@@ -170,12 +170,15 @@ RUN_ID=""
 OUTPUT_JSON=0
 REQUIRE_EXECUTED=0
 LEGBA=0
+POTEAU=0       # laplas (S3.4b / T4): verify the poteau receipt chain, adoption-aligned
+POTEAU_GOVERNANCE=null
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --json) OUTPUT_JSON=1; shift ;;
         --base-dir) BASE_DIR="$2"; shift 2 ;;
         --require-executed) REQUIRE_EXECUTED=1; shift ;;
         --legba) LEGBA=1; shift ;;
+        --poteau) POTEAU=1; shift ;;
         -h|--help) usage; exit 0 ;;
         -*) echo "ERROR: unknown flag '$1'" >&2; usage >&2; exit 1 ;;
         *) if [[ -z "$RUN_ID" ]]; then RUN_ID="$1"; else echo "ERROR: extra arg '$1'" >&2; exit 1; fi; shift ;;
@@ -192,6 +195,16 @@ RUN_DIR="$BASE_DIR/$RUN_ID"
 MANIFEST="$RUN_DIR/form-c-manifest.json"
 ORCHESTRATOR="$RUN_DIR/orchestrator.jsonl"
 ENVELOPES_DIR="$RUN_DIR/envelopes"
+
+# --poteau governance is an ORTHOGONAL axis (armed vs unarmed) — compute it EARLY
+# so EVERY verdict (incl. not_a_run / broken_run) reports it, not only the
+# valid_run path. The chain-INTEGRITY check (which can downgrade to broken_run)
+# still runs later in the armed-pass section. (Found live, 2026-06-13: the dry-run
+# demo returned governance:null because the stamp was gated behind the base pass.)
+if [[ "$POTEAU" == "1" ]]; then
+    _POT_DIR_EARLY="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.run/poteau/$RUN_ID"
+    if [[ -f "$_POT_DIR_EARLY/run-state.json" ]]; then POTEAU_GOVERNANCE='"armed"'; else POTEAU_GOVERNANCE='"unarmed"'; fi
+fi
 
 # Track which checks have passed for the structured verdict.
 CHK_MANIFEST=false
@@ -221,6 +234,7 @@ _verdict() {
             --arg env_digest "$ENVELOPE_DIGEST" \
             --argjson legba_verified "$LEGBA_VERIFIED" \
             --arg legba_receipt "$LEGBA_RECEIPT" \
+            --argjson poteau_governance "$POTEAU_GOVERNANCE" \
             '{
                 verdict: $verdict,
                 run_id: $run_id,
@@ -232,6 +246,7 @@ _verdict() {
                     envelopes: $envelopes,
                     legba_chain: $legba_verified
                 },
+                governance: $poteau_governance,
                 segment_count: $seg_count,
                 envelope_count: $env_count,
                 envelope_digest: (if $env_digest == "" then null else $env_digest end),
@@ -491,12 +506,50 @@ if [[ "$LEGBA" == "1" && "$ENVELOPE_COUNT" -gt 0 ]]; then
 fi
 
 # -----------------------------------------------------------------------------
+# --poteau (S3.4b / T4): adoption-aligned governance check. Closes #7 — an
+# unarmed session (work done outside the governed path) emits no receipts and
+# CANNOT mint valid_run with governance:armed; it stamps governance:unarmed
+# instead (legacy verification still applies — never a late retroactive trap,
+# SDD T4). An ARMED run with a broken/absent receipt chain is broken_run.
+# -----------------------------------------------------------------------------
+if [[ "$POTEAU" == "1" ]]; then
+    _POT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.run/poteau/$RUN_ID"
+    if [[ -f "$_POT_DIR/run-state.json" ]]; then
+        # the run ARMED — its receipt chain must walk clean and reach every seam
+        _gate_index="$(jq -r '.gate_index // 0' "$_POT_DIR/run-state.json" 2>/dev/null)"
+        _receipts="$_POT_DIR/receipts.jsonl"
+        if [[ ! -f "$_receipts" ]]; then
+            _verdict "broken_run" 3 "--poteau: run armed (run-state present) but NO receipt chain — gated exits left no receipts (#7: the governed path was abandoned mid-run)"
+        fi
+        _rcount="$(grep -c . "$_receipts" 2>/dev/null || echo 0)"
+        # chain integrity: every receipt's prev_receipt_hash links the prior line's receipt_hash
+        if ! node -e '
+          const fs=require("fs");
+          const L=fs.readFileSync(process.argv[1],"utf8").trim().split("\n").filter(Boolean).map(JSON.parse);
+          let prev=null, run=null;
+          for (const s of L) {
+            if (s.receipt.prev_receipt_hash !== prev) process.exit(7);  // chain break
+            if (run===null) run=s.receipt.run_id; else if (s.receipt.run_id!==run) process.exit(8); // cross-run splice (IMP-011)
+            prev=s.receipt_hash;
+          }
+          process.exit(0);
+        ' "$_receipts" 2>/dev/null; then
+            _verdict "broken_run" 3 "--poteau: receipt chain is broken or splices across runs (IMP-011) — the gate receipts do not form an unbroken single-run chain"
+        fi
+        # POTEAU_GOVERNANCE already stamped "armed" early; chain integrity verified here.
+    fi
+fi
+
+# -----------------------------------------------------------------------------
 # All checks passed.
 # -----------------------------------------------------------------------------
 if [[ "$ENVELOPE_COUNT" -gt 0 ]]; then
     _legba_note=""
     [[ "$LEGBA_VERIFIED" == "true" ]] && _legba_note=" + Legba custody chain verified"
-    _verdict "valid_run" 0 "manifest + $SEGMENT_COUNT segment(s) + orchestrator trail + $ENVELOPE_COUNT executed handoff envelope(s) verified$_legba_note"
+    _pot_note=""
+    [[ "$POTEAU_GOVERNANCE" == '"armed"' ]] && _pot_note=" + poteau receipt chain verified (governance: armed)"
+    [[ "$POTEAU_GOVERNANCE" == '"unarmed"' ]] && _pot_note=" (governance: unarmed — legacy-legal)"
+    _verdict "valid_run" 0 "manifest + $SEGMENT_COUNT segment(s) + orchestrator trail + $ENVELOPE_COUNT executed handoff envelope(s) verified$_legba_note$_pot_note"
 elif [[ "$REQUIRE_EXECUTED" == "1" ]]; then
     # TERMINAL gate: the compile is provably real, but ZERO segments executed —
     # not a completed composition. Distinct from valid_run (default) so an

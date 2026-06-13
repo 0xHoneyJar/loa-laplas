@@ -1,0 +1,48 @@
+# Observatory CI (S1.5 placeholder — grows policy tests S4, redaction fixtures S5)
+# Determinism env pinned per flatline SP-B10: Node ≥22, LANG=C TZ=UTC.
+name: observatory
+
+on:
+  pull_request:
+    paths:
+      - "observatory/**"
+      - "app/observatory/**"
+      - ".github/workflows/observatory.yml"
+
+env:
+  LANG: C
+  TZ: UTC
+
+jobs:
+  vectors:
+    name: selftest + veve vectors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: contract wall fires (selftest)
+        run: node observatory/cli/obs.mjs selftest
+      - name: veve vectors byte-match
+        run: node observatory/cli/verify-vectors.mjs
+      - name: policy conformance + episode schema (S4)
+        run: node --test observatory/tests/policies.test.mjs
+      - name: redaction + share walls (S5)
+        run: node --test observatory/tests/share.test.mjs
+
+  shell:
+    name: shell build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app/observatory
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/observatory/package-lock.json
+      - run: npm ci
+      - run: npm run build

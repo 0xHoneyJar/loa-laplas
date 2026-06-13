@@ -1,0 +1,10 @@
+{
+  "name": "lead-and-council",
+  "members": [
+    { "role": "auditor", "seat": "work", "tier": "opus", "kind": "agent" },
+    { "role": "scribe", "seat": "work", "tier": "haiku", "kind": "agent" },
+    { "role": "reviewer-a", "seat": "council", "tier": "opus", "kind": "agent" },
+    { "role": "reviewer-b", "seat": "council", "tier": "external", "kind": "agent" },
+    { "role": "operator", "slot": "operator-approval", "kind": "hitl" }
+  ]
+}
