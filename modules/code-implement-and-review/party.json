@@ -1,0 +1,10 @@
+{
+  "name": "implementer-and-craft-council",
+  "_note": "Faithful to code-implement-and-review.yaml: one implementer (general-purpose, work) + the FAGAN craft-gate reviewer. review_routing.council=2 expresses the composition's intent (adversarial review IS the point); the party staffs a SECOND council seat so the ready check's P603 (council staffable) passes. TODAY the runtime fires single-voice FAGAN; S4's council-run.sh honors the council mandate by firing both voices — until then an armed run of this module would P204-refuse (the #30 benchmark working). The module is the forward-compatible target.",
+  "members": [
+    { "role": "implementer", "seat": "work", "tier": "opus", "kind": "agent" },
+    { "role": "reviewer", "seat": "council", "tier": "opus", "kind": "agent" },
+    { "role": "reviewer-b", "seat": "council", "tier": "external", "kind": "agent" },
+    { "role": "operator", "slot": "operator-approval", "kind": "hitl" }
+  ]
+}
