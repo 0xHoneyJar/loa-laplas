@@ -196,6 +196,16 @@ MANIFEST="$RUN_DIR/form-c-manifest.json"
 ORCHESTRATOR="$RUN_DIR/orchestrator.jsonl"
 ENVELOPES_DIR="$RUN_DIR/envelopes"
 
+# --poteau governance is an ORTHOGONAL axis (armed vs unarmed) — compute it EARLY
+# so EVERY verdict (incl. not_a_run / broken_run) reports it, not only the
+# valid_run path. The chain-INTEGRITY check (which can downgrade to broken_run)
+# still runs later in the armed-pass section. (Found live, 2026-06-13: the dry-run
+# demo returned governance:null because the stamp was gated behind the base pass.)
+if [[ "$POTEAU" == "1" ]]; then
+    _POT_DIR_EARLY="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.run/poteau/$RUN_ID"
+    if [[ -f "$_POT_DIR_EARLY/run-state.json" ]]; then POTEAU_GOVERNANCE='"armed"'; else POTEAU_GOVERNANCE='"unarmed"'; fi
+fi
+
 # Track which checks have passed for the structured verdict.
 CHK_MANIFEST=false
 CHK_SEGMENTS=false
@@ -526,9 +536,7 @@ if [[ "$POTEAU" == "1" ]]; then
         ' "$_receipts" 2>/dev/null; then
             _verdict "broken_run" 3 "--poteau: receipt chain is broken or splices across runs (IMP-011) — the gate receipts do not form an unbroken single-run chain"
         fi
-        POTEAU_GOVERNANCE='"armed"'
-    else
-        POTEAU_GOVERNANCE='"unarmed"'   # legacy-legal (wave 1-2); never a late trap (T4)
+        # POTEAU_GOVERNANCE already stamped "armed" early; chain integrity verified here.
     fi
 fi
 
