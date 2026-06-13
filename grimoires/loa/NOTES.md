@@ -28,6 +28,15 @@
 ## Decision Log
 <!-- Major decisions with rationale -->
 
+### decompose-bridge cycle (2026-06-13) — SDD architecture (operator-signed)
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Decomposer host | Lean laplas binary `laplas/bin/decompose.mjs` | Sits where party/manifests/dagValidate live; keeps the Python emitter lean (PRD §5 seam). Driver calls it before RFC#35 fan-out. |
+| gate_blind source | Derive from the composition's own manifests (gate rooms/seats `covers_domains[]`) | Gate coverage is per-composition, not global; no new registry that drifts. Back-compat: undeclared gate → covers its room domain / `*`. |
+| Decomposition LLM tier | sonnet (cheap) | The split is structured; opus stays reserved for gate-blind/central leaves (G-3). confidence_floor catches weak splits → serial fallback. |
+
+PRD hardened against Flatline (9 blockers + 9 high-consensus) before SDD; entered /simstim at `--from architect`. SDD: `grimoires/loa/sdd.md`.
+
 ## laplas-poteau cycle (2026-06-12)
 - Hounfour module-format ascension PROPOSAL: `grimoires/loa/proposals/hounfour-module-format-ascension.md` (schemas attached, trinity framing). Return trigger: S6 close or +30 days (2026-07-12). loa-hounfour is local — operator files when ready (the kit proposes; hounfour ratifies).
 - S2 close = the PR #43 (observatory) rebase-vs-stack checkpoint (U7).

@@ -1,0 +1,275 @@
+{
+  "consensus_summary": {
+    "high_consensus_count": 0,
+    "disputed_count": 14,
+    "low_value_count": 0,
+    "blocker_count": 7,
+    "model_agreement_percent": 0,
+    "models": 3,
+    "tertiary_items": 0,
+    "confidence": "single_model"
+  },
+  "high_consensus": [],
+  "disputed": [
+    {
+      "id": "IMP-001",
+      "description": "Exit-code semantics scattered across three sprints with no authoritative matrix is a genuine integration hazard. A misread exit code in the `/compose` driver will silently misroute outcomes. Cost is one table; benefit is unambiguous driver behavior and automation-safe tests. High confidence finding with real downstream blast radius.",
+      "gpt_score": 0,
+      "opus_score": 875,
+      "tertiary_score": 900,
+      "delta": 875,
+      "average_score": 875,
+      "source": "opus_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-002",
+      "description": "This is the most load-bearing gap in the plan. S1 must consume a DAG contract before the LLM integration exists, yet the exact schema between `split-goal`, `derive-routing`, and `dagValidate` is unspecified. Without field-level pinning, pure-core fixtures will drift from the real binary payload the moment S3 lands. Foundational; highest cost of deferral.",
+      "gpt_score": 0,
+      "opus_score": 915,
+      "tertiary_score": 880,
+      "delta": 915,
+      "average_score": 915,
+      "source": "opus_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-003",
+      "description": "Deterministic routing is promised in the sprint goal but the acceptance criteria only check individual predicates, not stable ordering or repeat-run equality. Unstable serialization will produce false diffs in trajectory logs and break reproducible test fixtures. Moderate implementation cost to specify; high value for debuggability and CI stability.",
+      "gpt_score": 0,
+      "opus_score": 840,
+      "tertiary_score": 850,
+      "delta": 840,
+      "average_score": 840,
+      "source": "opus_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-004",
+      "description": "Confidence floor is the primary blast-radius control for over-parallelization, yet neither the confidence source nor the serial payload contract is defined. A vague floor can silently over-parallelize uncertain work or produce inconsistent routing across environments. Core safety invariant that should be pinned before S1 fixtures are written.",
+      "gpt_score": 0,
+      "opus_score": 860,
+      "tertiary_score": 860,
+      "delta": 860,
+      "average_score": 860,
+      "source": "opus_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-005",
+      "description": "The roster schema includes `tier_ceiling` but no test exercises a role whose computed tier exceeds it. This is a real routing safety hole, though narrower in scope than the foundational schema and confidence gaps. Worth adding a fixture and acceptance criterion; medium implementation cost, clear benefit.",
+      "gpt_score": 0,
+      "opus_score": 720,
+      "tertiary_score": 750,
+      "delta": 720,
+      "average_score": 720,
+      "source": "opus_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-006",
+      "description": "Module manifest path resolution rules are practically necessary for consistent CLI behavior, but the failure modes listed (missing `module.json`, duplicate role ids) are the kind of thing implementers often handle implicitly. Still worth a short spec section to prevent drift between decompose.mjs and the roster loader. Lower urgency than contract-level gaps.",
+      "gpt_score": 0,
+      "opus_score": 695,
+      "tertiary_score": 720,
+      "delta": 695,
+      "average_score": 695,
+      "source": "opus_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-007",
+      "description": "S2 security acceptance is gated on a corpus and confidence categories that are not concretely specified. Without pinned fixtures and a stable detector mock strategy, the security tests will prove only superficial sanitization coverage. The stdin boundary is the highest-risk attack surface in the system; this finding directly targets its verifiability.",
+      "gpt_score": 0,
+      "opus_score": 845,
+      "tertiary_score": 820,
+      "delta": 845,
+      "average_score": 845,
+      "source": "opus_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-008",
+      "description": "The first nondeterministic dependency (LLM call in S3) needs a provider interface boundary to keep tests stable and prevent provider coupling. The finding is sound, but the abstraction contract is partially implicit in how any well-structured LLM wrapper works. Value is real but somewhat recoverable later if the interface boundary is kept thin and mockable from day one.",
+      "gpt_score": 0,
+      "opus_score": 745,
+      "tertiary_score": 840,
+      "delta": 745,
+      "average_score": 745,
+      "source": "opus_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-009",
+      "description": "The retry hook crosses dagValidate and splitGoal, and without a narrow contract it can accept structurally different DAGs on retry—a subtle correctness hazard. The finding correctly identifies that retrying too broadly is as dangerous as not retrying. Medium implementation cost to specify; high value for correctness under the hallucination path.",
+      "gpt_score": 0,
+      "opus_score": 760,
+      "tertiary_score": 780,
+      "delta": 760,
+      "average_score": 760,
+      "source": "opus_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-010",
+      "description": "Protecting existing `args.items[]` workflows during rollout is important for safe adoption and for preserving the RFC #35 behavior that the A/B validated. The acceptance criterion is missing and easy to add. Rollout safety criteria belong in the plan, not in post-merge triage.",
+      "gpt_score": 0,
+      "opus_score": 795,
+      "tertiary_score": 890,
+      "delta": 795,
+      "average_score": 795,
+      "source": "opus_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-011",
+      "description": "AC-S3.4 references a wall-clock bound that is not stated anywhere in the sprint plan, making G-6 literally non-actionable for implementers and reviewers. A missing benchmark environment and threshold turns a gate into decoration. Low cost to specify; high cost of omission when the criterion is invoked during review.",
+      "gpt_score": 0,
+      "opus_score": 820,
+      "tertiary_score": 650,
+      "delta": 820,
+      "average_score": 820,
+      "source": "opus_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-012",
+      "description": "The stall watchdog is S4's core safety mechanism and the definition of 'progress' is absent. Ambiguity here directly causes flaky timing tests and missed or false stalls in production. The question of whether sibling receipts reset the timer is non-trivial and must be decided before implementation, not discovered during debugging.",
+      "gpt_score": 0,
+      "opus_score": 855,
+      "tertiary_score": 850,
+      "delta": 855,
+      "average_score": 855,
+      "source": "opus_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-013",
+      "description": "The no-zombie-workers invariant is only proven on the happy cancellation path. Worker-ignores-cancel and timeout-during-drain are plausible failure modes in any cooperative cancellation scheme. Bounding cleanup behavior under failure makes the invariant enforceable rather than aspirational. Real gap; medium cost to specify.",
+      "gpt_score": 0,
+      "opus_score": 830,
+      "tertiary_score": 870,
+      "delta": 830,
+      "average_score": 830,
+      "source": "opus_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-014",
+      "description": "Typed emit is central to driver behavior across Node, Python emitter, and `/compose`, yet output shapes are only named, not specified. Integration ambiguity across three consumers is the exact scenario where schema files or fixture snapshots pay off immediately. Highest confidence finding; the cost of schema drift post-integration is high and the cost of pinning schemas now is low.",
+      "gpt_score": 0,
+      "opus_score": 905,
+      "tertiary_score": 920,
+      "delta": 905,
+      "average_score": 905,
+      "source": "opus_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    }
+  ],
+  "low_value": [],
+  "blockers": [
+    {
+      "id": "SKP-001",
+      "concern": "No explicit size limits defined for raw goal input before sanitization or LLM processing",
+      "severity": "HIGH",
+      "severity_score": 750,
+      "why_matters": "Extremely large inputs could cause memory exhaustion during stdin streaming to injection-detect.sh, buffer overflows, or trigger massive API billing/token limit errors at the LLM boundary.",
+      "location": "S2.2 sanitizeGoal(goal) and S3.1 splitGoal",
+      "recommendation": "Enforce a strict byte/character length limit at the earliest entry point in decompose.mjs before UUID wrapping or sanitization.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-002",
+      "concern": "No timeout is specified for the `injection-detect.sh` subprocess spawned by `sanitizeGoal`. A hung or slow detector holds the Node.js pipeline open indefinitely, producing an effective denial-of-service on every decompose invocation. No fallback exit code is specified for a timed-out detector.",
+      "severity": "CRITICAL",
+      "severity_score": 820,
+      "why_matters": "In an automated pipeline (the run_mode this sprint explicitly targets), a single blocked goal with no timeout degrades into a hung run with no watchdog coverage (S4.2 monitors leaf progress, not decomposer startup). The stall exit path (S4) is downstream of the hung point and never fires.",
+      "location": "S2.2 sanitizeGoal, SDD C11/B3",
+      "recommendation": "Specify a hard wall-clock timeout (e.g., 2 s) on the subprocess with a defined fail-safe: treat timeout as 'indeterminate' → block + log, not proceed. Add an AC that asserts the timeout fires within the bound on a no-response fixture.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-001",
+      "concern": "S2.2 'lower-confidence → log + proceed under containment' is a security bypass path with undefined semantics. The word 'containment' is never specified: no sandboxing constraints, no tool restriction, no prompt quarantine. An adversarially crafted goal tuned to score below the high-confidence threshold reaches the LLM with only a log entry.",
+      "severity": "CRITICAL",
+      "severity_score": 930,
+      "why_matters": "A motivated attacker who can probe the detector's confidence boundary will craft inputs that reliably score 'lower', bypassing the hard block entirely. The block is only as strong as the gap between the two confidence bands — and that gap is undocumented.",
+      "location": "S2.2 sanitizeGoal, AC-S2.2, SDD C11/B9",
+      "recommendation": "Define 'containment' as a concrete, verifiable constraint set (e.g., tool whitelist locked to read-only, worker prompt prefixed with a fixed sentinel the gate checks, no tool calls permitted except the declared role loadout). Block anything above a low-confidence floor rather than two-banding; document the threshold value and make it a config constant so the test can assert it.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-004",
+      "concern": "S3.2 feeds the model's own hallucinated role back as feedback for the retry-with-feedback loop. The feedback payload is not sanitized before re-entering the LLM context, creating a prompt injection vector: a goal that causes the model to hallucinate a role name containing injection syntax will have that syntax amplified in the retry prompt.",
+      "severity": "HIGH",
+      "severity_score": 720,
+      "why_matters": "The retry loop is specifically activated by a hallucination — meaning the model was already behaving unexpectedly. Feeding its raw output back unsanitized is the highest-risk moment to skip sanitization. The sentinel from S2.1 is applied to the original goal, not to the retry feedback.",
+      "location": "S3.2 decompose.mjs retry-with-feedback, SDD C8/B12",
+      "recommendation": "Pass the sanitizeGoal pipeline over the feedback string (or at minimum strip anything outside the expected schema vocabulary) before appending it to the retry prompt. Add an AC: a fixture where the hallucinated role name contains an injection attempt — the retry prompt must not propagate the injected content.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-003",
+      "concern": "The confidence floor used in dag-validate's 'below-floor → serial' branch (S1.6 / SDD C8) is referenced but never defined in this plan. No numeric threshold appears in any acceptance criterion or config reference.",
+      "severity": "HIGH",
+      "severity_score": 740,
+      "why_matters": "The floor is a routing decision with silent blast radius: set too high and every multi-step goal falls back to serial (killing G-1); set too low and low-quality splits proceed to fan-out with garbage items. With no specified value, implementation ships an arbitrary constant that future sprints can silently diverge on.",
+      "location": "S1.6 dag-validate.mjs, AC-S1.6, SDD C8",
+      "recommendation": "Name the floor constant (e.g., `CONFIDENCE_FLOOR = 0.6`), reference it in the AC, put it in a shared config imported by both S1.6 and S3.1 (split-goal sets the confidence), and assert the exact threshold value in the AC-S1.6 fixture table.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-001",
+      "concern": "The plan defines multiple typed outcomes and exit codes, but does not specify a single machine-readable error envelope for `serial`, `refusal`, security blocks, roster failures, split failures, and stall incidents.",
+      "severity": "HIGH",
+      "severity_score": 720,
+      "why_matters": "Without a stable error/output contract, `/compose`, tests, and downstream automation may interpret failures inconsistently, causing silent serial fallback, missed refusals, or incorrect worker execution after a blocker.",
+      "location": "Sprint 1 AC-S1.6, Sprint 2 AC-S2.2, Sprint 3 S3.2/S3.3, Sprint 4 S4.3",
+      "recommendation": "Define one JSON result schema with discriminated `type`, required fields per outcome, exit-code mapping, and contract tests that verify stdout/stderr behavior for every exit path.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-002",
+      "concern": "Undefined failure semantics for multi-pass sequential gate batches",
+      "severity": "HIGH",
+      "severity_score": 720,
+      "why_matters": "If a large DAG requires sequential gate passes and a later pass fails, the system may be left in an inconsistent state with partial completions. Downstream nodes might hang waiting for the failed pass.",
+      "location": "S3.4 gate batch cap",
+      "recommendation": "Define explicit transactional boundaries or rollback procedures for sequential batch failures, or clearly specify how partial DAG success is handled without stranding dependents.",
+      "source": "tertiary_skeptic"
+    }
+  ],
+  "degraded": false,
+  "degraded_model": null,
+  "confidence": "single_model",
+  "phase": "sprint",
+  "document": "grimoires/loa/sprint.md",
+  "domain": " sprint 1 deterministic routing",
+  "tertiary_model_used": "gemini-headless",
+  "tertiary_status": "active",
+  "execution": {
+    "mode": "hitl",
+    "mode_reason": "Simstim workflow active (.run/simstim-state.json state=RUNNING)",
+    "run_id": null
+  },
+  "timestamp": "2026-06-13T22:16:52Z",
+  "metrics": {
+    "total_latency_ms": 222000,
+    "cost_cents": 0,
+    "cost_usd": 0
+  }
+}
