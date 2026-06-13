@@ -90,8 +90,12 @@ terminate_when: >
 # into every emitted segment (TIER_MODEL_JS, leafModel||"sonnet", dagWaves,
 # boundedParallel) — no runtime change is needed to go fast.
 #
-# To go FAST, the /compose driver resolves the operator's task into independent
-# work items and passes them as args.items[]:
+# To go FAST, the /compose driver SHOULD resolve the operator's task into
+# independent work items and pass them as args.items[]. NOTE (honest, audit
+# 2026-06-13): nothing AUTO-decomposes today — neither the emitter nor the
+# /compose skill derives items[]; the driver (operator or agent) supplies them.
+# With no items[], this runs the single-context path (same as before). The
+# fan-out is a CAPABILITY here, not automatic default behavior. Shape:
 #   args.items = [{ id, task, depends_on?, intelligence_tier?, isolation? }]
 # Iteration 1 fans those items across cheap-tier (sonnet) leaves in Kahn waves;
 # the opus FAGAN gate reviews the MERGED diff ONCE per convergence cycle (the loop

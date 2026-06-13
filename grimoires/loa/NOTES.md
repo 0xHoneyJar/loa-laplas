@@ -55,3 +55,9 @@ No PRD/SDD grounds this work — operator brief treated as the requirements per 
 - `compositions/code-implement-and-review.yaml` declares RFC #35 fan-out (`dag_fanout` block) + executor instruction + fan-out invocation example.
 - Emitted workflow verified: DAG machinery present (TIER_MODEL_JS/leafModel/dagWaves/boundedParallel/dagItems); leaves route sonnet, FAGAN gate opus on the merged diff; `items`-less path → single-context (backward-compat). Stage models {1:sonnet, 2:opus}.
 - Declaration+proof only; no runtime code. S3 = live A/B speedup proof.
+
+## compose-speed S3 — live A/B (2026-06-13, run s3ab-e033d1)
+- Fan-out PROVEN live: iter 1 fanned 2 parallel sonnet leaves (clamp+slugify) in 1 wave; opus FAGAN gate fired once/cycle on the MERGED diff, item-anchored; census 4 sonnet work + 3 opus gate (7 agents, ~8.3min, 285k tok, converged in 3 iters).
+- Gate teeth INTACT: caught a fabricated-file diff (clamp not in repo), a BSD-sed `\+` portability regression, scope overreach, a malformed hunk — converged only after real fixes.
+- HONEST cost finding: the win is WALL-CLOCK parallelism (scales with item count), NOT tokens — the emitter already role-routes the work stage to sonnet (party tier:opus was dead metadata). Slowness was sequential work + gate looping, not opus workers. Clean cost-delta number needs a 1-pass multi-item task (deferred).
+- dag_fanout YAML over-claim softened (review+audit follow-up).
