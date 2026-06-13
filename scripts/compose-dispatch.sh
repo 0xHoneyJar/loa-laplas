@@ -233,7 +233,10 @@ if [[ -n "$MODULE_PATH" ]]; then
         exit 2
     fi
     rm -f "$_ready_err"
-else
+elif [[ -n "${POTEAU_VERBOSE:-}" ]]; then
+    # Module-less is the legacy default (wave-1 legality) — SILENT by default so it
+    # doesn't pollute stdout/stderr for the 90% of existing runs (the governance:unarmed
+    # stamp at verify time is the honest signal). Opt into the notice with POTEAU_VERBOSE.
     echo "[gate-0] unprepared ceremony (no --module) — proceeding (wave-1 legality; governance: unarmed)" >&2
 fi
 
