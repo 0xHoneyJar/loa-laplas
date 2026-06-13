@@ -81,6 +81,42 @@ terminate_when: >
   folded into converged.
 
 # ================================================================
+# DAG fan-out (RFC #35) — the SPEED shape (compose-speed S2, 2026-06-13)
+# ================================================================
+# This composition is RFC-#35-capable: the iterate pair [[1,2]] has EXACTLY ONE
+# work stage (stage 1 implement, role: primary) and one gate (stage 2 review,
+# role: craft-gate), satisfying the emitter's dag_capable check (len(work_stages)
+# == 1, segment-emitter.py:953). The runtime ALREADY bakes the fan-out machinery
+# into every emitted segment (TIER_MODEL_JS, leafModel||"sonnet", dagWaves,
+# boundedParallel) — no runtime change is needed to go fast.
+#
+# To go FAST, the /compose driver resolves the operator's task into independent
+# work items and passes them as args.items[]:
+#   args.items = [{ id, task, depends_on?, intelligence_tier?, isolation? }]
+# Iteration 1 fans those items across cheap-tier (sonnet) leaves in Kahn waves;
+# the opus FAGAN gate reviews the MERGED diff ONCE per convergence cycle (the loop
+# wraps WAVES, not items — gate cost ~1x/cycle, never Nx). Leaves default to
+# sonnet unless an item declares its own intelligence_tier (reserve 'deep' for
+# genuinely hard items). A task with NO items[] runs the single-context
+# implement->gate path unchanged — fan-out is OPT-IN, never forced.
+#
+# Decomposition heuristic (how the driver derives items[]): split along
+# independent file/module/feature boundaries that share no mutable state; express
+# ordering with depends_on (the wave scheduler honors it); keep each item a
+# self-contained unit one sonnet worker can ship and the gate can anchor a finding
+# to. The emitter is deterministic and never shells out to derive items — the
+# EXECUTOR populates them (segment-emitter.py:949-950).
+dag_fanout:
+  capable: true
+  work_stage: 1            # role: primary — the fanned leaf
+  gate_stage: 2            # role: craft-gate — fires once on the merged diff
+  executor_populates: "args.items[]"
+  leaf_tier_default: sonnet
+  gate_tier: opus
+  gate_fires: "once per convergence cycle on the merged diff; findings anchored to [item-id]"
+  backward_compatible: "no items[] -> single-context implement->gate path, unchanged"
+
+# ================================================================
 # Stages
 # ================================================================
 
@@ -186,6 +222,12 @@ thinking_effort:
 invocation_examples:
   - operator_utterance: "implement the perf pass and review it"
     resolves_to: full chain stages 1-2 with iteration loop
+  - operator_utterance: "implement these 3 independent endpoints and review them"
+    resolves_to: >
+      DAG fan-out (RFC #35) — driver resolves
+      args.items=[{id:'ep-a',task:...},{id:'ep-b',task:...},{id:'ep-c',task:...}];
+      iteration 1 fans 3 sonnet leaves in one Kahn wave; the opus FAGAN gate
+      reviews the merged diff ONCE, anchoring findings to [ep-a|ep-b|ep-c]
   - operator_utterance: "review this diff"
     resolves_to: stage 2 only with operator-supplied Diff Artifact
   - operator_utterance: "skip review, just implement"

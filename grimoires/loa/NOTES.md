@@ -50,3 +50,8 @@ No PRD/SDD grounds this work — operator brief treated as the requirements per 
 - `laplas-ready` PASS on redesigned `code-implement-and-review`: receipt `sha256:88e57f00dda0bb91159677f6a0cb8346faaae503f520f8bbd81fc918fbddafb7` (binds quest 31dc0f3 / party e50c683 / dungeon 9490075).
 - Operator decision: gate seam = single opus FAGAN gate (`review_routing.council:false`); FR-E council stays available for council-mandating compositions.
 - Worker archetype → sonnet (fanned at runtime via RFC #35); opus reserved for the gate. Declaration-only; S2 wires the executor.
+
+## compose-speed S2 — executor wiring (2026-06-13)
+- `compositions/code-implement-and-review.yaml` declares RFC #35 fan-out (`dag_fanout` block) + executor instruction + fan-out invocation example.
+- Emitted workflow verified: DAG machinery present (TIER_MODEL_JS/leafModel/dagWaves/boundedParallel/dagItems); leaves route sonnet, FAGAN gate opus on the merged diff; `items`-less path → single-context (backward-compat). Stage models {1:sonnet, 2:opus}.
+- Declaration+proof only; no runtime code. S3 = live A/B speedup proof.
