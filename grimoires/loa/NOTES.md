@@ -27,3 +27,37 @@
 
 ## Decision Log
 <!-- Major decisions with rationale -->
+
+## laplas-poteau cycle (2026-06-12)
+- Hounfour module-format ascension PROPOSAL: `grimoires/loa/proposals/hounfour-module-format-ascension.md` (schemas attached, trinity framing). Return trigger: S6 close or +30 days (2026-07-12). loa-hounfour is local — operator files when ready (the kit proposes; hounfour ratifies).
+- S2 close = the PR #43 (observatory) rebase-vs-stack checkpoint (U7).
+
+## [2026-06-13T05:03:27Z] bug-20260612-b2936d triage
+- Triaged BLOCKER-class poteau gate forgery (work agent self-mints valid poteau_gate_pass). Sprint: sprint-bug-1. Beads: construct-rooms-substrate-chk.
+- WARN: grimoires/loa/ledger.json is empty/invalid JSON — skipped ledger cycle registration per /bug failure-mode protocol. next-bug-sprint-id.sh returned sprint-bug-1 (handled empty ledger gracefully). Ledger entry can be backfilled when ledger is reinitialized.
+
+## 2026-06-13 — compose-speed sprint (SEPARATE concern from laplas-poteau)
+
+New sprint plan written to `grimoires/loa/sprint-compose-speed.md` (NOT clobbering the laplas-poteau prd/sdd/sprint). Goal: make `code-implement-and-review` FAST via parallel cheap-tier fan-out + gate-once.
+
+Key grounding: the SPEED machinery already exists at the runtime level — RFC #35 `args.items` fan-out, wave scheduling, cheap≡sonnet leaf default, and "loop wraps WAVES not items so gate cost does not multiply" — all in `scripts/lib/segment-emitter.py` (verified). The gap is module/composition declaration + executor wiring ONLY; no runtime code changes.
+
+The cost mistake to fix: `modules/code-implement-and-review/party.json` staffs the implementer at `tier: opus`; composition loops the opus FAGAN gate up to 3×. Target: sonnet workers, opus gate fires ONCE on merged output.
+
+No PRD/SDD grounds this work — operator brief treated as the requirements per uncertainty protocol. 3 sprints (S1 manifest · S2 wiring · S3 prove-the-speedup A/B). OUT OF SCOPE: the 3 friction findings (false-positive council arming, no aborted verdict path, flat-vs-run-scoped packet.json refusal message) — separate follow-up.
+
+## compose-speed S1 — fan-out manifest (2026-06-13)
+- `laplas-ready` PASS on redesigned `code-implement-and-review`: receipt `sha256:88e57f00dda0bb91159677f6a0cb8346faaae503f520f8bbd81fc918fbddafb7` (binds quest 31dc0f3 / party e50c683 / dungeon 9490075).
+- Operator decision: gate seam = single opus FAGAN gate (`review_routing.council:false`); FR-E council stays available for council-mandating compositions.
+- Worker archetype → sonnet (fanned at runtime via RFC #35); opus reserved for the gate. Declaration-only; S2 wires the executor.
+
+## compose-speed S2 — executor wiring (2026-06-13)
+- `compositions/code-implement-and-review.yaml` declares RFC #35 fan-out (`dag_fanout` block) + executor instruction + fan-out invocation example.
+- Emitted workflow verified: DAG machinery present (TIER_MODEL_JS/leafModel/dagWaves/boundedParallel/dagItems); leaves route sonnet, FAGAN gate opus on the merged diff; `items`-less path → single-context (backward-compat). Stage models {1:sonnet, 2:opus}.
+- Declaration+proof only; no runtime code. S3 = live A/B speedup proof.
+
+## compose-speed S3 — live A/B (2026-06-13, run s3ab-e033d1)
+- Fan-out PROVEN live: iter 1 fanned 2 parallel sonnet leaves (clamp+slugify) in 1 wave; opus FAGAN gate fired once/cycle on the MERGED diff, item-anchored; census 4 sonnet work + 3 opus gate (7 agents, ~8.3min, 285k tok, converged in 3 iters).
+- Gate teeth INTACT: caught a fabricated-file diff (clamp not in repo), a BSD-sed `\+` portability regression, scope overreach, a malformed hunk — converged only after real fixes.
+- HONEST cost finding: the win is WALL-CLOCK parallelism (scales with item count), NOT tokens — the emitter already role-routes the work stage to sonnet (party tier:opus was dead metadata). Slowness was sequential work + gate looping, not opus workers. Clean cost-delta number needs a 1-pass multi-item task (deferred).
+- dag_fanout YAML over-claim softened (review+audit follow-up).

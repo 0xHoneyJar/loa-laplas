@@ -1,0 +1,15 @@
+{
+  "cc_version": "2.1.176 (Claude Code)",
+  "mode": "headless",
+  "evidence_grade": "mechanical",
+  "ts": "2026-06-13T00:05:28Z",
+  "legs_passed": [
+    "L4_ups_injection",
+    "L2_pretooluse_deny",
+    "L1_stop_block",
+    "L3_loop_guard",
+    "L5_combined"
+  ],
+  "legs_failed": [],
+  "pass": true
+}

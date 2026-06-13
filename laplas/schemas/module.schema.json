@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://loa-hounfour/laplas/module/1",
+  "title": "Module — three preparations, authored separately, validated together",
+  "type": "object",
+  "required": ["name", "quest", "party", "dungeon"],
+  "additionalProperties": true,
+  "properties": {
+    "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "quest": { "type": "string", "description": "path to quest manifest, relative to the module file" },
+    "party": { "type": "string", "description": "path to party manifest" },
+    "dungeon": { "type": "string", "description": "path to dungeon manifest" }
+  }
+}

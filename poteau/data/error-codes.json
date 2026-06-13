@@ -1,0 +1,90 @@
+{
+  "comment": "Loa E-code discipline applied to poteau. Each: code, name, what, fix.",
+  "codes": {
+    "P101": {
+      "name": "packet_missing",
+      "what": "Stop attempted in an armed run with no handoff packet.",
+      "fix": "Emit .run/poteau/packet.json (verdict, rationale, task_ref, conformance), then stop again."
+    },
+    "P102": {
+      "name": "packet_field_missing",
+      "what": "Required handoff field absent (three-tier: required fails closed).",
+      "fix": "Add the named field; recommended fields warn, required fields refuse."
+    },
+    "P201": {
+      "name": "task_ref_mismatch",
+      "what": "Packet does not reference the armed task (issue #29: gate judged coherence, not conformance).",
+      "fix": "Copy run_state task_ref into packet.task_ref; verdict must compare work AGAINST THE TASK."
+    },
+    "P202": {
+      "name": "conformance_unasserted",
+      "what": "No explicit in-scope assertion.",
+      "fix": "Set packet.conformance.in_scope=true with a one-line scope note, or verdict CHANGES_REQUIRED."
+    },
+    "P203": {
+      "name": "grounding_unproven",
+      "what": "Mandated read left no echo in the rationale (issue #31: 0/4 reads honored).",
+      "fix": "Open the rationale with the literal H1 of each mandated read; a read with no echo is presumed unread."
+    },
+    "P204": {
+      "name": "council_downgraded",
+      "what": "Mandated council surface arrived with fewer voices than required (issue #30).",
+      "fix": "Attach >=min_voices distinct council receipts or route via the council runner. Single-model on this surface is forbidden."
+    },
+    "P301": {
+      "name": "unhonorable_mandate",
+      "what": "Manifest mandates a council the lattice cannot honor.",
+      "fix": "Configure gate.council.runner, or pass --allow-single-model to RECORD the downgrade (compile-time fail-closed, issue #30)."
+    },
+    "P401": {
+      "name": "generated_file_drift",
+      "what": "A @generated file was hand-edited (layer leakage).",
+      "fix": "Edit poteau/manifest/poteau.manifest.json and re-run poteau-gen; --force discards drift."
+    },
+    "P402": {
+      "name": "protected_path_mutation",
+      "what": "Run-time mutation targeted hook config / gate state / manifest.",
+      "fix": "Constitutional changes go through manifest + gen + reviewed commit, never from inside a run."
+    },
+    "P500": {
+      "name": "gatekeeper_internal",
+      "what": "Gatekeeper errored.",
+      "fix": "Custody gates fail CLOSED: fix the assembly (see .run/poteau/gatekeeper.err); POTEAU_BREAK_GLASS=<reason> for sensed emergency release."
+    },
+    "P600": {
+      "name": "module_unreadable",
+      "what": "Module or one of its three manifests failed to resolve/parse.",
+      "fix": "A module references quest, party, and dungeon by path; all three must resolve. Custody fails closed."
+    },
+    "P601": {
+      "name": "party_missing_role",
+      "what": "Quest requires a role the party does not seat (the cover rule).",
+      "fix": "Recruit the role or re-quest. The cover says 4-6 characters for a reason."
+    },
+    "P602": {
+      "name": "dungeon_missing_tool",
+      "what": "Quest requires a tool the dungeon does not provision (Daemonheim rule).",
+      "fix": "Add the veve'd CLI to the dungeon loadout, or pick a dungeon that carries it."
+    },
+    "P603": {
+      "name": "council_understaffed",
+      "what": "Quest mandates a council larger than the party seats (issue #30, at the door).",
+      "fix": "Add council voices or the ceremony does not start."
+    },
+    "P604": {
+      "name": "gate_room_unreachable",
+      "what": "A quest gate keys to a room absent from the dungeon graph.",
+      "fix": "Fix the keying \u2014 an unreachable gate is an unfinishable quest."
+    },
+    "P605": {
+      "name": "rel_mismatch",
+      "what": "Competitive quest declared against a casual dungeon posture.",
+      "fix": "Run in a competitive dungeon, or downgrade deliberately and record why."
+    },
+    "P606": {
+      "name": "hitl_slot_unseated",
+      "what": "Quest gate invokes an operator slot the party does not seat.",
+      "fix": "The operator is a party slot, not ambient magic \u2014 add the seat or remove the invocation."
+    }
+  }
+}

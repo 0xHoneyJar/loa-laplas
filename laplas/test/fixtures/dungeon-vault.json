@@ -1,0 +1,6 @@
+{
+  "name": "competitive-rel-vault",
+  "rel": "competitive",
+  "tools": ["ledger-cli", "lexicon-lint"],
+  "rooms": [ { "id": "antechamber" }, { "id": "vault" } ]
+}

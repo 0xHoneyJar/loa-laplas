@@ -1,0 +1,4 @@
+{
+  "name": "solo-drafter",
+  "members": [ { "role": "scribe", "seat": "work", "tier": "haiku", "kind": "agent" } ]
+}

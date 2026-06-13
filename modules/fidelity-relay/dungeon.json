@@ -1,0 +1,7 @@
+{
+  "name": "fidelity-corridor",
+  "rel": "competitive",
+  "tools": [],
+  "rooms": [ { "id": "declare" }, { "id": "validate" }, { "id": "confirm" } ],
+  "budgets": { "tool_calls": 50, "wall_s": 600, "stall_s": 120 }
+}

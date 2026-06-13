@@ -1,0 +1,9 @@
+{
+  "name": "implementer-and-craft-gate",
+  "_note": "Speed redesign (sprint-compose-speed S1, 2026-06-13). The implementer is the WORKER ARCHETYPE — staffed at sonnet and fanned out by the runtime into N parallel leaves (RFC #35 args.items) at dispatch, NOT one serial opus context (the old cost mistake). The FAGAN reviewer is the SINGLE opus craft-gate, firing ONCE on the merged diff at the seam. Operator decision 2026-06-13: review_routing.council=false — a single strong opus gate over fanned cheap work, not a 2-voice council (the FR-E cryptographic council stays available for compositions that mandate it). Opus is reserved for the gate; no work seat runs opus.",
+  "members": [
+    { "role": "implementer", "seat": "work", "tier": "sonnet", "kind": "agent" },
+    { "role": "reviewer", "seat": "council", "tier": "opus", "kind": "agent" },
+    { "role": "operator", "slot": "operator-approval", "kind": "hitl" }
+  ]
+}

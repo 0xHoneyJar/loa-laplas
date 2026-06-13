@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://loa-hounfour/laplas/dungeon/1",
+  "title": "Dungeon — the WHERE (rooms graph, provisioned tools, REL, budgets)",
+  "type": "object",
+  "required": ["name", "rooms"],
+  "additionalProperties": true,
+  "properties": {
+    "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "rel": { "type": "string", "enum": ["competitive", "cooperative", "solo"] },
+    "tools": {
+      "type": "array",
+      "description": "The veve'd allowlist — Daemonheim rule: you use what is provisioned.",
+      "items": { "type": "string" }
+    },
+    "rooms": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "tool_calls": { "type": "integer", "minimum": 1 },
+        "wall_s": { "type": "integer", "minimum": 1 },
+        "stall_s": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}
