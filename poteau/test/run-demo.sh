@@ -15,9 +15,14 @@ node poteau/bin/poteau-gen.mjs --allow-single-model >/dev/null 2>&1; ck $? 3 "ha
 node poteau/bin/poteau-gen.mjs --allow-single-model --force >/dev/null 2>&1; ck $? 0 "--force regenerates"
 
 echo "== Arm a run, then walk the exit-gate ladder (P101→P201→P203→mint) =="
-printf '%s' '{"prompt":"/compose ground-and-craft"}' | bash poteau/hooks/prompt-arm.sh >/dev/null
-jq '.task={"id":"sprint-7","goal":"fix dpr curve"} | .task_ref="TBD" | .mandated_reads=[{"path":"docs/dpr.md","h1":"# DPR Methodology"}]' \
-  .run/poteau/run-state.json > .run/poteau/rs.tmp && mv .run/poteau/rs.tmp .run/poteau/run-state.json
+# S3.3 port: the DISPATCHER (gate 0) arms — not prompt-arm (hooks cannot conduct).
+# The demo simulates the dispatcher's seed-runstate output directly.
+mkdir -p .run/poteau
+jq -n '{run_id:"demo-run", armed_at:"2026-06-13T00:00:00Z", gate_index:0, stop_blocks:0,
+  task:{"id":"sprint-7","goal":"fix dpr curve"}, task_ref:"TBD",
+  mandated_reads:[{"path":"docs/dpr.md","h1":"# DPR Methodology"}]}' > .run/poteau/run-state.json
+# prompt-arm now only injects the gradient + links the session (fail-open); assert it does so
+printf '%s' '{"prompt":"/compose ground-and-craft","session_id":"demo-sess"}' | bash poteau/hooks/prompt-arm.sh | grep -q "POTEAU ARMED (run demo-run)" ; ck $? 0 "prompt-arm injects the gradient + adopts the dispatcher-armed run (does NOT create run-state)"
 OUT=$(printf '%s' '{"stop_hook_active":false}' | bash poteau/hooks/exit-gate.sh)
 echo "$OUT" | jq -e '.decision=="block" and (.reason|contains("P101")|not) and (.reason|contains("handoff packet"))' >/dev/null; ck $? 0 "no packet → Stop blocked, refusal names the fix"
 TASKREF=$(jq -cr '.task' .run/poteau/run-state.json | node -e 'const{createHash}=require("crypto");const jcs=v=>v===null||typeof v!=="object"?JSON.stringify(v):Array.isArray(v)?"["+v.map(jcs).join(",")+"]":"{"+Object.keys(v).sort().map(k=>JSON.stringify(k)+":"+jcs(v[k])).join(",")+"}";let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log("sha256:"+createHash("sha256").update(jcs(JSON.parse(s))).digest("hex")))')

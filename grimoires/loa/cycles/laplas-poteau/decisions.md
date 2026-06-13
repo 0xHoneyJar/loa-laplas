@@ -73,3 +73,22 @@ remaining S3 port-time work (T3 by-session pointers, T7 handoff-validate timeout
 IMP-011 receipt freshness, prompt-arm ready-receipt requirement, sandwich lint) and
 S3.4's verify-gate `--poteau` + #7 unarmed benchmark are integration polish on a
 proven core — the natural fresh-context continuation.
+
+## S3.3 port-time — done + the honest remainder (2026-06-12)
+- **prompt-arm → pure gradient injector** (the S1.3-deferral resolution): no longer
+  creates run-state — the DISPATCHER's gate 0 is the sole armer (hooks-cannot-conduct).
+  A raw /compose with no prepared module arms NOTHING (softer nudge), so merging the
+  lattice for-keeps can't spuriously arm an unprepared run. by-session pointer (T3) +
+  location-tolerant adoption (run-scoped OR flat during the port). Demo updated: the
+  dispatcher seeds run-state directly; +1 assertion (25/25).
+- **sandwich lint (IMP-008)**: static — no hook spawns/dispatches/sequences (reactive
+  law only). 2 tests.
+- **IMP-011 freshness**: receipt chain single-run + prev-hash linkage, enforced in
+  verify-gate --poteau (S3.4b).
+- **REMAINING (honest)**: full exit-gate + gatekeeper run-scoping (read by-session →
+  <run_id>/run-state.json instead of flat .run/poteau/run-state.json) is the last T3
+  piece — the seeder/dispatcher/verify side is run-scoped; the vendored hooks are still
+  flat. Tolerated during the port (prompt-arm handles both). T7 (handoff-validate
+  shelled with 10s timeout in the gatekeeper) is defense-in-depth on an already-
+  fail-closed path — deferred to the port-completion pass. Neither blocks #29/#31/#7/#30
+  closure (all proven).
