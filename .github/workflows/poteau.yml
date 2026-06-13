@@ -29,6 +29,8 @@ jobs:
           node-version: 22
       - name: demo — every invariant proven
         run: POTEAU_SRC=$(pwd)/poteau bash poteau/test/run-demo.sh
+      - name: laplas schema + ready-gate tests (S2.1/S2.3)
+        run: node --test laplas/test/
       - name: inventory reconciles (IMP-004 — no unaccounted coverage)
         run: |
           ROWS=$(grep -c '^| [0-9]' poteau/test/INVENTORY.md)

@@ -123,12 +123,14 @@ DRY_RUN=0
 OUTPUT_JSON=0
 SEAM_ROLES="${LOA_SEAM_ROLES:-hard-stop,craft-gate,gate}"  # Form C cut: seam roles
 INJECT_HANDOFFS=()  # cycle-craft-cluster B.4: bats test hook, "<stage>:<path>"
+MODULE_PATH=""      # laplas (S2.3): dispatch gate 0 — the ready check
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --interactive) MODE="interactive"; shift ;;
         --headless) MODE="headless"; shift ;;
         --form-c|--workflow) MODE="workflow"; shift ;;
+        --module) MODULE_PATH="$2"; shift 2 ;;
         --seam-roles) SEAM_ROLES="$2"; shift 2 ;;
         --run-id) RUN_ID="$2"; shift 2 ;;
         --stage) ONE_STAGE="$2"; shift 2 ;;
@@ -187,6 +189,41 @@ ENVELOPES_DIR="$RUN_DIR/envelopes"
 PROMPTS_DIR="$RUN_DIR/dispatch-prompts"
 
 mkdir -p "$RUN_DIR" "$ENVELOPES_DIR" "$PROMPTS_DIR" "$ROOMS_DIR"
+
+# =============================================================================
+# DISPATCH GATE 0 — the laplas ready check (S2.3 / SDD §4.1). No ceremony arms
+# without quest+party+dungeon agreeing. Refusals are PASSED THROUGH verbatim
+# (the P6xx text already teaches the fix — never re-worded). A composition
+# WITHOUT a module is wave-1 legal: warn (unprepared ceremony) and proceed —
+# #7's incentive logic (never make the governed path heavier than the on-ramp).
+# Wave 3 flips this to refuse (sprint S6.3).
+# =============================================================================
+# Anchor to SUBSTRATE_ROOT (the repo root, deterministic) — laplas-ready writes
+# its receipt relative to node's CWD; running it FROM SUBSTRATE_ROOT pins the
+# write to a known .run/poteau, independent of PROJECT_ROOT (which is the
+# consumer parent in standalone dev) or the caller's CWD.
+LAPLAS_READY="$SUBSTRATE_ROOT/laplas/bin/laplas-ready.mjs"
+POTEAU_READY_DIR="$SUBSTRATE_ROOT/.run/poteau/$RUN_ID"
+if [[ -n "$MODULE_PATH" ]]; then
+    _abs_module="$(cd "$(dirname "$MODULE_PATH")" 2>/dev/null && pwd)/$(basename "$MODULE_PATH")"
+    if [[ ! -f "$_abs_module" ]]; then
+        echo "ERROR: --module not found: $MODULE_PATH" >&2; exit 1
+    fi
+    _ready_err="$(mktemp)"
+    if ( cd "$SUBSTRATE_ROOT" && node "$LAPLAS_READY" "$_abs_module" ) >/dev/null 2>"$_ready_err"; then
+        mkdir -p "$POTEAU_READY_DIR"
+        cp "$SUBSTRATE_ROOT/.run/poteau/ready.json" "$POTEAU_READY_DIR/ready.json"  # bind run-scoped (B8)
+        echo "[gate-0] laplas ready ✓ — receipt bound at .run/poteau/$RUN_ID/ready.json" >&2
+    else
+        echo "[gate-0] CEREMONY REFUSED — quest/party/dungeon do not agree:" >&2
+        cat "$_ready_err" >&2   # P6xx pass-through, verbatim (refusals teach)
+        rm -f "$_ready_err"
+        exit 2
+    fi
+    rm -f "$_ready_err"
+else
+    echo "[gate-0] unprepared ceremony (no --module) — proceeding (wave-1 legality; governance: unarmed)" >&2
+fi
 
 # Initialize logger
 log_event() {
