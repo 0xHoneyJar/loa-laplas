@@ -3,7 +3,7 @@
 import { gateBlind } from './gate-coverage.mjs';
 import { highCentrality } from './centrality.mjs';
 
-const TIER_RANK = { haiku: 0, sonnet: 1, opus: 2 };
+const TIER_RANK = { haiku: 0, sonnet: 1, opus: 2, external: 2 };
 const tierRank = (t) => TIER_RANK[t] ?? 1;
 
 export function opusPredicate(item, coverage, items) {

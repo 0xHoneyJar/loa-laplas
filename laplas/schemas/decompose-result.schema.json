@@ -8,7 +8,7 @@
     "rel_policy": { "type": "object" },
     "decomposition_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
     "fallback_reason": { "type": "string", "enum": ["LOW_CONFIDENCE", "INDIVISIBLE", "LLM_EMPTY"] },
-    "refusal_reason": { "type": "string", "enum": ["SANITIZE_REJECT", "DOMAIN_AMBIGUOUS", "ROSTER_INVALID", "LLM_FAILURE", "GOAL_TOO_LARGE", "DETECTOR_TIMEOUT", "EMPTY"] },
+    "refusal_reason": { "type": "string", "enum": ["SANITIZE_REJECT", "DOMAIN_AMBIGUOUS", "ROSTER_INVALID", "LLM_FAILURE", "GOAL_TOO_LARGE", "DETECTOR_TIMEOUT"] },
     "detail": { "type": "string" }
   }
 }

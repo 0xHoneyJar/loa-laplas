@@ -73,3 +73,21 @@ Every AC walked verbatim from `grimoires/loa/sprint.md` Sprint 1.
 2. Inspect `laplas/lib/gate-coverage.mjs:11-22` — confirm no `['*']` default.
 3. Inspect `laplas/lib/derive-routing.mjs:40-43` — confirm gating confidence is deterministic, model self-confidence is telemetry-only.
 4. Confirm scope is surgical: only new files under `laplas/lib`, `laplas/schemas`, `laplas/test`; the emitter and S2/S3/S4 untouched.
+
+## Feedback Addressed (review iteration 1)
+
+Reviewer APPROVED (43/43) with non-blocking concerns. Each real concern is fixed; the deferred S3 footgun is left intentionally. Suite now **44/44** (one new regression test).
+
+| # | Reviewer concern | Resolution | Where |
+|---|------------------|-----------|-------|
+| 1 | **`rosterFromParty` cannot load the repo's own `party-good.json`** — `tier:"external"` exit-6'd, and the HITL `operator` member (no `role`) would also fail. | Widened the valid tier set to include `external` (typos like `gpt9` still reject); HITL members (`kind==='hitl'`) are skipped as operator seats, not routable roles; zero agent roles after skipping → still exit 6. | `laplas/lib/roster.mjs:10` (TIERS), `:21` (hitl skip), `:35` (no-agent-roles → exit 6) |
+| 2 | **`EMPTY` refusal contract drift** — schema invented an `EMPTY` `refusal_reason`; §0.1 maps 0-items to a SERIAL (`LLM_EMPTY`), not a refusal. | 0-items → `{type:'serial', fallback_reason:'LLM_EMPTY'}`; removed `"EMPTY"` from the schema's `refusal_reason` enum. | `laplas/lib/dag-validate.mjs:22` (serial LLM_EMPTY), `laplas/schemas/decompose-result.schema.json:11` (enum) |
+| 3 | **Duplicate-role first-write-wins footgun** — second member's tier silently dropped; ceiling decided by array order. | Dedup now keeps the **most restrictive** (lowest-rank) tier as `tier_ceiling` (haiku<sonnet<opus, external≡opus-rank); order-independent / deterministic. | `laplas/lib/roster.mjs:13,29` (TIER_RANK + min-ceiling merge) |
+| — | **Speculative `seat:'review'` gate branch** — no fixture uses it; only `council`/`work` exist. | Dropped the `seat==='review'` branch; gate coverage adds `council` seats only. | `laplas/lib/gate-coverage.mjs:16` |
+| — | **`TIER_RANK` missing `external`** (so a clamp could wrongly drop opus below an external ceiling). | Added `external: 2` to the opus-predicate rank map. | `laplas/lib/opus-predicate.mjs:6` |
+
+**New regression test** (the one that would have caught concern #1): `laplas/test/decompose-core.test.mjs:145` — loads `party-good.json` via `fileURLToPath`/`import.meta.url`, asserts `ok:true` with the 4 agent roles (`auditor`, `scribe`, `reviewer-a`, `reviewer-b`) and the HITL `operator` skipped, and that the `external` ceiling is carried through. AC-S1.6's 0-items case updated to expect `serial/LLM_EMPTY` (`:120-121`).
+
+**Deferred (not touched, per reviewer agreement)**: the "strict confidence → all-serial silent footgun" — emitting a distinct signal when the known-domain set was empty (un-migrated composition) — is S3's job, not S1's.
+
+**Verification**: `node --test laplas/test/*.test.mjs` → **44 pass / 0 fail** (was 43; +1 regression test). `loadRoster("./laplas/test/fixtures/module-good.json")` now returns `ok:true` (was exit 6). Schema JSON re-validated; no bare `"EMPTY"` token remains. Scope surgical: `laplas/{lib,schemas,test}` + `sprint.md` AC-S1.6 one-line reconcile.

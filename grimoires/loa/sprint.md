@@ -68,7 +68,7 @@ Given identical inputs (raw items + module + rel), `derive-routing` + `dagValida
 - AC-S1.2: declared `covers_domains:['code']` → `gateBlind('code')===false`, `gateBlind('contracts')===true`; undeclared gate covers room domain only.
 - AC-S1.4: opus iff gate_blind OR high_centrality; gate-covered low-centrality leaf → `tier_default` (G-3 unit).
 - AC-S1.5 **(determinism, §0.6)**: identical inputs → byte-identical `items[]` across two runs (stable order, sorted deps).
-- AC-S1.6: the fixture table {cycle, dangling, dup, role-miss, multi-domain, below-`CONFIDENCE_FLOOR`(0.6), 0-items, >`N_MAX_ITEMS`} → the exact typed outcome + exit code per §0.2.
+- AC-S1.6: the fixture table {cycle, dangling, dup, role-miss, multi-domain, below-`CONFIDENCE_FLOOR`(0.6), 0-items → serial(`LLM_EMPTY`) per §0.1, >`N_MAX_ITEMS`} → the exact typed outcome + exit code per §0.2.
 - AC-S1.7: empty/malformed roster → exit 6.
 - AC-S1.7b **(tier_ceiling, Flatline D5)**: a role whose `opus_predicate` tier exceeds its roster `tier_ceiling` → clamped + flagged (a fixture asserts the clamp).
 - All Sprint-1 logic pure; `node --test laplas/test/` green.

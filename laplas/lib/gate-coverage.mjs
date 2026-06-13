@@ -13,7 +13,7 @@ export function gateCoverage(dungeon = {}, party = {}) {
     else if (entry.domain) covered.add(entry.domain); // back-compat: declared domain only
   };
   for (const room of dungeon.rooms ?? []) add(room);
-  for (const m of party.members ?? []) if (m.seat === 'council' || m.seat === 'review') add(m);
+  for (const m of party.members ?? []) if (m.seat === 'council') add(m);
   return covered;
 }
 

@@ -19,7 +19,7 @@ export function dagValidate(items, roster, opts = {}) {
   const floor = opts.confidence_floor ?? CONFIDENCE_FLOOR;
 
   // bounds
-  if (!Array.isArray(items) || items.length === 0) return refusal('EMPTY');
+  if (!Array.isArray(items) || items.length === 0) return serial('LLM_EMPTY');
   if (items.length > N_MAX_ITEMS) return fail('BOUNDS', `${items.length} > ${N_MAX_ITEMS}`);
 
   // duplicate ids

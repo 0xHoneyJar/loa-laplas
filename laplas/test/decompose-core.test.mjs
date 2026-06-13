@@ -3,6 +3,9 @@
 // Run: node --test laplas/test/
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { relPolicy } from "../lib/rel-policy.mjs";
 import { gateCoverage, gateBlind } from "../lib/gate-coverage.mjs";
@@ -114,8 +117,8 @@ test("AC-S1.6 — every structural/routing case yields the exact typed outcome",
   assert.deepEqual(pick(dagValidate([ri("a", { domain: null })], roster)), { type: "refusal", refusal_reason: "DOMAIN_AMBIGUOUS" });
   // below confidence floor → serial
   assert.deepEqual(pick(dagValidate([ri("a", { conf: 0 }), ri("b", { conf: 0 })], roster)), { type: "serial", fallback_reason: "LOW_CONFIDENCE" });
-  // zero items → refusal
-  assert.deepEqual(pick(dagValidate([], roster)), { type: "refusal", refusal_reason: "EMPTY" });
+  // zero items → serial (§0.1: LLM_EMPTY — the goal still runs single-context)
+  assert.deepEqual(pick(dagValidate([], roster)), { type: "serial", fallback_reason: "LLM_EMPTY" });
   // over the bounds → fail
   const tooMany = Array.from({ length: N_MAX_ITEMS + 1 }, (_, i) => ri(`n${i}`));
   assert.deepEqual(pick(dagValidate(tooMany, roster)), { type: "fail", code: "BOUNDS" });
@@ -134,6 +137,22 @@ test("AC-S1.7 — empty/malformed roster → exit 6", () => {
   const r = rosterFromParty(party);
   assert.equal(r.ok, true);
   assert.deepEqual(r.roster.roles.find((x) => x.id === "impl").tier_ceiling, "sonnet");
+});
+
+// ─── AC-S1.7 regression — the repo's own canonical good fixture must load ───
+// (party-good.json has a tier:"external" council member and a HITL operator
+// with no role — the exact shape that exit-6'd before this fix.)
+test("AC-S1.7 regression — party-good.json loads: 4 agent roles, HITL operator skipped", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const good = JSON.parse(readFileSync(join(here, "fixtures", "party-good.json"), "utf8"));
+  const res = rosterFromParty(good);
+  assert.equal(res.ok, true);
+  const ids = res.roster.roles.map((x) => x.id).sort();
+  assert.deepEqual(ids, ["auditor", "reviewer-a", "reviewer-b", "scribe"]);
+  // the HITL operator seat is NOT a routable role
+  assert.equal(res.roster.roles.some((x) => x.id === "operator"), false);
+  // the external council voice is accepted (no clamp) — tier_ceiling carried through
+  assert.equal(res.roster.roles.find((x) => x.id === "reviewer-b").tier_ceiling, "external");
 });
 
 test("resolveDomain — single resolves, empty/multi unresolved", () => {
