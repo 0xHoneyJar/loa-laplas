@@ -12,7 +12,7 @@ per-provider reviewer key, the seeder **provisions** the matching public keys, a
 tool-gate read-fence keeps reviewer **private** keys out of the governed agent's reach.
 
 **Result:** a self-reflected packet now REFUSES (P204); a genuinely-signed
-distinct-reviewer council still MINTS. Demo 31/31, laplas 35/35, bats 94/94.
+distinct-reviewer council still MINTS. Demo 32/32, laplas 35/35, bats 94/94.
 
 **Author/judge isolation, reframed:** we deliberately do NOT restrict *who* writes
 `packet.json` (unenforceable on a shared FS — would be form, not substance). Isolation
@@ -58,6 +58,24 @@ keys a self-reflecting agent does not hold.
      write-gating is not used); (c) **honest grounding**: G3 reframed as a heuristic with
      the declared run-state-copyability limit (`poteau-gatekeeper.mjs:67-78`).
 
+## Audit Feedback Addressed (iteration 3)
+
+**Cross-run/cross-gate replay (security audit, MEDIUM)** — the council signature bound to
+packet content but not to the run or gate, so a byte-identical packet's genuine signatures
+verified under a different `run_id` (audit probe 1d → `pass:true`). Closed.
+
+- Fix: the reviewer now signs the **council subject** = `sha(jcs({gate_index, packet_hash,
+  run_id}))`; the gatekeeper recomputes the same subject from `rs.run_id` / `rs.gate_index`
+  and verifies against it. A signature is valid for exactly one `(packet, run, gate)`.
+  - `poteau/bin/poteau-gatekeeper.mjs` G4 — `councilSubject` from `rs.run_id`/`rs.gate_index`.
+  - `scripts/council-run.sh` — `--run-id`/`--gate-index` args; computes the same subject.
+  - `laplas/test/council.test.mjs` — `council()` threads run+gate; S4.2 passes them from `rs`.
+  - `poteau/test/forge-fixture.mjs` — signs the subject (run_id `forge-run`, gate_index 0).
+- Verified: audit probe 1d now REFUSES (`P204`); `run-demo.sh` row 29 ("CROSS-RUN REPLAY …
+  REFUSE") asserts it; same packet under its own run_id still mints; demo 32/32, laplas 35/35
+  (S4.2 green), bats 94/94. The entire replay class (same-task, different-packet, cross-run,
+  cross-gate) is now closed.
+
 ## Review Feedback Addressed (iteration 2)
 
 **C-REPLAY (senior lead, BLOCKING)** — *"council signatures are replayable (not bound
@@ -95,8 +113,8 @@ to the packet)."* Confirmed and fixed.
 
 ## Testing Summary
 
-- **Demo** (`POTEAU_SRC=$(pwd)/poteau bash poteau/test/run-demo.sh`): 31 passed, 0 failed
-  (incl. row 28 replay-refusal).
+- **Demo** (`POTEAU_SRC=$(pwd)/poteau bash poteau/test/run-demo.sh`): 32 passed, 0 failed
+  (incl. row 28 replay-refusal + row 29 cross-run-replay-refusal).
 - **Laplas** (`node --test laplas/test/*.test.mjs`): 35 passed, 0 failed (S4.2 council
   green path mints with signed receipts; benchmarks P204 still refuses no-council).
 - **Bats** (`bats tests/integration/form-c-dispatch.bats`): 94 ok, 0 not ok.

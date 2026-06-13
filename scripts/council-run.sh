@@ -29,7 +29,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REVIEWER_KEYS="$SCRIPT_DIR/../poteau/bin/reviewer-keys.mjs"  # FR-E: per-provider signing keys
 
-PROMPT_FILE="" TASK_REF="" PACKET_FILE="" MIN_VOICES=2 PROVIDERS="claude,codex,gemini" OUT=""
+PROMPT_FILE="" TASK_REF="" PACKET_FILE="" MIN_VOICES=2 PROVIDERS="claude,codex,gemini" OUT="" RUN_ID="" GATE_INDEX="0"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --prompt) PROMPT_FILE="$2"; shift 2 ;;
@@ -38,6 +38,8 @@ while [[ $# -gt 0 ]]; do
     --min-voices) MIN_VOICES="$2"; shift 2 ;;
     --providers) PROVIDERS="$2"; shift 2 ;;
     --out) OUT="$2"; shift 2 ;;
+    --run-id) RUN_ID="$2"; shift 2 ;;          # C-REPLAY freshness: bind sigs to the run
+    --gate-index) GATE_INDEX="$2"; shift 2 ;;  # ...and the gate
     *) echo "council-run: unknown arg '$1'" >&2; exit 2 ;;
   esac
 done
@@ -48,9 +50,18 @@ PACKET_HASH=$(node -e '
   const jcs=v=>v===null||typeof v!=="object"?JSON.stringify(v):Array.isArray(v)?"["+v.map(jcs).join(",")+"]":"{"+Object.keys(v).sort().map(k=>JSON.stringify(k)+":"+jcs(v[k])).join(",")+"}";
   console.log("sha256:"+createHash("sha256").update(jcs(JSON.parse(fs.readFileSync(process.argv[1],"utf8")))).digest("hex"));
 ' "$PACKET_FILE")
-# C-REPLAY: the reviewer signs the PACKET CONTENT HASH (PACKET_HASH above), not
-# {task_ref,verdict} — binding the receipt to THIS packet so it cannot be replayed
-# onto another. The gatekeeper recomputes the same hash and verifies against it.
+# C-REPLAY + freshness: the reviewer signs the COUNCIL SUBJECT, not the bare packet
+# hash — sha(jcs({gate_index, packet_hash, run_id})). Binding to the packet stops
+# same-task replay; binding to run_id + gate_index stops cross-run / cross-gate
+# replay of an identical packet. The gatekeeper recomputes the SAME subject (byte
+# for byte: same jcs, same field order) and verifies each signature against it.
+SUBJECT=$(node -e '
+  const {createHash}=require("crypto");
+  const jcs=v=>v===null||typeof v!=="object"?JSON.stringify(v):Array.isArray(v)?"["+v.map(jcs).join(",")+"]":"{"+Object.keys(v).sort().map(k=>JSON.stringify(k)+":"+jcs(v[k])).join(",")+"}";
+  const gi=parseInt(process.argv[2],10);
+  const subj={gate_index:(Number.isNaN(gi)?0:gi), packet_hash:process.argv[1], run_id:(process.argv[3]===""?null:process.argv[3])};
+  console.log("sha256:"+createHash("sha256").update(jcs(subj)).digest("hex"));
+' "$PACKET_HASH" "$GATE_INDEX" "$RUN_ID")
 
 NONCE=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n')
 RECEIPTS="[]"
@@ -74,12 +85,12 @@ run_provider() {
     done
   fi
   if [[ -z "$verdict" ]]; then return 0; fi
-  # FR-E + C-REPLAY: sign the PACKET CONTENT HASH with this provider's reviewer key.
-  # The gatekeeper (G4) verifies this signature against the provisioned reviewer
-  # PUBLIC key over the SAME hash — a fabricated string is not a voice, and a
-  # genuine signature cannot be replayed onto a different packet.
+  # FR-E + C-REPLAY: sign the COUNCIL SUBJECT (packet hash + run + gate) with this
+  # provider's reviewer key. The gatekeeper (G4) verifies against the provisioned
+  # reviewer PUBLIC key over the SAME subject — a fabricated string is not a voice,
+  # and a genuine signature cannot be replayed onto another packet, run, or gate.
   local sig
-  sig=$(node "$REVIEWER_KEYS" sign "$p" "$PACKET_HASH" 2>/dev/null) || return 0
+  sig=$(node "$REVIEWER_KEYS" sign "$p" "$SUBJECT" 2>/dev/null) || return 0
   [[ -n "$sig" ]] || return 0
   jq -nc --arg p "$p" --arg v "$verdict" --arg t "$TASK_REF" --arg h "$PACKET_HASH" --arg n "$NONCE" --arg s "$sig" \
     '{reviewer_id:($p+":headless:"+$n), provider:$p, verdict:$v, task_ref:$t, packet_hash:$h, signature:$s, ts:(now|todate)}'

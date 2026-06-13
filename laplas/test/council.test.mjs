@@ -21,10 +21,12 @@ function seed() {
   execFileSync(process.execPath, [SEEDER, MODULE, out], { env: { ...process.env, POTEAU_RUN_ID: "c" }, stdio: ["ignore", "ignore", "ignore"] });
   return JSON.parse(readFileSync(out, "utf8"));
 }
-function council(packetObj, mock, minVoices = 2) {
+function council(packetObj, mock, minVoices = 2, runId = "c", gateIndex = 0) {
   const dir = mkdtempSync(join(tmpdir(), "cr-"));
   const pkt = join(dir, "pkt.json"); writeFileSync(pkt, JSON.stringify(packetObj));
-  const out = execFileSync("bash", [COUNCIL, "--task-ref", packetObj.task_ref, "--packet", pkt, "--min-voices", String(minVoices), "--providers", "claude,codex,gemini"],
+  // C-REPLAY freshness: pass the run_id + gate_index so the reviewer signs the same
+  // council subject the gatekeeper recomputes from the run-state.
+  const out = execFileSync("bash", [COUNCIL, "--task-ref", packetObj.task_ref, "--packet", pkt, "--min-voices", String(minVoices), "--providers", "claude,codex,gemini", "--run-id", runId, "--gate-index", String(gateIndex)],
     { env: { ...process.env, COUNCIL_RUN_MOCK: JSON.stringify(mock) }, encoding: "utf8" });
   return JSON.parse(out);
 }
@@ -47,8 +49,9 @@ test("S4.2 #30 runtime — council receipts CLEAR P204 (the worked example's gre
   const base = { verdict: "APPROVED", rationale: "# construct-rooms-substrate — objectives met within scope", task_ref: rs.task_ref, conformance: { in_scope: true } };
   // before: no council receipts → P204 (proven in benchmarks.test.mjs)
   assert.equal(judge(rs, base).code, "P204");
-  // after: attach the council's receipts → G4 clears, receipt minted
-  const c = council(base, { claude: "APPROVED", codex: "APPROVED" });
+  // after: attach the council's receipts → G4 clears, receipt minted. The council
+  // signs the subject bound to THIS run+gate (rs.run_id / rs.gate_index).
+  const c = council(base, { claude: "APPROVED", codex: "APPROVED" }, 2, rs.run_id, rs.gate_index);
   const withCouncil = { ...base, council_receipts: c.council_receipts };
   const v = judge(rs, withCouncil);
   assert.ok(v.pass === true, `expected pass, got ${JSON.stringify(v)}`);

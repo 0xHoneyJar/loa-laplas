@@ -109,13 +109,16 @@ if (rs.review_routing?.council === true) {
   catch { custodyRefuse('gatekeeper: review_routing.reviewer_keys holds an unparseable public key — custody fails closed, never waved through.'); }
   if (!keys.length)
     refuse('P204', `This surface mandates a council (min ${min} voices) but no reviewer public keys are provisioned (run_state.review_routing.reviewer_keys is empty). A council that cannot be verified cannot be honored — provision reviewer keys via the council runner.`);
-  // C-REPLAY: each reviewer signs the PACKET CONTENT HASH — sha(jcs(packet WITHOUT
-  // council_receipts)). Recomputing it HERE and verifying against it binds every
-  // signature to THIS packet: a genuine signature from another packet (even same
-  // task_ref/verdict) does not verify. Count DISTINCT reviewer keys with a valid
-  // signature (a receipt binds to at most one key).
+  // C-REPLAY + freshness (audit): each reviewer signs the COUNCIL SUBJECT —
+  // sha(jcs({gate_index, packet_hash, run_id})) where packet_hash = sha(jcs(packet
+  // WITHOUT council_receipts)). Binding to the packet kills same-task replay; also
+  // binding to run_id + gate_index kills cross-run / cross-gate replay of an
+  // identical packet. A signature is valid for exactly one (packet, run, gate).
+  // Count DISTINCT reviewer keys with a valid signature (a receipt binds to one key).
   const { council_receipts: _cr, ...packetCore } = packet;
-  const councilPayload = Buffer.from(sha(jcs(packetCore)));
+  const packetHash = sha(jcs(packetCore));
+  const councilSubject = sha(jcs({ gate_index: rs.gate_index ?? 0, packet_hash: packetHash, run_id: rs.run_id ?? null }));
+  const councilPayload = Buffer.from(councilSubject);
   const verified = new Set();
   for (const r of (packet.council_receipts ?? [])) {
     if (!r || typeof r.signature !== 'string') continue;

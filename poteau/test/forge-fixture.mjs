@@ -75,7 +75,9 @@ const signedCore = {
   conformance: { in_scope: true, note: 'councilled' },
 };
 const packetHash = sha(jcs(signedCore));
-const sigB64 = (kp) => sign(null, Buffer.from(packetHash), kp.privateKey).toString('base64');
+// Sign the COUNCIL SUBJECT bound to this run + gate (matches the gatekeeper).
+const councilSubject = sha(jcs({ gate_index: runState.gate_index, packet_hash: packetHash, run_id: runState.run_id }));
+const sigB64 = (kp) => sign(null, Buffer.from(councilSubject), kp.privateKey).toString('base64');
 const signed = {
   ...signedCore,
   council_receipts: [

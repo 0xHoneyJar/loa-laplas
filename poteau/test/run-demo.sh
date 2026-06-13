@@ -83,5 +83,9 @@ ck "$RC" 0 "GREEN: genuinely signed distinct-reviewer council receipts MINT (gre
 # REPLAY — the SAME genuine signatures stapled onto a DIFFERENT packet must REFUSE.
 OUT=$(jq -n --argjson rs "$FRS" --argjson p "$(cat .run/poteau/forge/replay-packet.json)" '{run_state:$rs, packet:$p}' | node poteau/bin/poteau-gatekeeper.mjs); RC=$?
 ck "$RC" 2 "REPLAY: genuine signatures on a DIFFERENT packet REFUSE — signatures bind to packet content (C-REPLAY)"
+# CROSS-RUN REPLAY — the SAME genuine packet+sigs under a DIFFERENT run_id must REFUSE.
+FRS_OTHER=$(printf '%s' "$FRS" | jq '.run_id="OTHER-RUN"')
+OUT=$(jq -n --argjson rs "$FRS_OTHER" --argjson p "$(cat .run/poteau/forge/signed-packet.json)" '{run_state:$rs, packet:$p}' | node poteau/bin/poteau-gatekeeper.mjs); RC=$?
+ck "$RC" 2 "CROSS-RUN REPLAY: genuine packet+sigs under a DIFFERENT run_id REFUSE — sigs bind to run+gate (audit)"
 
 echo; echo "RESULT: $PASS passed, $FAIL failed"; [ $FAIL -eq 0 ]

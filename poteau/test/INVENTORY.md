@@ -1,6 +1,6 @@
 # Demo assertion inventory (IMP-004 — the count derives from THIS list)
 
-The demo's RESULT line must equal the row count here (currently **31**). A new
+The demo's RESULT line must equal the row count here (currently **32**). A new
 assertion joins this table in the same commit, or CI refuses — count drift is
 unaccounted coverage. Rows are the demo's `ck` labels VERBATIM (greppable).
 
@@ -37,3 +37,4 @@ unaccounted coverage. Rows are the demo's `ck` labels VERBATIM (greppable).
 | 26 | …refusal names the council-signature failure (P204), not a vacuous pass | bug-20260612-b2936d / G4 |
 | 27 | GREEN: genuinely signed distinct-reviewer council receipts MINT (green path preserved) | bug-20260612-b2936d / green |
 | 28 | REPLAY: genuine signatures on a DIFFERENT packet REFUSE — signatures bind to packet content (C-REPLAY) | bug-20260612-b2936d / replay |
+| 29 | CROSS-RUN REPLAY: genuine packet+sigs under a DIFFERENT run_id REFUSE — sigs bind to run+gate (audit) | bug-20260612-b2936d / freshness |
