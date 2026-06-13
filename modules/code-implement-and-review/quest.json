@@ -16,6 +16,6 @@
     { "id": "operator-seam", "room": "review", "hitl": "operator-approval" }
   ],
   "mandated_reads": [
-    { "path": "README.md", "h1": "# construct-rooms-substrate" }
+    { "path": "README.md", "h1": "# loa-laplas" }
   ]
 }

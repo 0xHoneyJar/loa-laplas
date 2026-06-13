@@ -1,11 +1,11 @@
 schema_version: 4
-slug: construct-rooms-substrate
-name: Construct Rooms Substrate
-version: 0.3.0
+slug: loa-laplas
+name: loa-laplas
+version: 0.4.0
 type: skill-pack
-short_description: "Substrate that puts every Loa construct into an isolated Claude Code subagent room"
+short_description: "Master of ceremonies for the Loa engine — compiles compositions into runnable, gated agentic workflows"
 description: |
-  construct-rooms-substrate provides the runtime substrate for invoking any Loa
+  loa-laplas provides the runtime substrate for invoking any Loa
   construct as a Claude Code native subagent inside an isolated 'room' — a
   named, traced, packet-emitting invocation boundary. It ships the adapter
   generator, composition runner, handoff packet schemas, validators, and
@@ -21,8 +21,8 @@ author: 0xHoneyJar
 license: AGPL-3.0
 visibility: public
 repository:
-  url: https://github.com/0xHoneyJar/construct-rooms-substrate
-  homepage: https://constructs.network/constructs/construct-rooms-substrate
+  url: https://github.com/0xHoneyJar/loa-laplas
+  homepage: https://constructs.network/constructs/loa-laplas
 
 # Substrate packs do NOT declare personas — they have no embodiment.
 personas: []
