@@ -121,7 +121,7 @@ Given identical inputs (raw items + module + rel), `derive-routing` + `dagValida
 
 ---
 
-## Sprint 4 — The Phase-1 stall path (the keystone)
+## Sprint 4 — The Phase-1 stall path (the keystone) ✅ implemented + reviewed (cycle 2); audit pending
 
 **Goal**: FR-4.5 live — a stalled leaf has a real, run_mode-aware exit, with the named-gap interface and bounded wave cancellation, robust under cancel failure.
 

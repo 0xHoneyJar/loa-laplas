@@ -30,13 +30,15 @@ export async function resolveComposeItems({ goal, items, ...opts } = {}) {
   if (!result) return { mode: 'refuse', exit, refusal_reason: 'VALIDATION_FAIL', detail: `dagValidate failed (exit ${exit})` };
   if (result.type === 'dag') {
     // The driver passes `gate_batch_max` into the emitted workflow's args (S3.4): the DAG
-    // fan-out batches each wave by it (casual 8 / competitive 4). Surfaced flat so the
-    // driver doesn't have to reach into rel_policy.
+    // fan-out batches each wave by it (casual 8 / competitive 4). `stall_s` rides the same
+    // way (S4.4): the emitted wave loop's per-wave stall watchdog reads it. Both surfaced
+    // flat so the driver doesn't have to reach into rel_policy.
     return {
       mode: 'fanout',
       items: result.items.map(toEmitterItem),
       rel_policy: result.rel_policy,
       gate_batch_max: result.rel_policy?.gate_batch_max,
+      stall_s: result.rel_policy?.stall_s,
       decomposed: true,
     };
   }

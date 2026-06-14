@@ -98,8 +98,9 @@ RT="$HOME/.loa/constructs/substrates/construct-rooms-substrate"
    ```sh
    node "$RT/laplas/bin/compose-resolve.mjs" --goal "<goal>" [--module <module.json>]
    ```
-   Branch on the JSON `mode`: `fanout` → set `args.items = <items>` **and**
-   `args.gate_batch_max = <gate_batch_max>` (the emitter waves them, batched by the cap);
+   Branch on the JSON `mode`: `fanout` → set `args.items = <items>`, `args.gate_batch_max =
+   <gate_batch_max>` **and** `args.stall_s = <stall_s>` (the emitter waves them, batched by the
+   cap; `stall_s` drives the per-wave stall watchdog — absent ⇒ the emitter's DEFAULT_STALL_S);
    `single` → run with **no** `items` (one context); `refuse` → **surface the refusal and do
    NOT run** (the CLI exits ≠ 0). **A pre-supplied `items[]` skips this step entirely** (D10 —
    the existing RFC #35 path is unchanged).

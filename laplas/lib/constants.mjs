@@ -9,3 +9,5 @@ export const CENTRALITY_THRESHOLD = 2;      // highCentrality fires at ≥ this
 export const GATE_LATENCY_BOUND = 0.25;     // gate wall-clock ≤ 25% of wave time (G-6, S3)
 export const SPLIT_RETRY = { retries: 1, backoff_ms: 2000 };  // split-goal (S3)
 export const ROLE_RETRY = 2;                // role-hallucination retry-with-feedback (S3)
+export const DEFAULT_STALL_S = 90;          // stall watchdog fallback when rel_policy.stall_s absent (S4, casual default)
+export const STALL_DRAIN_TIMEOUT_MS = 5000; // wave-cancel bounded drain (Flatline-SDD D13): a sibling ignoring cancel is abandoned after this, the wave still emits a typed result

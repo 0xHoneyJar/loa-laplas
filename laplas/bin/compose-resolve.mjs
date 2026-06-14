@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // compose-resolve.mjs — S3.3 the /compose driver CLI. Given a bare goal (and a module for the
 // roster), prints the driver decision the /compose executor branches on:
-//   { mode:'fanout', items:[…emitter-shaped…], gate_batch_max } |
+//   { mode:'fanout', items:[…emitter-shaped…], gate_batch_max, stall_s } |
 //   { mode:'single', goal, fallback_reason } |
 //   { mode:'refuse', refusal_reason, exit }
 // The pre-supplied-items[] bypass (D10) lives in the executor: if items[] were already passed,

@@ -41,6 +41,23 @@ test('S3.3 — a bare multi-domain goal → fanout with emitter-shaped items', a
   assert.equal(r.gate_batch_max, 8, 'casual rel → gate_batch_max 8 (the emitter wave batch width)');
 });
 
+// ───────────────────────── S4.4 (C2 regression) — stall_s rides the fanout to the driver ─────────────────────────
+test('S4.4 — fanout surfaces stall_s flat (so the /compose driver forwards args.stall_s, not just gate_batch_max)', async () => {
+  const split = '[{"id":"a","task":"t","role":"impl","domain_hint":"code","depends_on":[]},' +
+                '{"id":"b","task":"t","role":"rev","domain_hint":"contracts","depends_on":[]}]';
+  // casual → stall_s 90 (rel-policy POLICIES.casual.stall_s); the driver must pass this as
+  // args.stall_s or the emitter silently falls back to DEFAULT_STALL_S and rel-awareness is lost.
+  const casual = await resolveComposeItems({ goal: 'do X and Y', provider: prov(split), ...base });
+  assert.equal(casual.mode, 'fanout');
+  assert.equal(casual.stall_s, 90, 'casual rel → stall_s 90 surfaced flat for args.stall_s');
+
+  // competitive → stall_s 45: proves stall_s is rel-derived, not a constant — so dropping the
+  // driver forward (the C2 bug) would silently collapse 45 → DEFAULT_STALL_S (90).
+  const compCtx = { ...ctx, rel: 'competitive' };
+  const comp = await resolveComposeItems({ goal: 'do X and Y', provider: prov(split), ...base, ctx: compCtx });
+  assert.equal(comp.stall_s, 45, 'competitive rel → stall_s 45 (distinct from casual — proves it is rel-derived)');
+});
+
 test('S3.3 — tier mapping: an opus-routed (central) leaf maps to intelligence_tier "deep", never downgraded', async () => {
   // a is central (b,c depend on it) + role rev (opus ceiling) + known domain → routed opus.
   const split = '[{"id":"a","task":"t","role":"rev","domain_hint":"code","depends_on":[]},' +
