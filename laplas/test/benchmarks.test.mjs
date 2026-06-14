@@ -32,7 +32,7 @@ test("the seeder derives a real armed contract (task_ref + reads + routing)", ()
   const rs = seed();
   assert.match(rs.task_ref, /^sha256:[0-9a-f]{64}$/);
   assert.ok(rs.task.objectives.length >= 1);
-  assert.equal(rs.mandated_reads[0].h1, "# construct-rooms-substrate"); // mechanically extracted
+  assert.match(rs.mandated_reads[0].h1, /^# \S/); // mechanically extracted, well-formed H1 (repo-name-agnostic: CI checks out as a different dir name)
   // compose-speed S1 redesign: code-implement-and-review is now a single opus gate
   // (review_routing.council=false), not a 2-voice council — the seeder derives that.
   assert.equal(rs.review_routing.council, false);
@@ -46,7 +46,7 @@ test("#29 benchmark — wrong task_ref is refused P201 (the gate sees the task)"
 
 test("#29 — missing in_scope assertion is refused P202", () => {
   const rs = seed();
-  const v = judge(rs, { verdict: "APPROVED", rationale: "# construct-rooms-substrate", task_ref: rs.task_ref });
+  const v = judge(rs, { verdict: "APPROVED", rationale: rs.mandated_reads[0].h1, task_ref: rs.task_ref });
   assert.equal(v.code, "P202");
 });
 
@@ -62,7 +62,7 @@ test("#30 benchmark — council-mandated surface refuses a single-voice packet P
   // exercises the council-MANDATE-refuses path, so assert an explicit council contract.
   rs.review_routing = { council: true, min_voices: 2 };
   // task + read + scope all correct; the ONLY remaining gate is the council
-  const v = judge(rs, { verdict: "APPROVED", rationale: "# construct-rooms-substrate — objectives met within scope", task_ref: rs.task_ref, conformance: { in_scope: true } });
+  const v = judge(rs, { verdict: "APPROVED", rationale: `${rs.mandated_reads[0].h1} — objectives met within scope`, task_ref: rs.task_ref, conformance: { in_scope: true } });
   assert.equal(v.code, "P204");
 });
 

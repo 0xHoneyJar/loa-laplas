@@ -5,6 +5,7 @@
 // Run: node --test laplas/test/*.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,6 +17,12 @@ import { gateVerifiesGoal } from '../lib/gate-verifies-goal.mjs';
 import { GOAL_MAX_BYTES, DETECTOR_TIMEOUT_MS } from '../lib/constants.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
+// The real-detector integration test spawns the framework's injection-detect.sh, which
+// lives in the System Zone (.claude/) and is NOT committed to this repo — so it is absent
+// in a fresh CI checkout (the workflow does not mount the Loa framework). Skip the live
+// detector test when it is missing; the deterministic banding tests (cannedSpawn) still
+// cover the sanitize-goal logic in every environment.
+const REAL_DETECTOR = join(here, '..', '..', '.claude', 'scripts', 'injection-detect.sh');
 
 // a spawn double that returns a fixed detector score (deterministic banding)
 const cannedSpawn = (score) => () => ({ status: 0, stdout: JSON.stringify({ status: 'DETECTED', score }), error: null });
@@ -109,7 +116,7 @@ test('AC-S2.2 — fail-closed: detector crash or unparseable output → SANITIZE
   }
 });
 
-test('AC-S2.2 — real detector: a clean goal clears; a textbook injection is at least contained', () => {
+test('AC-S2.2 — real detector: a clean goal clears; a textbook injection is at least contained', { skip: existsSync(REAL_DETECTOR) ? false : 'real detector .claude/scripts/injection-detect.sh not present (framework not mounted — CI)' }, () => {
   const clean = sanitizeGoal('implement the login feature and add tests');
   assert.equal(clean.type, 'ok');
   assert.equal(clean.contained, false);
