@@ -1,102 +1,164 @@
-# Sprint Plan — Laplas + Poteau Integration
+# Sprint Plan — The Decomposition Bridge (Phase 1)
 
-> **Cycle**: laplas-poteau · **PRD + SDD**: `grimoires/loa/{prd,sdd}.md` (both FLATLINE-REVIEWED)
-> **Status**: FLATLINE-REVIEWED (3-model · 66% agreement · 7 HIGH integrated · 5 disputed
-> accepted · 13 blockers → 8 themes addressed inline + 1 ANNOTATED (staged adoption defended
-> with citations, telemetry moved earlier) · artifact: `cycles/laplas-poteau/flatline-sprint-review.json`)
-> **Branch**: `cycle/laplas-poteau` (stacked on cycle/observatory-graduation) · Beads: created at /run time
-> **MVP** = S1–S4 · wave 2 = S5 · wave 3 = S6 · out of scope per PRD §6.
-> **Standing rule (G-5)**: any sprint that flips an enforcement surface prose→hook ships the
-> `hardness-manifest.json` entry + its named PT benchmark IN THE SAME sprint, or the flip reverts.
+> **Cycle**: decompose-bridge · **Branch**: cycle/decompose-bridge · **Date**: 2026-06-13
+> **Traces**: `grimoires/loa/prd.md` (FRs/G-metrics) · `grimoires/loa/sdd.md` (components C1–C13, both Flatline-hardened).
+> **Scope**: SDD Phase 1 only (C1–C11). Phase 1.5 / Phase 2 are telemetry-gated, out of this plan.
+> **Stack**: Node/ESM under `laplas/` (matches the substrate); `node --test` + bats. The Python emitter is consumed unchanged (RFC #35); one config touch for the gate batch cap.
+> **Hardened by Flatline** (3-model, 2026-06-13, 7 blockers / 14 disputed — the disagreement was unanimous on one thing: *pin the contracts*). §0 below is the response; see Appendix.
 
-## Sprint 1: CONTRACT + LANDING — size M
+**Sprint order is dependency-driven**: §0 contracts (pinned first) → S1 (pure core) → S2 (security boundary) → S3 (binary wires S1+S2 + LLM + driver) → S4 (stall path). Each sprint is independently testable and shippable.
 
-**Goal**: law is proven possible on this runtime, then the lattice lands intact.
+---
 
-| # | Task | Acceptance |
-|---|---|---|
-| 1.1 | **FR-B0 smoke test** (`scripts/poteau-smoke.sh`) — five legs (Stop-block · exit-2 deny+stderr · loop-guard · injection · combined-state T2), BOTH interactive and headless modes | `contract-receipt.json` records 5/5 per mode; **any leg false = CYCLE HALTS** (the freeze gate — no FR-B design work may merge before this is green) |
-| 1.2 | Vendor `poteau/` + `laplas/` pristine (commit 1), repo-convention deltas (commit 2): R-5 portable-compare fix, `POTEAU_ROOT` paths, B8/T3 session-keyed run-dirs, T1 packet-mailbox carve-out in tool-gate | Demo 21/21 on ubuntu AND macos in CI; `pt-fixture-portable-compare` named; tool-gate test: packet.json write ALLOWED, run-state.json write DENIED (P402) |
-| 1.3 | `poteau-gen` adaptation + `docs/poteau-runbook.md` (SDD §4.2 content: merge/verify/rollback commands) | `poteau-gen` emits fragment + checksums; P401 drift-refusal demo'd; **operator executes the runbook once** (the agent never merges hook config) and `poteau-gen --check` passes post-merge AND post-remount |
-| 1.4 | CI workflow: demo + smoke + fixtures as PR gates on `poteau/**`, `laplas/**` paths — **the freeze gate is CI-MECHANICAL (IMP-002): the smoke job is a required branch-protection check, not prose** | Workflow green on the PR; a planted leg-failure fixture turns it red (the gate is proven by going red); branch protection lists the smoke job as required |
-| 1.5 | Demo inventory enumerated (IMP-004): the "21/21" = 17 poteau assertions (run-demo.sh, PT-1..9 mapped) + 4 laplas checks (refusal, P-code coverage, pass, receipt binding) — listed in `poteau/test/INVENTORY.md` | Count derives from the inventory file, not a magic number; CI asserts list length == passes |
+## §0 Pinned Contracts & Constants (the single source the sprints build against)
 
-## Sprint 2: THE DOOR — size M
+**Flatline's dominant finding**: types/exit-codes/thresholds were named but not pinned. They are pinned here; every sprint references this section, and contract tests assert these exact shapes. (Blockers B6/B2/B5/B1; Disputed D1/D2/D4/D11/D12/D14.)
 
-**Goal**: no ceremony starts unready; the format becomes draft law.
+### 0.1 Result envelope — `laplas/schema/decompose-result.json` (one discriminated union)
+```
+{ "type": "dag",     "items": [<item>…], "rel_policy": {…}, "decomposition_confidence": <0..1> }
+{ "type": "serial",  "items": [<one spanning item>], "fallback_reason": "LOW_CONFIDENCE|INDIVISIBLE|LLM_EMPTY" }
+{ "type": "refusal", "refusal_reason": "SANITIZE_REJECT|DOMAIN_AMBIGUOUS|ROSTER_INVALID|LLM_FAILURE|GOAL_TOO_LARGE|DETECTOR_TIMEOUT" }
+```
+Discriminator = `type`. Every field per arm is required. The driver branches on `type`, never on exit code alone.
 
-| # | Task | Acceptance |
-|---|---|---|
-| 2.1 | `laplas/schemas/{quest,party,dungeon,module}.schema.json` (draft-07, versioned `module/1`) — H1 extraction skips YAML frontmatter (SDD IMP-007); task-literal bounds in quest schema (SDD T5: ≤4000 chars, **backtick runs rejected — U1: a task containing ``` cannot escape the gate-prompt fence**) | Schemas validate all existing fixtures; frontmatter'd doc fixture extracts the RIGHT H1; 4001-char task fixture refused (fixture `p-task-too-long.json`); backtick-escape fixture refused (fixture `p-task-fence-escape.json`) |
-| 2.2 | **(blocked-by 2.1 — schemas freeze before decomposition, IMP-011)** Worked example: decompose `compositions/code-implement-and-review.yaml` → `modules/code-implement-and-review/{module,quest,party,dungeon}.json` (council + gates + HITL seat all exercised) | `laplas-ready` passes it; receipt binds 3 hashes; the composition still runs UNCHANGED (module is preparation, not execution — no breaking change) |
-| 2.3 | Ready check at dispatch gate 0 (SDD §4.1): `--module` flag + refusal pass-through; module-less = warn + proceed (wave-1 legality) | P601–P606 negative fixtures each refuse with the fix named; module-less dispatch warns `unprepared ceremony`; armed dispatch writes `.run/poteau/<run_id>/ready.json` |
-| 2.4 | Hounfour migration PROPOSAL (schemas attached, ratification out of scope) | Proposal doc opened in loa-hounfour with the trinity framing (spec/kit/content); link recorded in NOTES.md; **return-trigger named (IMP-013): revisit at S6 close or +30 days, whichever first — no proposal limbo** |
+### 0.2 Exit-code matrix (authoritative — referenced by all sprints)
+| Exit | Meaning | Result `type` on stdout |
+|------|---------|--------------------------|
+| 0 | ok | `dag` or `serial` |
+| 3 | dagValidate fail after retry (role↔roster / cycle) | `refusal` (or stderr P601) |
+| 4 | security hard-block (sanitize / sentinel collision / detector timeout) | `refusal` |
+| 5 | LLM call failure (after retry budget) | `refusal` |
+| 6 | roster invalid | `refusal` |
+| 7 | goal exceeds size cap | `refusal` |
 
-## Sprint 3: THE QUEST REACHES THE GATE — size L
+### 0.3 Raw-item schema (split-goal → derive-routing → dagValidate) — `laplas/schema/raw-item.json`
+`{ id: string, task: string, depends_on: string[], role: string, domain_hint: string, confidence: number }`. The *routed* item adds `tier, domain, centrality, gate_coverage, decomposition_confidence` (derived). Both schemas are files with contract tests.
 
-**Goal**: #29 and #31 die by mechanism; the exit is the gate.
+### 0.4 Constants — `laplas/lib/constants.mjs` (shared, imported by S1 + S3)
+| Constant | Value | Used by |
+|----------|-------|---------|
+| `CONFIDENCE_FLOOR` | 0.6 | dagValidate below-floor → serial (S1.6, S3.1) |
+| `GOAL_MAX_BYTES` | 16384 | entry size cap → exit 7 (S2/S3.2) |
+| `DETECTOR_TIMEOUT_MS` | 2000 | injection-detect.sh wall-clock; timeout → block (S2.2) |
+| `N_MAX_ITEMS` | 16 | dagValidate bounds (S1.6) |
+| `CENTRALITY_THRESHOLD` | 2 | highCentrality (S1.3) |
+| `GATE_LATENCY_BOUND` | gate ≤ 25% of wave wall-clock | G-6 benchmark (S3.4) |
+| `SPLIT_RETRY` | 1 retry, 2000ms backoff | split-goal (S3.1) |
+| `ROLE_RETRY` | max 2 | role-hallucination retry-w-feedback (S3.2) |
 
-| # | Task | Acceptance |
-|---|---|---|
-| 3.1 | Dispatcher per-stage seeds (SDD §4.4): task/task_ref/mandated_reads/review_routing into `stages/<k>.json`; IMP-004 legacy defaults (no task = refuse to arm; no routing = non-council, logged) | Cut of the worked example produces correct seeds; legacy composition without task literals refuses with teaching P-code |
-| 3.2 | Emitter TASK/SCOPE into gate_head (`segment-emitter.py:1095`), **length-prefixed sentinel fence (U1 — not bare backticks)**; emit-time P301 when council mandate unstaffable (#30 compile half). **Override authz (U2): `--allow-single-model` requires `{actor, reason}` — empty actor = refusal; recorded to incidents with scope** | Emitted gate segment contains the verbatim task inside the sentinel fence; council-mandate-without-runner emit fails P301; override without actor refused (fixture); with actor → `council_waived{actor,reason}` stamped in receipt + incident |
-| 3.3 | Gatekeeper port: G1 shells handoff-validate (10s timeout, SDD T7 — **timeout behavior identical in interactive and headless: P500 refusal, stderr logged, never a silent stall — IMP-015**) · by-session pointers (SDD T3) · receipt run_id+freshness binding (SDD IMP-011) · prompt-arm requires ready receipt · **sandwich lint (IMP-008): a grep fixture asserts no hook script initiates or sequences (hooks-never-conduct, statically checked)** | Pointer race test (two sessions, no clobber); stale-pointer no-op test; timeout → P500 naming the hang in both modes; existing 3-tier packet fixtures pass unchanged (R-1); sandwich lint green |
-| 3.4 | Verify-gate `--poteau` adoption-aligned (SDD T4): armed = chain-walk + gate_index ≥ seams; unarmed = legacy verify + `governance: unarmed` stamp. **Governance telemetry starts HERE (bypass-blocker answer): every verify logs the stamp to the FR-G feed from S3, so the S6.3 flip decision has a full data window** | **#29 benchmark**: wrong-repo fixture run refused at first exit with P201 (fixture `p-wrong-repo/`). **#31 benchmark**: 4 mandated reads, one missing H1 echo → P203 names the path (fixture `p-read-no-echo/`); 4/4 echoes pass. **#7 benchmark**: unarmed run verifies legacy with the stamp, never a late trap |
-| 3.5 | Hardness-manifest flips: `handoff-validate` + `loa-tool-mandate` successor entries reflect reality post-port | Each flip ships its PT benchmark in this sprint (G-5 standing rule); Observatory fold renders the new SOLID doors |
+### 0.5 "Progress" (watchdog definition — Flatline D12)
+A leaf makes *progress* when it emits a tool-call event or an output token to `orchestrator.jsonl`. The `stall_s` timer resets on each progress event; it does **not** reset on a sibling's progress (per-leaf, not per-wave). No progress for `rel_policy.stall_s` seconds → stall.
 
-## Sprint 4: THE COUNCIL — size M
+### 0.6 Determinism (Flatline D3)
+Given identical inputs (raw items + module + rel), `derive-routing` + `dagValidate` produce byte-identical `items[]` (stable key order, sorted `depends_on`). A repeat-run-equality test asserts this — trajectory diffs must reflect real change, not serialization noise.
 
-**Goal**: #30 dies twice — at compile and at run time.
+---
 
-| # | Task | Acceptance |
-|---|---|---|
-| 4.1 | `scripts/council-run.sh` (SDD §4.7): headless trio pattern, **PARALLEL invocation, 300s/provider timeout, ONE retry per provider on transient failure (5xx/timeout) within budget (U4)**, receipts bind task_ref+packet_hash+nonce (SDD B6). **Distinctness honesty (U3): reviewer distinctness is attested by the runner (orchestrator-side custody, distinct provider binaries) — runner-grade, not cryptographic; declared in the runbook** | Receipts schema-valid; same prompt to N providers in parallel; provider dead after retry → HARD-FAIL naming it + the staffing fix (SDD T6) — never silent degradation; retry test (one planted 503 → recovers; two → hard-fail) |
-| 4.2 | Gatekeeper G4 live: council surfaces refuse <min_voices distinct reviewer_ids (P204) | **#30 benchmark**: council-mandated module emit w/o runner → P301; single-voice packet at run time → P204; recorded override → `council_waived` in receipt + incident |
-| 4.3 | Executor wiring: gate-stage segments invoke council-run (hooks never conduct — the sandwich) | Worked-example run end-to-end: council receipts in packet, G4 passes, chain verifies, `valid_run` with `governance: armed` |
-| 4.4 | Incidents schema (IMP-014) + cycle decisions.md ledger live | One shape `{ts, run_id, event, reason, actor}`; every override/break-glass/checkpoint lands in it; decisions.md cites the first armed run's receipts |
+## Sprint 1 — Deterministic routing core + roster contract
 
-## Sprint 5: CUSTODY + LIVENESS (wave 2) — size L
+**Goal**: Given a *raw* item DAG (§0.3) + a module manifest, deterministically produce a routed, validated `items[]` — or a typed `serial`/`refusal` (§0.1) — with **no LLM in the loop**.
 
-**Goal**: receipts become challengeable; the watchdog gets its hook.
+**Components**: C3 · C4 · C5 · C6 · C7 · C8 · §4.1 roster. **Constants/schemas**: §0.3, §0.4.
 
-| # | Task | Acceptance |
-|---|---|---|
-| 5.1 | Key ceremony (SDD §4.8): per-run provisioned keys outside workspace (**0700 dir / 0600 keys, node crypto entropy, never logged — U5**), pubkeys in run manifest, keys DELETED at run close (SDD IMP-016). **Abnormal-exit custody (U5): EXIT/TERM traps delete keys; an orphan-key sweep at next dispatch reaps any survivor + writes an incident** | Receipts verify via manifest pubkeys after key destruction; forged-receipt fixture (unmanifested key) detected by chain verify; kill -9 mid-run fixture → next dispatch reaps + incident logged |
-| 5.2 | CAS wiring: move-record hashes via legba CAS (**in-repo dependency: `scripts/legba/legba.mjs`, no external fetch — IMP-006**); receipts replay-challengeable | `legba challenge`-shaped re-execution over a poteau receipt succeeds/fails honestly on a tampered fixture |
-| 5.3 | Watchdog (SDD §4.9): orchestrator-side poll over moves.jsonl (**incremental tail via offset cursor, never full re-read — U6**); manifest thresholds (SDD IMP-012: tool_calls 50 · wall_s 600 · stall_s 120); verdict → checkpoint packet through the exit gate (PT-8) | Fixture run breaching tool_calls fires the budget verdict; checkpoint packet judged, never dropped; `compose-calls-ceiling` flips prose→hook WITH this benchmark (G-5) |
+**Tasks**: S1.1 rel-policy.mjs (C4) · S1.2 gate-coverage.mjs (C5; default = room domain only, never `*`) · S1.3 centrality.mjs (C6, `CENTRALITY_THRESHOLD`) · S1.4 opus-predicate.mjs (C7) · S1.5 derive-routing.mjs (C3; validator-confidence vs model-self-confidence telemetry) · S1.6 dag-validate.mjs (C8; `CONFIDENCE_FLOOR`, `N_MAX_ITEMS`, typed outcomes) · S1.7 loadRoster (§4.1) · S1.8 `constants.mjs` + the two schema files (§0.3/§0.4).
 
-## Sprint 6: TELEMETRY + THE HONEST README (wave 3) — size S
+**Acceptance criteria**:
+- AC-S1.1: `relPolicy('casual','automated').summon_approval==='auto'`; `relPolicy('competitive','automated').summon_approval==='fail'`.
+- AC-S1.2: declared `covers_domains:['code']` → `gateBlind('code')===false`, `gateBlind('contracts')===true`; undeclared gate covers room domain only.
+- AC-S1.4: opus iff gate_blind OR high_centrality; gate-covered low-centrality leaf → `tier_default` (G-3 unit).
+- AC-S1.5 **(determinism, §0.6)**: identical inputs → byte-identical `items[]` across two runs (stable order, sorted deps).
+- AC-S1.6: the fixture table {cycle, dangling, dup, role-miss, multi-domain, below-`CONFIDENCE_FLOOR`(0.6), 0-items → serial(`LLM_EMPTY`) per §0.1, >`N_MAX_ITEMS`} → the exact typed outcome + exit code per §0.2.
+- AC-S1.7: empty/malformed roster → exit 6.
+- AC-S1.7b **(tier_ceiling, Flatline D5)**: a role whose `opus_predicate` tier exceeds its roster `tier_ceiling` → clamped + flagged (a fixture asserts the clamp).
+- All Sprint-1 logic pure; `node --test laplas/test/` green.
 
-**Goal**: G-5 closes — the posture map is true and watched.
+---
 
-| # | Task | Acceptance |
-|---|---|---|
-| 6.1 | `scripts/poteau-stats.sh` → GECKO-consumable JSONL (gate-pass rate, P-code histogram, incidents per construct) | Stats over the cycle's real runs; a climbing-refusal fixture surfaces in the report (IMP-009 mechanical criteria) |
-| 6.2 | README posture map replaces "observability-primary / does not block": every surface listed with block/log + why + manifest entry | Every claim cross-checks against hardness-manifest.json (no orphan claims either direction); the Observatory renders the map |
-| 6.3 | Wave-3 flip decision: dispatch refuses module-less ceremonies (T4 end-state) — OPERATOR decision with refusal-rate telemetry in hand | decisions.md entry citing 6.1 telemetry; if flipped, the unprepared-ceremony warn path is removed and its test inverts |
+## Sprint 2 — The worker prompt boundary (security)
 
-## Cross-cutting
+**Goal**: Ship the security controls before any untrusted goal reaches an LLM or a worker — no DoS, no undefined bypass.
 
-- **The freeze gate**: S1.1 failing ANY leg halts the cycle for re-design — no exceptions,
-  no partial credit (PRD FR-B0); CI-mechanical per S1.4. **Halt recovery (U8)**: only the
-  operator re-opens, via a decisions.md entry carrying the failing leg's receipt + an SDD
-  amendment (the observatory §3.3-amendment pattern) — redesign is an artifact, not a vibe.
-- **Override + break-glass authz (U2, one rule)**: every bypass surface
-  (`--allow-single-model`, `POTEAU_BREAK_GLASS`) requires `{actor, reason}`; empty actor =
-  refusal; all land in incidents.jsonl `{ts, run_id, event, reason, actor}` (SDD IMP-014).
-- **Staged adoption stands (bypass blocker, ANNOTATED not folded)**: module-less dispatch
-  warns-and-proceeds through wave 2 BY twice-flatlined design (PRD B2 honest threat model ·
-  SDD T4 adoption-aligned verify — the late-trap was specifically redesigned away). The
-  strengthening: governance-stamp telemetry starts at S3.4, so S6.3's flip decision is made
-  on a full data window, not a guess. #7's law: the governed corridor becomes mandatory only
-  after it is demonstrably the cheapest corridor.
-- **P-code acceptance criteria cite fixtures (IMP-001)**: every refusal named in an
-  acceptance column has a fixture file under `laplas/test/fixtures/` or `poteau/test/` —
-  reviewable by reading the fixture, not by decoding the P-code from memory.
-- **SDD reference key (IMP-003)**: T-numbers and IMP-numbers cited in tasks are defined in
-  `cycles/laplas-poteau/sdd.md` (blocker themes T1–T7, review items IMP-001…016) — one hop,
-  no archaeology.
-- **Benchmarks close issues**: #29 → S3.4 · #31 → S3.4 · #30 → S4.2 · #7 → S3.4 stamp + S6.3 flip; each closing commit cites the issue and the benchmark fixture.
-- **Operator seats (HITL, never ambient)**: S1.3 runbook execution · S6.3 flip decision · break-glass forever.
-- **Determinism env pinned**: Node ≥22, `LANG=C TZ=UTC` for all fixtures and receipts (house law since observatory).
-- **Dual-state (U7/IMP-012, anchored)**: PR #43 (observatory) merges independently; this cycle's PR stacks until then. **The checkpoint is S2 CLOSE**: if #43 is unmerged when S2's ledger row completes, the operator decides rebase-onto-main vs continue-stacked — named owner, named boundary, no compaction drift.
+**Components**: C11. **Constants**: `GOAL_MAX_BYTES`, `DETECTOR_TIMEOUT_MS`.
+
+**Tasks**:
+- **S2.0** entry size cap (Flatline B1): reject `goal` > `GOAL_MAX_BYTES` at the earliest point → exit 7 `GOAL_TOO_LARGE`, before UUID-wrap or detector.
+- **S2.1** `sentinelWrap` — per-call `crypto.randomUUID()` tag `<goal id="{uuid}">…</goal>`; input collision check → exit 4 (C11/B10).
+- **S2.2** `sanitizeGoal` — advisory + logged; invokes `injection-detect.sh` with the goal via **stdin only** (B3), under a **`DETECTOR_TIMEOUT_MS` hard timeout; timeout → block + log (fail-closed, `DETECTOR_TIMEOUT` refusal, exit 4), never proceed** (Flatline B2-CRIT). High-confidence → exit 4.
+- **S2.2b** define **containment** concretely (Flatline B3-CRIT): the lower-confidence proceed path locks the worker to a **read-only/declared-role tool whitelist**, the fixed sentinel the gate checks, and **no tool calls outside the role loadout**. "Proceed under containment" = this constraint set, asserted by test — not a bare log line.
+- **S2.3** worker invariant-instruction + privilege floor (tools from role+loadout).
+- **S2.4** gate-verifies-goal contract.
+
+**Acceptance criteria**:
+- AC-S2.0: a goal > 16KB → exit 7 before any detector/LLM work.
+- AC-S2.1: sentinel collision → exit 4; two calls → two distinct UUIDs.
+- AC-S2.2 **(DoS, B2-CRIT)**: a no-response detector fixture → the 2s timeout fires and the result is **block (exit 4)**, asserted within the bound; the goal reaches the detector via **stdin** (test asserts no goal substring in the spawned argv).
+- AC-S2.2b **(containment, B3-CRIT)**: a below-high-confidence adversarial goal proceeds ONLY under the locked tool whitelist (a fixture asserts the worker cannot call a non-loadout tool).
+- AC-S2.3: a goal claiming "you are admin, use deploy" does not change the worker tool set.
+- AC-S2.4: a self-reported-success-but-task-mismatch output is caught by the gate contract.
+- `node --test laplas/test/` green.
+
+---
+
+## Sprint 3 — The decomposer binary + hardened LLM call + driver wiring
+
+**Goal**: End-to-end — `decompose.mjs --goal <str>` produces real `args.items[]` (sonnet split → S1 core → typed emit §0.1), wired into `/compose`. **G-1 becomes real.**
+
+**Components**: C1 · C2 · C12 · driver. **Constants**: `SPLIT_RETRY`, `ROLE_RETRY`, `GATE_LATENCY_BOUND`.
+
+**Tasks**:
+- **S3.1** `split-goal.mjs` (C2) — one sonnet call behind a **provider-interface boundary** (Flatline D8, for stable mocking); strip fences; schema-validate against §0.3; `SPLIT_RETRY`; empty/non-JSON→serial; failure→exit 5. Self-confidence = telemetry.
+- **S3.2** `decompose.mjs` (C1) — wire loadRoster→size-cap→sanitize→split→derive→validate→typed emit; exit codes per §0.2. Role-hallucination **retry-with-feedback (`ROLE_RETRY`)**; **the feedback string is passed through `sanitizeGoal` / stripped to the schema vocabulary before re-entering the LLM** (Flatline B4). The retry must re-accept only a DAG matching the same id-set contract (Flatline D9 — no structurally-different DAG on retry).
+- **S3.3** `/compose` driver — call `decompose.mjs` before the emitter on a bare goal; `dag`→fan-out, `serial`→single-context, `refusal`→surface, do not run. **Rollout safety (Flatline D10)**: a pre-supplied `args.items[]` bypasses the decomposer entirely (existing RFC #35 path unchanged) — asserted.
+- **S3.4** gate batch cap (C12) — emitter consumes `rel_policy.gate_batch_max`; overflow → sequential passes with **defined failure semantics (Flatline B7)**: a failed batch marks its items failed and **strands their dependents with a typed `DEPENDENCY_FAILED` reason** (no silent partial success); independent batches still complete.
+
+**Acceptance criteria**:
+- AC-S3.1: mocked provider returns {valid, fenced, malformed, empty, network-error} → correct typed outcome + exit per §0.2.
+- AC-S3.2 **(G-1)**: a bare multi-domain goal → ≥2 construct-routed parallel items in ≥1 wave (mocked split).
+- AC-S3.2b: a hallucinated role corrected within `ROLE_RETRY`; persistent → exit 3 (P601). **A hallucinated role containing injection syntax is sanitized before the retry prompt** (Flatline B4 fixture).
+- AC-S3.3: `/compose <goal>` auto-fans; `refusal`→no worker; `serial`→single-context; **a pre-supplied items[] skips the decomposer (RFC #35 unchanged)**.
+- AC-S3.4 **(G-6)**: a >8-item DAG (casual) → sequential gate passes; gate wall-clock ≤ `GATE_LATENCY_BOUND` (25% of wave) on the benchmark; a failed batch strands dependents with `DEPENDENCY_FAILED`, independent batches complete.
+
+---
+
+## Sprint 4 — The Phase-1 stall path (the keystone) ✅ implemented + reviewed (cycle 2); audit pending
+
+**Goal**: FR-4.5 live — a stalled leaf has a real, run_mode-aware exit, with the named-gap interface and bounded wave cancellation, robust under cancel failure.
+
+**Components**: C9 · C10. **Defs**: §0.5 "progress".
+
+**Tasks**:
+- **S4.1** `named-gap.json` (C9) + GECKO `diagnose` emits it.
+- **S4.2** `stall-watch.mjs` (C10) — `stall_s` watchdog on the §0.5 progress definition (per-leaf timer).
+- **S4.3** `stall-exit.mjs` (C10) — interactive→escalate; automated→fail-loud `STALLED_NO_SUMMON` incident + nonzero; never silent.
+- **S4.4** wave cancellation — cooperative cancel + drain; preserve completed receipts; **bounded cleanup under failure (Flatline D13)**: a worker that ignores cancel is hard-killed after a drain timeout; a timeout-during-drain still emits the typed wave result (no indefinite hang).
+
+**Acceptance criteria**:
+- AC-S4.1: `diagnose` on a stalled fixture → schema-valid `named_gap`, non-empty `missing_role`.
+- AC-S4.2 **(progress, §0.5)**: the timer resets on the leaf's own tool/output event, not on a sibling's; no progress for `stall_s` → stall fires.
+- AC-S4.3 **(FR-4.5)**: automated + stall → fail-loud `STALLED_NO_SUMMON` + named_gap, nonzero, **no silent re-queue**; interactive + stall → escalation, no auto-proceed.
+- AC-S4.4: cancel → no zombie workers, completed receipts preserved; **a worker ignoring cancel is killed after the drain timeout; timeout-during-drain still emits a typed result** (Flatline D13).
+- `node --test laplas/test/` green.
+
+---
+
+## Cross-cutting Success Criteria (cycle-level)
+- **G-1**: `/compose <bare goal>` auto-fans to ≥2 construct-routed parallel items (S3).
+- **G-3**: 0 opus on a gate-covered leaf; opus only at gate_blind/central (S1+S3).
+- **G-6**: gate wall-clock ≤ `GATE_LATENCY_BOUND` (25% of wave) on a large DAG (S3).
+- **Security**: adversarial corpus blocked/contained; detector via stdin + 2s timeout fail-closed; containment = locked whitelist; privilege floor holds (S2).
+- **FR-4.5**: no stranded runs — every stall has a typed exit (S4).
+- **No regression / rollout safety**: existing `code-implement-and-review` runs, stays cheap, and a pre-supplied `args.items[]` skips the decomposer (S1.2 migration test + S3.3).
+
+## Dependencies & Risks
+- §0 contracts pinned before S1. S1+S2 block S3. S4 depends on S3 + the emitter wave loop.
+- Risk: the `/compose` driver wiring (S3.3) touches the Python↔laplas seam — thin `args.items[]` data handoff only.
+- Risk: sonnet split quality is the one nondeterministic dependency — `CONFIDENCE_FLOOR` + serial fallback bound the blast radius.
+
+---
+
+## Appendix — Flatline integration log (sprint, 2026-06-13)
+3-model pass: **0% agreement, 7 blockers, 14 disputed** — the disagreement *was* the finding (each model named a different unpinned contract; the theme was unanimous). Response:
+- **§0 created** — result envelope (B6/D1/D14), raw-item schema (B2/D2), constants incl. `CONFIDENCE_FLOOR=0.6` (B5/D4) + `GATE_LATENCY_BOUND` (D11), "progress" def (D12), determinism (D3).
+- **Security**: detector 2s timeout fail-closed (B2-CRIT, S2.2), containment defined (B3-CRIT, S2.2b), retry-feedback sanitized (B4, S3.2), goal size cap (B1, S2.0).
+- **Robustness**: gate-batch failure semantics (B7, S3.4), provider boundary (D8), retry-DAG contract (D9), rollout safety (D10, S3.3), tier_ceiling (D5, S1.7b), cancel-under-failure (D13, S4.4).

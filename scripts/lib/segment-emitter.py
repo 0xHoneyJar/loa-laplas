@@ -75,6 +75,38 @@ def js(value):
     return _det_escape(json.dumps(value, ensure_ascii=True))
 
 
+_LAPLAS_LIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "laplas", "lib")
+
+
+def _inline_block(filename, marker):
+    """Extract the JS block delimited by `// >>>INLINE <marker>` / `// <<<INLINE <marker>`
+    from a laplas/lib module — the SINGLE SOURCE for logic that must be both
+    unit-testable (the module exports it) AND emitted verbatim into the workflow (the
+    sandbox cannot import the module). The block is global-free trusted static code
+    (no composition value), so it is emitted RAW — NOT js()/_det_escape'd (those guard
+    composition-DERIVED strings). The runtime's own Date/Math.random source-grep is the
+    determinism backstop if the block ever drifts."""
+    text = open(os.path.join(_LAPLAS_LIB, filename), encoding="utf-8").read()
+    start = text.index(f"// >>>INLINE {marker}")
+    end = text.index(f"// <<<INLINE {marker}", start)
+    # keep everything BETWEEN the marker lines (drop the marker comments themselves)
+    body = text[text.index("\n", start) + 1:end].rstrip()
+    if not body:
+        raise SystemExit(f"_inline_block: empty block for {marker} in {filename}")
+    return body
+
+
+def _laplas_const(name, default):
+    """Read a pinned integer constant from laplas/lib/constants.mjs (the §0.4 SoT) so
+    the emitted workflow and the kit can never disagree on a threshold."""
+    try:
+        text = open(os.path.join(_LAPLAS_LIB, "constants.mjs"), encoding="utf-8").read()
+        m = re.search(rf"export const {re.escape(name)}\s*=\s*(\d+)", text)
+        return int(m.group(1)) if m else default
+    except OSError:
+        return default
+
+
 def _coerce_cap(value, default=3):
     """max_iterations MUST become a JS integer literal — never a raw-interpolated
     string (that was an injection vector). Coerce; fall back to default."""
@@ -689,16 +721,29 @@ const withRetry = async (stageName, required, fn) => {
 // a parallel() thunk would otherwise crash the whole run). The iterating loop
 // below is sequential and does not use this — kept for fan-out segments.
 const RATE_BOUND = 8;
-const boundedParallel = async (thunks) => {
+// width defaults to RATE_BOUND (existing callers unchanged); the DAG fan-out (S3.4)
+// passes the composition's gate_batch_max so casual (8) and competitive (4) batch
+// differently. A bad/missing width falls back to RATE_BOUND.
+const boundedParallel = async (thunks, width = RATE_BOUND) => {
+  const cap = Number.isInteger(width) && width >= 1 ? width : RATE_BOUND;
   const out = [];
-  for (let i = 0; i < thunks.length; i += RATE_BOUND) {
-    const chunk = thunks.slice(i, i + RATE_BOUND);
+  for (let i = 0; i < thunks.length; i += cap) {
+    const chunk = thunks.slice(i, i + cap);
     const settled = await parallel(chunk.map((t, j) => () => safe("parallel-" + (i + j), t)));
     for (const r of settled) out.push(r);
   }
   return out;
 };
 """
+
+
+def emit_wave_cancel():
+    """The unified DAG wave loop (S4.4 cancel/drain + the folded S3.4/x7l stranding),
+    emitted VERBATIM from laplas/lib/wave-cancel.mjs (single source — unit-tested in
+    laplas/test/wave-cancel.test.mjs). Defines `cancellableWave` + `runDag`; the DAG
+    branch below wires `runItem`/`parallelFn`/`makeWaveCancel` into them."""
+    return "// --- wave-cancel (S4.4 + folded S3.4/x7l) — emitted from laplas/lib/wave-cancel.mjs ---\n" \
+        + _inline_block("wave-cancel.mjs", "wave-cancel") + "\n"
 
 
 def emit_meta(comp, seg, cycle_id, run_id, authored_at, cap):
@@ -1109,35 +1154,29 @@ def emit_iterating_body(comp, seg, cycle_id, run_id):
       ((it.depends_on || []).length ? "COMPLETED UPSTREAM DEPENDENCIES (their outputs — build on these, do not redo them):\\n" + JSON.stringify(Object.fromEntries((it.depends_on || []).map((d) => [d, ((done[d] || {{}}).output || "")]))) : ""),
       {js(_return_instruction(wst, "Return the structured output per the WORK schema (output + rationale)."))}
     ].filter(Boolean).join("\\n");
-    const itemResults = {{}};
-    let dagFailed = null;
-    for (let w = 0; w < dagWavesResolved.length && !dagFailed; w++) {{
-      const wave = dagWavesResolved[w];
-      log("DAG wave " + (w + 1) + "/" + dagWavesResolved.length + " (" + wave.length + " item(s)): " + wave.map((i) => i.id).join(", "));
-      const results = await boundedParallel(wave.map((it) => () =>
-        withRetry({js(wst['construct'])} + ":" + it.id, {_emit_stage_required(wst)}, () =>
-          agent(leafPrompt(it, itemResults), Object.assign({{ label: {js(wst['construct'])} + ":item-" + it.id, phase: {js(w_name)}, agentType: {js(_agent_type(wst['construct']))}, model: leafModel(it), schema: {_emit_stage_schema(wst)} }}, it.isolation === "worktree" ? {{ isolation: "worktree" }} : {{}})))));
-      // Drain the WHOLE wave before failing: sibling results were already paid
-      // for and are kept as partial progress (council: claude + cursor).
-      const waveFailures = [];
-      for (let i = 0; i < wave.length; i++) {{
-        const r = results[i];
-        if (r === null) {{ waveFailures.push({{ reason: "operator-skip", item: wave[i].id }}); continue; }}
-        if (isFailed(r)) {{ waveFailures.push({{ reason: "dag-leaf-failed", item: wave[i].id, detail: r }}); continue; }}
-        itemResults[wave[i].id] = r;
-      }}
-      if (waveFailures.length) {{
-        dagFailed = {{ reason: "dag-wave-failed", stage: {js(wst['construct'])}, wave: w + 1,
-          failures: waveFailures, iteration: iteration }};
-      }}
-    }}
-    if (dagFailed) {{
-      // Materialize partial progress so the degraded envelope carries the work
-      // that DID complete (resumability + operator visibility).
-      workState = {{ dag: true, partial: true, wavesCompleted: dagFailed.wave - 1, items: itemResults,
+    const runItem = (it, done) =>
+      withRetry({js(wst['construct'])} + ":" + it.id, {_emit_stage_required(wst)}, () =>
+        agent(leafPrompt(it, done), Object.assign({{ label: {js(wst['construct'])} + ":item-" + it.id, phase: {js(w_name)}, agentType: {js(_agent_type(wst['construct']))}, model: leafModel(it), schema: {_emit_stage_schema(wst)} }}, it.isolation === "worktree" ? {{ isolation: "worktree" }} : {{}})));
+    // S4.4 + folded S3.4 (x7l): runDag visits EVERY wave (NO whole-dag abort), strands
+    // only a failed item's transitive DEPENDENTS (typed DEPENDENCY_FAILED) while
+    // INDEPENDENT items still complete, and on a stall cooperatively cancels +
+    // bounded-drains the wave (makeWaveCancel wires the timers; degrades to
+    // stranding-only when the sandbox has no setTimeout). Single source: wave-cancel.mjs.
+    const dagOut = await runDag(dagWavesResolved, {{ runItem, parallelFn: (thunks) => boundedParallel(thunks, gateBatchMax), makeWaveCancel }});
+    const itemResults = dagOut.itemResults;
+    const dagDead = Object.keys(dagOut.failed).length + Object.keys(dagOut.stranded).length + dagOut.stalled.length;
+    if (dagDead) {{
+      // PARTIAL (B7): the independent items completed; only the failed item's
+      // dependents were stranded. Materialize the completed receipts + a typed breakdown.
+      const failedList = Object.entries(dagOut.failed).map(([id, f]) => id + " (" + f.reason + ")");
+      const strandedList = Object.entries(dagOut.stranded).map(([id, s]) => id + " (DEPENDENCY_FAILED<-" + s.failed_dep + ")");
+      workState = {{ dag: true, partial: true, items: itemResults,
+        completed: Object.keys(itemResults), failed: dagOut.failed, stranded: dagOut.stranded, stalled: dagOut.stalled,
         output: Object.entries(itemResults).map(([id, r]) => "[" + id + "] " + ((r && r.output) || "")).join("\\n\\n"),
-        rationale: "PARTIAL DAG merge — wave " + dagFailed.wave + " failed: " + dagFailed.failures.map((f) => f.item + " (" + f.reason + ")").join(", ") }};
-      degraded = dagFailed; break;
+        rationale: "PARTIAL DAG: " + Object.keys(itemResults).length + " completed; failed [" + failedList.join(", ") + "]; stranded [" + strandedList.join(", ") + "]" + (dagOut.stalled.length ? "; stalled [" + dagOut.stalled.join(", ") + "]" : "") }};
+      degraded = {{ reason: dagOut.stalled.length ? "dag-stalled" : "dag-partial-failure", stage: {js(wst['construct'])},
+        failed: dagOut.failed, stranded: dagOut.stranded, stalled: dagOut.stalled, drained: dagOut.drained, iteration: iteration }};
+      break;
     }}
     workState = {{
       dag: true, waves: dagWavesResolved.length, items: itemResults,
@@ -1205,6 +1244,29 @@ const dagWaves = (items) => {
   return waves;
 };
 const dagItems = (Array.isArray(input.items) && input.items.length) ? input.items : null;
+// S3.4 gate batch cap (C12): the DAG fan-out batches each wave by the composition's
+// gate_batch_max (rel_policy: casual 8 / competitive 4); absent/invalid → RATE_BOUND.
+const gateBatchMax = Number.isInteger(input.gate_batch_max) && input.gate_batch_max >= 1 ? input.gate_batch_max : RATE_BOUND;
+// S4.4 stall/cancel wiring (per-wave, P1 minimal — per-leaf intra-progress is 1.5).
+// The emitted sandbox forbids wall-clock reads and may lack setTimeout; with NO timers
+// this degrades to B7-stranding-only (signal never flips, no deadline). stall_s rides
+// in from rel_policy; the drain timeout is the §0.4 pinned constant (constants.mjs).
+const _hasTimers = (typeof setTimeout === "function" && typeof clearTimeout === "function");
+const STALL_MS = (Number.isInteger(input.stall_s) && input.stall_s >= 1 ? input.stall_s : __DEFAULT_STALL_S__) * 1000;
+const STALL_DRAIN_MS = __STALL_DRAIN_MS__;
+const makeWaveCancel = (items) => {
+  const signal = { cancelled: false };
+  if (!_hasTimers) return { signal, deadline: null };
+  let resolveDeadline;
+  const deadline = new Promise((res) => { resolveDeadline = res; });
+  let stallT = null, drainT = null;
+  // a wave running past STALL_MS is presumed stalled → flip the signal (cooperatively
+  // skip any not-yet-started sibling) and arm the bounded drain; a sibling still running
+  // after STALL_DRAIN_MS is abandoned (D13) — the wave still emits a typed result.
+  stallT = setTimeout(() => { signal.cancelled = true; drainT = setTimeout(() => resolveDeadline("drain"), STALL_DRAIN_MS); }, STALL_MS);
+  const cleanup = () => { if (stallT) clearTimeout(stallT); if (drainT) clearTimeout(drainT); };
+  return { signal, deadline, cleanup };
+};
 let dagWavesResolved = null;
 if (dagItems) {
   const dagErr = dagValidate(dagItems);
@@ -1214,8 +1276,12 @@ if (dagItems) {
   log("DAG mode: " + dagItems.length + " item(s) in " + dagWavesResolved.length + " wave(s)");
 }"""
         # the runtime tier map is the SAME constant the python resolver uses —
-        # emitted by value so the two can never drift (council: gpt + cursor).
-        dag_setup = dag_setup_template.replace("__TIER_MODEL_JSON__", js(TIER_MODEL))
+        # emitted by value so the two can never drift (council: gpt + cursor). stall_s
+        # default + drain timeout are read from constants.mjs (§0.4 SoT), same reason.
+        dag_setup = (dag_setup_template
+                     .replace("__TIER_MODEL_JSON__", js(TIER_MODEL))
+                     .replace("__DEFAULT_STALL_S__", str(_laplas_const("DEFAULT_STALL_S", 90)))
+                     .replace("__STALL_DRAIN_MS__", str(_laplas_const("STALL_DRAIN_TIMEOUT_MS", 5000))))
     else:
         dag_setup = """\
 // DAG fan-out (RFC #35) requires exactly ONE work stage in the iterate pair —
@@ -1406,6 +1472,7 @@ def emit(comp, seg, room_packets, cycle_id, run_id, authored_at):
         emit_room_packets(seg, room_packets),
         emit_learnings(seg),  # context_carry v2: clew read-back (br-c3m)
         emit_preamble(),
+        emit_wave_cancel(),   # S4.4 + folded S3.4/x7l — runDag/cancellableWave (single source)
     ]
     if seg["kind"] == "iterating":
         parts.append(emit_iterating_body(comp, seg, cycle_id, run_id))

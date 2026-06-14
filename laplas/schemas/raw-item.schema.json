@@ -1,0 +1,14 @@
+{
+  "$comment": "raw-item.schema.json — the split-goal → derive-routing → dagValidate contract (sprint §0.3). The LLM emits these; routing fields are derived downstream. draft-07 SUBSET (the house validate-schema.mjs keywords only).",
+  "type": "object",
+  "required": ["id", "task", "role"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "task": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "depends_on": { "type": "array", "items": { "type": "string" } },
+    "role": { "type": "string", "minLength": 1 },
+    "domain_hint": { "type": "string" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+  }
+}

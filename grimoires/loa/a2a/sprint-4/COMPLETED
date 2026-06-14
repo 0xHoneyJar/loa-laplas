@@ -1,0 +1,19 @@
+Sprint 4 — The Phase-1 stall path (the keystone) — COMPLETED
+
+Verdict: APPROVED - LETS FUCKING GO (security audit, cycle 2)
+Date: 2026-06-14
+Cycle: decompose-bridge
+Scope: S4.1 named-gap+diagnose · S4.2 stall-watch · S4.3 stall-exit · S4.4 wave-cancel
+       + folded S3.4/x7l (DEPENDENCY_FAILED stranding, B7)
+
+Gates:
+- /implement: cycle 2 (cycle 1 + review-driven fixes C1/C2)
+- /review-sprint: All good (adversarial; C1+C2 fixed and verified)
+- /audit-sprint: APPROVED (no CRITICAL/HIGH; M1 prototype-pollution = silent-loss MEDIUM, follow-up bead; L1/L2 forward-looking notes)
+
+Tests: 87/87 laplas · 95/95 form-c (bats) · emitter node --check clean · dispatch determinism guard passes
+
+Residual (disclosed, not overclaimed):
+- KL§1: live setTimeout availability in the Workflow sandbox unverified → graceful degrade to B7-stranding-only; needs a live dispatch
+- M1: dagValidate should reject reserved item ids (__proto__/constructor/prototype) — follow-up bead
+- KL§5: x7l G-6 wall-clock benchmark deferred (stranding rewrite done + tested)

@@ -1,332 +1,234 @@
-# Software Design Document — Laplas + Poteau Integration
+# Software Design Document — The Decomposition Bridge
 
-> **Cycle**: laplas-poteau · **PRD**: `grimoires/loa/prd.md` (FLATLINE-REVIEWED, 12 blockers inline)
-> **Status**: FLATLINE-REVIEWED (3-model: claude+codex+gemini headless · 62% agreement ·
-> 8 HIGH integrated · 6 disputed accepted (gpt+gemini consensus, opus-uncovered) ·
-> 11 blockers → 7 themes addressed inline, none overridden)
-> **Flatline artifact**: `cycles/laplas-poteau/flatline-sdd-review.json`
-> **Design inputs re-grounded**: reference impl read in full (hooks 136 lines, gatekeeper 108,
-> gen 101, ready 100, manifest 35) · this repo's seams located line-anchored
-> (`segment-emitter.py:1095` gate_head — #29's exact site · `compose-dispatch.sh` stage loop ·
-> `.claude/settings.json` hook map) · demo behavior verified (20/21 macOS, R-5).
+> **Cycle**: decompose-bridge · **Repo**: loa-laplas · **Date**: 2026-06-13 · **Branch**: cycle/decompose-bridge
+> **Traces**: `grimoires/loa/prd.md` (hardened, Flatline-integrated). Every component maps to a PRD FR (§10).
+> **Architecture decisions (operator-signed, 2026-06-13)**: decomposer = **lean laplas binary** (`laplas/bin/decompose.mjs`); gate-blind = **derived from the composition's own manifests**; decomposition LLM call = **sonnet**. (NOTES.md Decision Log.)
+> **Hardened by Flatline** (3-model, 2026-06-13, 85% agreement): 12 blockers + 8 high-consensus integrated — see §11 (flatline log). Result: `grimoires/loa/a2a/flatline/sdd-review.json`.
+> **Runtime scope**: the landed compose-speed fan-out substrate (RFC #35, on main). `finn` parked.
 
-## 1 · Architecture overview
+---
 
-The sandwich, placed onto this repo:
+## 1. Architecture Overview
+
+The bridge is a **pre-pass** in front of the existing RFC #35 fan-out. The `/compose` driver calls one new lean binary; everything downstream is unchanged.
 
 ```
-┌─ ORCHESTRATOR ─ compose-dispatch.sh (compile) + CC main loop via /compose (execute)
-│                 + compose-verify-run.sh (prove)         — custody, sequencing
-│  ┌─ HOOK LATTICE (poteau, vendored) ─────────────────── per-move law, in-session
-│  │   UserPromptSubmit → prompt-arm.sh    arm IF ready receipt exists; inject gradient
-│  │   PreToolUse       → tool-gate.sh     P402 deny on constitutional paths
-│  │   PostToolUse      → move-record.sh   involuntary move log (→ FR-F liveness)
-│  │   Stop/SubagentStop→ exit-gate.sh     THE GATE: packet or no exit (G1–G5)
-│  │   PreCompact       → compact-clew.sh  thread dropped before surgery
-│  │  ┌─ PROMPTS / SKILLS ─ /compose skill, segment prompts (gradient, never guarantee)
-└──┴──┴── LAPLAS READY CHECK ─ laplas-ready.mjs at dispatch gate 0: quest+party+dungeon
-          agree (P601–P606) or the ceremony never starts; receipt binds all three hashes
+/compose <goal> [--module M.json] [--run-mode interactive|automated]
+  │
+  ├─ laplas/bin/decompose.mjs ─────────────────────── THE BRIDGE (new, Phase 1)
+  │     0. loadRoster(module)        ── §4 roster contract (validate or exit 6)
+  │     1. sanitizeGoal(goal)        ── §5 advisory pre-flight (stdin to detector)
+  │     2. splitGoal(goal, roster)   ── ONE sonnet call, hardened (retry/schema/fences)
+  │     3. deriveRouting(raw, M)     ── domain · centrality · gate_coverage ·
+  │                                      opus_predicate→tier · rel_policy · confidence
+  │     4. dagValidate(items, roster)── cycle/dangling/dup · role↔roster (retry-w-feedback) ·
+  │                                      one-room-one-domain · confidence floor
+  │     5. emit                      ── DAG  |  serial-fallback{reason}  |  refusal{reason}
+  │
+  └─ scripts/lib/segment-emitter.py (RFC #35) ──────── UNCHANGED
+        resolves topology → waves → fan-out workers → single craft-gate (batch-capped)
+        stall path: stall_s watchdog → GECKO diagnose → named_gap → stallExit(run_mode)
 ```
 
-Three planes the verify gate already owns stay owned: poteau ADDS the in-session law
-layer between compile and prove. `compose-verify-run.sh` grows one check (§4.6): a
-`valid_run` on an armed ceremony additionally requires an unbroken poteau receipt chain.
+**Design invariant**: the interchange is **`args.items[]` (data)** — the emitter never imports the decomposer, and vice-versa (PRD §5 seam).
 
-## 2 · Repository layout (post-integration)
+**Two halves, by determinism**: `splitGoal` is the *only* nondeterministic step (one LLM call). Everything after — routing derivation, validation, tier placement — is **deterministic code** over the raw split + the composition manifests. This is what makes the opus_predicate and rel_policy *computable* (Flatline-PRD B2/B9), not LLM-judged. **Corollary (Flatline-SDD)**: because the one nondeterministic step can fail or hallucinate, C2 and C8 carry explicit failure-handling (retry-with-feedback, schema validation, fence-stripping, typed exit codes) — see C2/C8.
 
-```
-loa-laplas/
-├── poteau/                      # vendored reference impl = executable spec
-│   ├── manifest/poteau.manifest.json   # the ONLY pen (projen discipline)
-│   ├── hooks/{prompt-arm,tool-gate,move-record,exit-gate,compact-clew}.sh
-│   ├── bin/{poteau-gen.mjs,poteau-gatekeeper.mjs}
-│   ├── data/error-codes.json    # normative P-code source (PRD §9)
-│   └── test/run-demo.sh         # CI gate (21/21; R-5 fix applied)
-├── laplas/
-│   ├── bin/laplas-ready.mjs     # the raid lobby (P601–P606)
-│   ├── schemas/{quest,party,dungeon,module}.schema.json   # NEW — format law draft
-│   └── test/fixtures/           # P601–P606 negative fixtures + worked example
-├── modules/
-│   └── code-implement-and-review/      # the worked example (FR-A decomposition)
-│       ├── module.json · quest.json · party.json · dungeon.json
-├── scripts/compose-dispatch.sh  # MOD: gate 0 ready check + per-stage run-state
-├── scripts/lib/segment-emitter.py      # MOD: TASK/SCOPE into gate_head (#29)
-├── scripts/poteau-smoke.sh      # NEW — FR-B0 hook-contract smoke test
-├── scripts/council-run.sh       # NEW — FR-D council runner (§4.7)
-├── scripts/poteau-stats.sh      # NEW — FR-G telemetry aggregator (§4.10, wave 3)
-├── docs/poteau-runbook.md       # NEW — operator bootstrap runbook (§4.2, ships S1)
-└── .claude/settings.poteau.json # @generated fragment (gen output, checksummed)
-```
+---
 
-## 3 · The arming lifecycle (end to end)
+## 2. Components
 
-```
-operator: /compose run code-implement-and-review …
-1. DISPATCH GATE 0 (compile time, fail closed):
-   laplas-ready.mjs modules/<name>/module.json
-   → refusals P601–P606 (exit 2, each names the fix) | ready receipt
-     .run/poteau/<run_id>/ready.json {quest_hash, party_hash, dungeon_hash}
-2. COMPILE (existing): validate → cut → emit segments + room packets + manifest
-   + NEW: per-stage poteau seeds .run/poteau/<run_id>/stages/<k>.json
-     {task, task_ref, mandated_reads[{path,h1}], review_routing}
-3. ARM (session): prompt-arm.sh sees /compose → verifies ready receipt exists for
-   the named run (NO receipt → arms NOTHING, warns: ceremony unprepared) → writes
-   run-state.json {run_id, session_id, gate_index:0, stop_blocks:0} + active-run
-   pointer → injects the governed-path one-liner (the gradient starts at the door)
-4. WORK (per stage): move-record appends moves; tool-gate denies constitutional
-   mutations; at stage end the agent emits its packet (construct-handoff vocabulary)
-   to .run/poteau/<run_id>/packet.json
-5. EXIT (Stop/SubagentStop): exit-gate → gatekeeper G1–G5 → pass mints chained
-   receipt + advances gate_index | refusal teaches, {decision:block}
-6. PROVE (existing + extension): compose-verify-run.sh <run_id> additionally walks
-   .run/poteau/<run_id>/receipts.jsonl — chain unbroken, gate_index == seam count
-```
+| # | Component | File | PRD FR |
+|---|-----------|------|--------|
+| C1 | Decomposer binary (entry) | `laplas/bin/decompose.mjs` | FR-1 |
+| C2 | Goal splitter (the hardened LLM call) | `laplas/lib/split-goal.mjs` | FR-1 |
+| C3 | Routing derivation | `laplas/lib/derive-routing.mjs` | FR-2, §9 |
+| C4 | rel_policy compiler | `laplas/lib/rel-policy.mjs` | FR-4, §9 |
+| C5 | gate-coverage / gate_blind | `laplas/lib/gate-coverage.mjs` | FR-2, §9 |
+| C6 | centrality / high_centrality | `laplas/lib/centrality.mjs` | FR-2, §9 |
+| C7 | opus_predicate | `laplas/lib/opus-predicate.mjs` | FR-2, G-3 |
+| C8 | dagValidate (extended, retry-aware) | `laplas/lib/dag-validate.mjs` | FR-1, FR-2 |
+| C9 | named_gap schema + GECKO sense | `laplas/schema/named-gap.json` | FR-3 |
+| C10 | Phase-1 stall: **minimal watchdog + exit** | `laplas/lib/stall-watch.mjs` + `stall-exit.mjs` | FR-4.5 |
+| C11 | prompt boundary (sentinel + sanitizer) | `laplas/lib/prompt-boundary.mjs` | §5.1 |
+| C12 | gate batch cap | emitter config via rel_policy | §5, G-6 |
+| C13 | summon dials (Phase 2, deferred) | `dungeon.budgets` additive | FR-5 |
 
-## 4 · Component contracts
+### C1 — `decompose.mjs` (the binary)
+CLI: `decompose.mjs --goal <str> --module <module.json> --run-mode <interactive|automated> [--rel casual|competitive]`.
+Stdout is exactly one of three typed results (**Flatline-SDD B5** — degradation ≠ refusal):
+- **DAG**: `{ kind: "dag", items: [<item>…], rel_policy, decomposition_confidence }`
+- **Serial fallback** (safe, runnable): `{ kind: "serial", items: [<single spanning item>], fallback_reason: "LOW_CONFIDENCE|INDIVISIBLE|LLM_EMPTY" }` — the goal still runs, single-context.
+- **Refusal** (no runnable item; driver MUST handle): `{ kind: "refusal", refusal_reason: "SANITIZE_REJECT|DOMAIN_AMBIGUOUS|ROSTER_INVALID|LLM_FAILURE" }` — emits NO item; the driver decides (abort / re-goal).
 
-### 4.1 Ready check at dispatch gate 0 (FR-A)
-`compose-dispatch.sh` gains, before schema validation: if the composition (or CLI
-`--module <path>`) names a module, run `node laplas/bin/laplas-ready.mjs <module>`;
-exit 2 → dispatch refuses with the P6xx text verbatim (refusals teach, pass-through —
-no re-wording); exit 0 → receipt at `.run/poteau/<run_id>/ready.json`. Compositions
-without a module: dispatch warns `unprepared ceremony (no module)` and proceeds —
-adoption is incremental (#7's incentive logic: never make the governed path heavier
-before the on-ramp exists), tracked to flip to refuse in wave 3.
-**Receipt binding**: `prompt-arm` (4.3) arms ONLY when the ready receipt for the run
-exists — preparation and enforcement are one chain, not parallel features.
+Exit codes (typed, never silent): `0` dag|serial · `3` dagValidate fail after retry (role↔roster/cycle, P601 voice on stderr) · `4` sanitize hard-block · `5` LLM_CALL_FAILURE · `6` ROSTER_INVALID.
 
-### 4.2 Vendoring + gen + the settings merge (FR-B)
-Vendor verbatim; repo-convention deltas applied as a SEPARATE commit on top of the
-pristine import (diffable provenance — R-4). `poteau-gen` runs with paths adapted via
-`POTEAU_ROOT`. **Settings merge — the clobber hazard (grounded)**: this repo's
-`.claude/settings.json` is framework-COPIED (mode 600, refreshed by
-`mount-submodule.sh --reconcile`/remount); naive in-place merge is silently undone at
-next refresh. The runbook (IMP-008) therefore specifies the loa overrides pattern:
-hooks fragment lives at `.claude/settings.poteau.json` (gen output) and the operator
-merge step appends poteau's hook entries into `.claude/settings.local.json`
-(operator-owned, survives remount) — with `poteau-gen --check` verifying post-merge
-state by checksum and a one-command rollback (delete the merged block, re-verify).
-**Runbook content (IMP-002 — actionable now, shipped as `docs/poteau-runbook.md`)**:
-```bash
-# 1. generate (refuses on drift/missing deps — P401/P302)
-node poteau/bin/poteau-gen.mjs
-# 2. merge (operator-owned; agent never runs this)
-jq -s '.[0] * {hooks: (.[0].hooks // {} | . as $h | .[1].hooks | to_entries
-  | reduce .[] as $e ($h; .[$e.key] = ((.[$e.key] // []) + $e.value)))}' \
-  .claude/settings.local.json .claude/settings.poteau.json > .claude/settings.local.json.new
-mv .claude/settings.local.json.new .claude/settings.local.json
-# 3. verify (checksums + merged-state probe)
-node poteau/bin/poteau-gen.mjs --check
-# 4. rollback (one command)
-jq 'del(.hooks[][] | select(.hooks[]?.command | strings | test("poteau/hooks/")))' \
-  .claude/settings.local.json > .claude/settings.local.json.new && mv .claude/settings.local.json.new .claude/settings.local.json
-```
-**R-5 fix lands here**: `run-demo.sh` numeric compares go through `$((N))`;
-fixture `pt-fixture-portable-compare`; CI matrix ubuntu + macos.
+### C2 — `split-goal.mjs` (the hardened LLM call) — Flatline-SDD B4/B7/B8/B12
+- Model: **sonnet** (operator-signed). One logical call, with a bounded retry budget.
+- **Failure modes (B8)**: network error / rate-limit / empty / non-JSON each handled. Retry budget: **1 retry, 2s backoff, then fast-fail** → exit 5 with structured stderr. An empty or non-JSON response after retry is treated as `INDIVISIBLE` → serial fallback (not an unhandled throw).
+- **Output parsing (B4)**: strip markdown fences, then **schema-validate** the raw output (Zod, or a hand-rolled validator if we avoid the dep) against the raw-item schema `[{ id, task, depends_on[], role, domain_hint, confidence }]`. Unparseable → serial fallback.
+- **Confidence is telemetry, not the gate (B7)**: the LLM's self-reported `confidence` is recorded for the Phase-1.5 calibration set but does NOT by itself gate fan-out. The *gating* confidence is computed by deterministic checks in C3/C8 (domain resolved? role in roster? dag acyclic? single-domain?). Model self-confidence and validator confidence are separate fields.
+- The goal + emitted tasks are wrapped by C11's sentinel; the model is instructed the goal is untrusted data (§5).
 
-### 4.3 FR-B0 — the contract smoke test (BLOCKER B1, runs FIRST)
-`scripts/poteau-smoke.sh`: launches a disposable `claude -p` (headless) session with a
-minimal hook config in an isolated project dir; proves four legs mechanically:
-1. **Stop block**: a Stop hook emitting `{"decision":"block","reason":"SENTINEL-CONTINUE"}`
-   → transcript shows continuation containing the sentinel.
-2. **PreToolUse deny**: exit-2 hook with sentinel stderr → tool result carries it,
-   mutation absent on disk.
-3. **Loop guard**: `stop_hook_active` true on the second Stop of a chain.
-4. **UserPromptSubmit injection**: stdout-on-exit-0 lands in context (sentinel echo).
-5. **Combined state (T2/SKP-006)**: a PreToolUse denial fired DURING a stop-blocked
-   continuation chain (`stop_hook_active=true`) with an active injection — the three
-   mechanisms compose; legs proven independently can still interfere.
-**Dual-mode pass criteria (IMP-015)**: all FIVE legs must pass in BOTH interactive and
-`claude -p` headless modes; the receipt records per-mode verdicts. One mode failing =
-exit 1 = HALT (R-7 is a freeze gate, enforced not advisory).
-Output: `.run/poteau/contract-receipt.json` {cc_version, mode, five leg verdicts}. Any
-leg false → exit 1, CYCLE HALTS (PRD FR-B0). CI re-runs on every PR touching `poteau/`
-or the CC version pin; drift = build refusal.
+### C3 — `derive-routing.mjs` (deterministic)
+Per raw item, compute (§9): `domain` (resolve `domain_hint` to exactly one registry entry or flag DOMAIN_AMBIGUOUS) · `centrality` (C6) · `gate_coverage`/`gate_blind` (C5) · `tier` via `opus_predicate` (C7) · `rel_policy` ref · `decomposition_confidence` = the *validator* confidence (deterministic), with model self-confidence carried separately as telemetry. Pure, testable.
 
-### 4.4 Dispatcher → run-state (FR-C, the quest reaches the gate)
-At cut time, per stage k the dispatcher derives from the composition (and module quest
-when present): `task` = the stage's task literals — the SAME text the emitter bakes
-into the work prompt (single source: the cut JSON, not a re-derivation); `task_ref` =
-sha256(JCS(task)); `mandated_reads` = quest.mandated_reads ∪ stage-level reads, each
-`{path, h1}` with h1 extracted MECHANICALLY — first `^# ` line AFTER skipping a YAML
-frontmatter block if present (IMP-007: this repo's docs open with `---` frontmatter;
-naive first-line extraction would mis-key every one); file missing or H1-less →
-refusal at compile, not silence; `review_routing` from quest/composition
-(`{council: bool, min_voices}`).
-**Task literal bounds (T5/IMP-008 — the quest is data, not directives)**: task ≤4000
-chars, control sequences stripped (C0/C1, ANSI), compile-time refusal P-code on
-violation; the gate prompt wraps TASK in a fenced block so a malformed quest.json
-cannot inject structural directives into the reviewer's context.
-**Legacy defaults (IMP-004, fail-closed on the load-bearing field)**: no task literals →
-refuse to arm; no review_routing → non-council, logged; no mandated_reads → empty,
-logged. Stage transition (orchestrator-driven, segment boundary): the executor copies
-`stages/<k>.json` over the active `task/mandated_reads/review_routing` keys in
-run-state — hooks never sequence (the sandwich), the orchestrator conducts.
+### C4 — `rel-policy.mjs`
+`relPolicy(rel, run_mode)` → `{ tier_default, gate_density, gate_batch_max, confidence_floor, stall_s, summon_generosity, summon_approval }`.
+- `casual` → `{ sonnet, sparse, 8, 0.5, 90, generous, auto }`
+- `competitive` → `{ sonnet, dense, 4, 0.7, 45, tight, break_glass }`
+- **run_mode override (Flatline-PRD DISPUTED-1)**: `automated` resolves `summon_approval` non-interactively — `casual`→`auto` (within budget); `competitive`→`fail` (never operator-wait). REL never compiles to a headless deadlock.
 
-### 4.5 Emitter — the gate sees the task (#29, line-anchored)
-`segment-emitter.py:1095` gate_head gains, immediately after the role sentence:
-```
-TASK (verbatim, judge work AGAINST THIS): <task literals>
-SCOPE: verdict is CHANGES_REQUIRED if the diff does not implement THE TASK within
-scope, regardless of internal quality. Assert conformance.in_scope explicitly.
-```
-Same source as run-state's `task` (4.4) — the model-side reviewer and the mechanical
-gatekeeper check the SAME contract; neither is derived from the other's paraphrase.
-The emitter also stops ignoring `review_routing` (#30's compile half): a council
-mandate on a stage whose party cannot staff ≥min_voices is P301 at EMIT time unless
-`--allow-single-model` (recorded per IMP-002).
+### C5 — `gate-coverage.mjs` (derive-from-composition — operator-signed)
+`gateCoverage(dungeon, party)` → the SET of domains a *declared* gate in THIS composition can re-check, from gate rooms + council/reviewer seats. Additive manifest field: a gate room/seat declares `covers_domains: [..]`. `gateBlind(domain) = domain ∉ gateCoverage`.
+- **Back-compat default (Flatline-SDD B2 — corrected)**: an undeclared gate covers its **room's declared domain ONLY — never `["*"]`**. A generic craft-gate with no domain declaration covers the **empty set**, so undeclared-domain leaves are gate-blind → opus-tiered. Conservative: the failure mode is over-provision (opus where maybe unneeded), never under-gate (cheap where unverifiable). A migration test asserts `code-implement-and-review` declares its gate's `covers_domains` so it stays cheap.
 
-### 4.6 Gatekeeper (port + two changes)
-G1–G5 port unchanged (executable spec). Two port-time changes, both PRD blockers:
-**(B8+T3) run-scoped state, session-keyed pointer** — pointers live at
-`.run/poteau/by-session/<session_id>` → `{run_id, armed_at}` (hooks read their OWN
-session's pointer from hook-input session_id — parallel sessions cannot clobber each
-other, no lock needed; IMP-013's race test ships in the suite). A second `/compose`
-in an already-armed session REFUSES to re-arm with a teaching message (one ceremony
-per session); a stale pointer (run dir absent) → hooks no-op + warn loudly. All run
-paths derive from the pointer: `…/<run_id>/{run-state,packet,ready}.json`,
-`moves/incidents/receipts .jsonl`. Parallel ceremonies never share state.
-**(T1) the packet mailbox carve-out** — tool-gate denies `.run/poteau/**` mutations
-(constitutional: run-state, moves, receipts, seeds, pointers) EXCEPT exactly one slot:
-`.run/poteau/<run_id>/packet.json` — the agent MUST be able to emit its packet (the
-reference's wholesale deny would deadlock its own exit), and an agent-authored packet
-is harmless by construction: it is JUDGED by G1–G5, and receipts are minted only by
-the gatekeeper. The carve-out is data, the judgment is law.
-**(G1 extends, vocabulary preserved)** — before field checks, the gatekeeper shells
-`scripts/handoff-validate.sh` on the packet under a 10s timeout (T7: a hanging
-validator must never stall the Stop hook — timeout → P500 fail-closed refusal that
-NAMES the hang); tier-1 required = fail closed, tier-2 warn: poteau's packet IS the
-construct-handoff packet; the three-tier discipline is one validator, not two dialects.
-**(IMP-011) receipt freshness** — each receipt additionally binds `run_id` and is
-refused if its `ts` predates the run's `armed_at` (no cross-run replay; chain order +
-prev-hash already prevent intra-run splicing).
-**Verify-gate extension, adoption-aligned (T4)**: `compose-verify-run.sh` gains
-`--poteau`. For runs that ARMED (ready receipt + run dir exist): receipt chain
-hash-walks clean, `gate_index` ≥ seam count, ready hashes match the module — else
-`broken_run`. For runs that never armed (waves 1–2 legality): legacy verification
-applies unchanged and the verdict stamps `governance: unarmed` — visible, never a
-late surprise failure (the trap SKP-002 named: full execution then predictable
-verify-fail is WORSE than honest legacy verification). Wave 3 flips DISPATCH to
-refuse unprepared ceremonies, at which point unarmed runs cannot exist — enforcement
-tightens at the door, never retroactively at the exit.
+### C6 — `centrality.mjs`
+`centrality(item, dag)` = out-degree + transitive-downstream-dependent count. `highCentrality(node) = centrality ≥ centrality_threshold` (default 2). Pure graph metric (Flatline-PRD B2).
 
-### 4.7 Council runner (FR-D)
-`gate.council.runner = "scripts/council-run.sh"` — flatline-orchestrator's headless
-trio pattern reused at gate scale: N≥2 distinct provider CLIs (claude/codex/gemini
-headless), each receiving the SAME gate prompt (incl. TASK/SCOPE), each returning a
-verdict JSON; receipts `{reviewer_id: provider+model+nonce, verdict, task_ref,
-packet_hash, ts}` appended to the packet (B6: id binds provider+model+nonce;
-anti-replay via task_ref+packet_hash binding; independence = distinct provider
-processes). **Resilience (T6/IMP-003/IMP-005)**: 300s timeout per provider call (CI
-safety), no silent retry; if available voices < min_voices the gate stage HARD-FAILS
-with a refusal naming the dead provider and the staffing fix — degradation happens
-ONLY via the recorded `--allow-single-model` override, never as a runtime fallback. The runner is invoked by the EXECUTOR at gate stages (workflow segment),
-never by hooks (hooks cannot conduct). Gatekeeper G4 then verifies ≥min_voices
-distinct reviewer_ids — runtime half of the two-sided #30 fix.
+### C7 — `opus-predicate.mjs`
+`opusPredicate(item) = gateBlind(item.domain) || highCentrality(item.node)` → `tier = opus` else `rel_policy.tier_default`. Drives G-3. The gate's own tier is separate from leaf tiers.
 
-### 4.8 Key ceremony + CAS (FR-E, wave 2)
-Replace generate-on-first-use: `poteau-gen --provision-keys <run_id>` mints per-run
-ed25519 keys under `~/.loa-laplas/keys/<run_id>/` (outside the workspace), publishes
-pubkeys into the run manifest. **Fence-grade honesty stands (B5)**: same-OS-user; the
-SDD claims detection (chain verify catches forged receipts whose key isn't in the
-manifest) not prevention. move-record input hashes upgrade from base64-prefix to
-sha256 over CAS-stored content (`scripts/legba/` integration), making receipts
-replay-challengeable (`legba challenge` shape).
+### C8 — `dag-validate.mjs` (extended, retry-aware) — Flatline-SDD B12
+Existing: dup id, unknown `depends_on`, cycle → fail-loud. **Added**:
+- **role↔roster with bounded retry (B1-PRD + B12-SDD)**: every `item.role` ∈ roster. A miss is likely an LLM hallucination, so instead of an immediate exit 3: feed the specific failure (`role 'X' not in roster {…}`) back to C2 for a **bounded correction retry (max 2)**; only after the budget is spent → exit 3 with the P601 refusal (recruit-or-re-quest). Never dispatch a leaf to nobody.
+- **one-room-one-domain (HC2-PRD)**: `item.domain` resolves to exactly one entry, else DOMAIN_AMBIGUOUS → refusal (not serial — ambiguous routing is unsafe to run).
+- **confidence floor**: validator confidence below `rel_policy.confidence_floor` → serial fallback.
+- **bounds**: `1 ≤ items ≤ N_max` (16); 0 items → refusal (LLM_EMPTY handled in C2).
 
-### 4.9 Liveness watchdog (FR-F, wave 2)
-`moves.jsonl` is already the heartbeat. A poll (orchestrator-side, NOT a hook —
-hooks are reactive) evaluates asson `livenessVerdict` (stall/spin) + budget
-per the §3.3-amendment taxonomy (`liveness | budget`), with concrete defaults FROM
-the manifest's existing `rooms.default.liveness` block (IMP-012): `tool_calls: 50`
-(budget), `wall_s: 600` (budget), `stall_s: 120` (liveness) — operator-tunable per
-room, never invented at runtime. Verdict → exit-gate-routed checkpoint
-packet (forced arrival is judged, never dropped — PT-8). On landing, hardness-manifest
-`compose-calls-ceiling` flips prose→hook WITH its benchmark (G-5 discipline).
+### C9 — `named-gap.json` + GECKO sense
+Schema: `{ item_id, missing_role, evidence, recommendation: "re-quest"|"summon:<role>"|"escalate", confidence }`. The stable **FR-3↔FR-4.5↔FR-5 interface** (Flatline-PRD HC6). Phase 1 ships the schema + GECKO `diagnose` emitting it.
 
-### 4.10 Observability (FR-G, wave 3)
-`poteau-stats.sh` aggregates per run: gate passes, refusal P-code histogram,
-break-glass count, max-blocks incidents → JSONL consumed by GECKO sensing; the
-Observatory's fold (`trace-gen`) reads the same dir to render armed runs.
+### C10 — Phase-1 stall: minimal watchdog + exit (the keystone) — Flatline-SDD B1
+**Ships as one atomic unit in Phase 1** so the exit is not dead code:
+- `stall-watch.mjs` — a *minimal* `stall_s` watchdog: a leaf producing no progress-bearing event for `rel_policy.stall_s` wall-seconds fires the stall. (Phase 1.5 enriches this into full loiter telemetry; Phase 1 needs only the trigger.)
+- `stall-exit.mjs` — `stallExit(named_gap, run_mode)`: `interactive` → surface `named_gap`, **escalate to operator** (kaironic boundary); `automated` → **fail the item loud** (`STALLED_NO_SUMMON` incident + named_gap + re-quest rec; nonzero). Never silent retry/re-queue/block.
+- **Wave cancellation (Flatline-SDD B11)**: a stall exit issues a **cooperative cancel to in-flight siblings in the same wave**, then drains and emits the wave result with the stall recorded — bounded, no zombie workers, no partial-wave ambiguity. Already-completed siblings' receipts are preserved.
 
-## 5 · Module format (laplas proper)
+### C11 — `prompt-boundary.mjs` (§5.1) — Flatline-SDD B3/B9/B10
+- **Sentinel (B10 — specified)**: `sentinelWrap(literal)` interpolates the goal/task only inside a **per-invocation random UUID tag** — `<goal id="{uuid}">…</goal>` — generated fresh each call (UUID passed in via `args`/env since the runtime forbids `Math.random()` in some paths; the binary uses `crypto.randomUUID()`). The prompt template checks the input for a sentinel collision (the literal already containing the tag/uuid) and exits 4 if found.
+- **Sanitizer (B9 — advisory, not the primary control)**: `sanitizeGoal(goal)` is **advisory + logged**, with structural containment (the sentinel + schema-validated, constrained LLM output) as the *primary* control. Reuses `.claude/scripts/injection-detect.sh`. A high-confidence match is a hard block (exit 4) with a reviewable reason; lower matches log + proceed under containment. Adversarial test corpus required.
+- **Detector invocation (B3 — CRITICAL)**: the untrusted goal is passed to `injection-detect.sh` strictly via **stdin** (never argv / shell interpolation) to avoid command injection at the detector boundary.
+- **Worker invariant + privilege floor**: workers receive fixed system instructions the task literal cannot override; tools derive from role+loadout, never the literal.
+- **Gate-verifies-goal**: the craft-gate checks worker output against `item.task` + the original goal, NOT the worker's self-report.
 
-Schemas drafted at `laplas/schemas/*.schema.json` from the fixture shapes (quest:
-name/version/rel/requires/review_routing/gates/mandated_reads · party:
-name/members[role,tier,seat]/hitl · dungeon: name/rooms/tools/rel/budgets), JSON
-Schema draft-07, versioned `module/1`. **Worked example**: decompose
-`compositions/code-implement-and-review.yaml` → quest (implement+review objectives,
-craft-gate contract, mandated reads), party (primary implementer seat + FAGAN council
-seat + operator HITL slot), dungeon (two-room graph, provisioned tools, budgets).
-The composition file remains the execution format; the module is the PREPARATION
-format referencing it — no breaking change to existing compositions (adoption per
-4.1). Hounfour migration PROPOSAL opens with the schemas attached (P3 persona;
-ratification explicitly out of cycle scope).
+### C13 — summon dials (Phase 2, deferred, telemetry-gated)
+Additive to `dungeon.budgets`: `summons`, `summon_tier_ceiling`, `summon_cooldown_s`. Budget-exhaustion → `STALLED_NO_SUMMON` → C10. NOT built until Phase-1.5 telemetry clears `P%/K` (FR-5). Forward-compat only.
 
-## 6 · Data layout (run-scoped, B8)
+---
 
-`incidents.jsonl` schema (IMP-014): `{ts, run_id, event: break_glass|max_blocks_checkpoint|
-council_waived|stale_pointer, reason, actor: operator|watchdog|system}` — one shape,
-aggregatable by FR-G. Per-run private keys are DELETED at run close (IMP-016); pubkeys
-persist in the run manifest so receipts stay verifiable after key destruction.
+## 3. Data Flow
 
-```
-.run/poteau/
-├── by-session/<session_id>          # pointer: {run_id, armed_at} (T3 — no clobber)
-├── contract-receipt.json            # FR-B0 smoke result (per CC version × mode)
-└── <run_id>/
-    ├── ready.json                   # laplas receipt (3 manifest hashes)
-    ├── run-state.json               # armed state: task/task_ref/reads/routing/gate_index
-    ├── stages/<k>.json              # per-stage seeds (dispatcher-written)
-    ├── packet.json                  # transient: consumed by each gate pass
-    ├── moves.jsonl                  # involuntary log (FR-F heartbeat)
-    ├── receipts.jsonl               # signed, chained gate receipts
-    └── incidents.jsonl              # break-glass · max-blocks · overrides
-```
+`/compose <goal>` → `decompose.mjs`: loadRoster → sanitizeGoal (advisory; stdin) → splitGoal (sonnet, retry/schema/fences) → deriveRouting → dagValidate (role retry-w-feedback; floor) → **{dag | serial | refusal}** → (if runnable) segment-emitter RFC #35 → waves → fan-out → single craft-gate (batched `gate_batch_max`; overflow sequential). **Stall path**: leaf stalls (`stall_s`) → GECKO diagnose → named_gap → stallExit(run_mode) → cooperative sibling cancel + drain.
 
-## 7 · Security (PRD §5/§7 carried into design)
+---
 
-Postures per manifest `failure_posture` (fences open, custody closed); break-glass
-launch-env-only/single-shot/sensed (B3); P500 refuses with fix text, never hangs (B4);
-unarmed sessions can't mint `valid_run` — verify-gate extension 4.6 makes that
-mechanical (B2); tool-gate fence classes documented verbatim from brief §7; key
-custody fence-grade until 4.8 (B5); the agent never merges its own hook config —
-runbook is operator-owned (IMP-008); P-code normative source vendors with FR-B (B7).
+## 4. Contracts
 
-## 8 · Testing & verification
+### 4.1 Party roster (Flatline-SDD B6 — was undefined)
+Schema: `roster = { roles: [ { id, domain, tier_ceiling } ] }`. Source: the `party` field of `module.json` (the laplas party manifest). C1 calls `loadRoster(module)` first and validates: non-empty, each role unique, each `tier_ceiling` a known tier. Empty/malformed → exit 6 (ROSTER_INVALID), refusal — no LLM call wasted on an un-routable party.
 
-| Surface | Test |
-|---|---|
-| Hook contract (FR-B0) | `poteau-smoke.sh` 4 legs, receipt archived; CI re-runs; drift = refusal |
-| Reference invariants | demo in CI (ubuntu+macos), 21/21 post-R-5-fix; PT-1..9 assertions named |
-| Ready check | P601–P606 negative fixtures + module-good pass + receipt-hash binding |
-| #29 benchmark | wrong-repo fixture run → first exit refuses P201 (G-1) |
-| #30 benchmark | council-mandated module: emit w/o runner → P301; single-voice packet → P204; recorded override → council_waived in receipt |
-| #31 benchmark | 4 mandated reads, rationale missing one H1 → P203 names the path; 4/4 echoes pass |
-| #7 benchmark | unarmed session emits no receipts → `compose-verify-run --poteau` = broken_run |
-| Settings merge | runbook verify step: `poteau-gen --check` green post-merge, post-remount |
-| Packet vocabulary | gatekeeper G1 shells handoff-validate.sh: existing 3-tier fixtures pass unchanged |
-| Pointer race (T3/IMP-013) | two concurrent sessions arm distinct runs → distinct pointers, no clobber; stale-pointer no-op test |
-| Task injection (T5) | quest.json with ANSI/structural directives → compile refusal; 4001-char task → refusal |
-| Mailbox carve-out (T1) | agent Write to packet.json ALLOWED; Write to run-state.json/receipts.jsonl DENIED (P402) |
-| Wave-2 acceptance (IMP-009) | keys deleted at close + pubkeys verify receipts (S5); watchdog fires at manifest thresholds in a fixture run (S5); README posture map lists every surface with its hardness entry (S6) |
+### 4.2 Other contracts
+- **Driver → decomposer**: CLI (C1); typed stdout (dag|serial|refusal); exit codes 0/3/4/5/6.
+- **Decomposer → emitter**: `args.items[]` element schema (C8 fields). Emitter reads `id, task, depends_on, role, tier`; routing fields carried for audit + the gate.
+- **Manifest additive**: gate room/seat `covers_domains: [..]` (C5); undeclared → room domain only.
+- **named_gap** (C9); **rel_policy** (C4).
 
-## 9 · Sprint shape (input to Phase 5)
+---
 
-S1 **Contract + landing**: FR-B0 smoke (HALT gate) → vendor + R-5 fix + gen + runbook
-+ CI demo. S2 **The door**: schemas + worked-example decomposition + ready-check at
-dispatch gate 0 + P6xx fixtures + hounfour proposal. S3 **The quest reaches the gate**:
-dispatcher run-state + emitter TASK/SCOPE + gatekeeper port (B8 + handoff-validate) +
-verify-gate `--poteau` + #29/#31 benchmarks. S4 **The council**: council-run.sh +
-emit-time P301 + receipts + #30 benchmark + #7 benchmark. S5 (wave 2) **Custody +
-liveness**: keys/CAS + watchdog + ceiling flip. S6 (wave 3) **Telemetry + README
-posture map** (G-5 close).
+## 5. Security Architecture (PRD §5.1 + Flatline-SDD)
 
-## 10 · Risks carried into design
+| Threat | Control | Component |
+|--------|---------|-----------|
+| Command injection at the detector boundary (CRITICAL B3) | goal to injection-detect.sh via **stdin only**, never argv | C11 |
+| Sentinel boundary failure / collision (CRITICAL B10) | per-call UUID tag `<goal id=uuid>`; collision check → exit 4 | C11 |
+| Sanitizer over-trusted as hard gate (CRITICAL B9) | sanitizer **advisory + logged**; structural containment (sentinel + schema-constrained output) is primary; adversarial corpus | C11 |
+| Semantic prompt injection (CRITICAL B6-PRD) | sentinel + sanitizer + gate-verifies-goal + privilege floor (defense-in-depth) | C11 |
+| Tainted decomposition / priv-esc (CRITICAL B4-PRD) | goal untrusted-by-default; worker tools from role+loadout | C11, C2 |
+| Worker self-report trusted (B5-PRD) | gate verifies vs item.task+goal | emitter gate |
+| Role spoof / dispatch-to-nobody (B1-PRD) | role↔roster validate (retry then fail-loud) | C8 |
 
-R-1 cutover: gatekeeper REUSES handoff-validate (4.6) so old/new speak one packet
-dialect; log-only pair retires only after S3 benchmarks green. R-2 deadlock: B4 NFR +
-break-glass + checkpoint-and-release all designed in. R-3 friction: 4.1 keeps
-unprepared ceremonies legal (warn) until wave 3; FR-G watches refusal rates. R-6
-settings clobber: grounded as REAL (framework-copied settings.json) — runbook routes
-through settings.local.json. NEW R-7: `claude -p` headless hook semantics may differ
-from interactive — FR-B0 smoke runs BOTH modes before FR-B design freezes.
+No single point of trust: sanitizer + sentinel + schema-validated constrained output + gate-verifies-goal each hold independently.
+
+---
+
+## 6. Scalability & Performance
+
+- Decomposer cost: **one sonnet call** (+ ≤1 retry) + O(V+E) deterministic derivation. Not an opus cost center (G-3).
+- Gate is **bounded**: `gate_batch_max` (8 casual / 4 competitive); overflow → sequential passes. **G-6**: gate wall-clock ≤ a stated fraction of wave time, measured on a *large* DAG (Flatline-PRD B8).
+- centrality O(V+E); gate-coverage O(rooms); cheap.
+
+---
+
+## 7. Phasing (maps PRD §6, adjusted for Flatline-SDD B1)
+
+- **Phase 1 (this cycle)**: C1–C11 — decomposer + routing + GECKO schema + **stall watchdog + exit (atomic, C10)** + security. The stall exit fires day one (not dead code). Fan-out automatic, loiter-reduced by construction, fails safe.
+- **Phase 1.5**: enrich the watchdog into full loiter telemetry (`loiter`/`summon_drawn` incidents bucketed by `missing_role`). Gathers the `P%/K` distribution.
+- **Phase 2 (telemetry-gated)**: C13 summon dials — only if the bar clears. FR-6 retune loop.
+- **Out of scope**: named bench (v2), finn integration, heavy-Loa-skill coupling.
+
+---
+
+## 8. Testing Strategy
+
+- **Deterministic core** (C3–C8): unit tests over fixed raw-item fixtures — domain resolution, centrality, gate_blind (incl. the back-compat default), opus_predicate, dagValidate (cycle/dangling/dup/role-miss/one-domain/floor/bounds). No LLM in the loop.
+- **C2 robustness**: mock the sonnet call to return: valid JSON, fenced JSON, malformed JSON, empty, network-error, hallucinated-role-then-corrected — assert the typed outcome + exit code for each.
+- **Security**: adversarial goal corpus (instruction-override, role-confusion, exfiltration, encoding-evasion, sentinel-collision) → assert sanitize block / containment; assert detector receives input via stdin (no argv leak).
+- **Migration**: `code-implement-and-review` declares gate `covers_domains` and stays cheap (no opus regression).
+- **G-6**: a large-DAG benchmark asserts gate wall-clock stays within the bound.
+
+---
+
+## 9. Operational Definitions → Code (PRD §8 made concrete)
+
+| Term | Function | File |
+|------|----------|------|
+| `run_mode` | CLI flag, threaded | C1 |
+| `stall` | `stall_s` watchdog (minimal in P1) | C10 |
+| `loitering` | `named_gap` events by `missing_role` | C9 |
+| `one-room-one-domain` | dagValidate domain-resolves-to-one | C8 |
+| `gate_blind` | `gateBlind(domain)` | C5 |
+| `high_centrality` | `highCentrality(node)` | C6 |
+| `opus_predicate` | `opusPredicate(item)` | C7 |
+| `decomposition_confidence` | validator (deterministic); model self = telemetry | C3/C2 |
+| `rel_policy` | `relPolicy(rel, run_mode)` | C4 |
+
+---
+
+## 10. PRD Traceability
+
+| PRD FR | SDD components |
+|--------|----------------|
+| FR-1 decomposer + contract | C1, C2, C3, C8, §4.1 |
+| FR-2 routing + opus predicate | C3, C5, C6, C7, C8 |
+| FR-3 GECKO sensor + named_gap | C9 |
+| FR-4 REL → rel_policy | C4 |
+| FR-4.5 Phase-1 stall exit | C10 |
+| FR-5 metered summon (Phase 2) | C13 (deferred) |
+| FR-6 retune loop (Phase 2) | C9 attribution |
+| §5.1 worker prompt boundary | C11 |
+| G-3 opus surgical | C7 |
+| G-6 gate doesn't re-serialize | C12, §6 |
+
+---
+
+## 11. Flatline integration log (SDD, 2026-06-13)
+
+3-model pass (85% agreement, 12 blockers / 8 high-consensus). All 12 integrated:
+
+| # | Blocker | Where |
+|---|---------|-------|
+| B1 | C10 dead code (exit w/o trigger) | C10 ships minimal watchdog atomic with exit (Phase 1) |
+| B2 | gate back-compat `["*"]` suppresses opus | C5 default = room domain only, never `*` |
+| B3 | command injection via detector argv (CRIT) | C11 detector via stdin |
+| B4 | LLM JSON parse failure unhandled | C2 fence-strip + schema-validate → serial fallback |
+| B5 | fallback conflates degrade vs refuse | C1 typed {dag\|serial\|refusal} |
+| B6 | roster never defined | §4.1 roster contract + exit 6 |
+| B7 | LLM self-confidence trusted as gate | C2/C3 validator-confidence gates; model-confidence = telemetry |
+| B8 | C2 no failure modes/exit/retry | C2 exit 5 + 1-retry-2s-backoff + empty→serial |
+| B9 | sanitizer over-trusted (CRIT) | C11 advisory + structural containment primary |
+| B10 | sentinel delimiter unspecified (CRIT) | C11 per-call UUID `<goal id=uuid>` + collision check |
+| B11 | wave cancellation on stall unstated | C10 cooperative sibling cancel + drain |
+| B12 | hard exit-3 on hallucinated role brittle | C8 bounded retry-with-feedback (max 2) then fail |
+
+Disputed: D1 (zero-item path explicitness) → C8 0-items→refusal; D2 (define "finn" shorthand) → noted as parked sibling in header.

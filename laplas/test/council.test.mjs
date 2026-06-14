@@ -38,7 +38,7 @@ function judge(run_state, packet) {
 
 test("S4.1 — council-run seats 2 distinct voices, receipts bind task_ref + packet_hash", () => {
   const rs = seed();
-  const pkt = { verdict: "APPROVED", rationale: "# construct-rooms-substrate — done", task_ref: rs.task_ref, conformance: { in_scope: true } };
+  const pkt = { verdict: "APPROVED", rationale: `${rs.mandated_reads[0].h1} — done`, task_ref: rs.task_ref, conformance: { in_scope: true } };
   const c = council(pkt, { claude: "APPROVED", codex: "APPROVED" });
   assert.equal(c.voices, 2);
   assert.ok(c.council_receipts.every(r => r.task_ref === rs.task_ref && r.packet_hash.startsWith("sha256:")));
@@ -53,7 +53,7 @@ test("S4.2 #30 runtime — council receipts CLEAR P204 (the worked example's gre
   // gatekeeper verifies the signatures against these (FR-E). Same keyset (repo default
   // or POTEAU_REVIEWERS) the council() runner reads its private keys from.
   rs.review_routing = { council: true, min_voices: 2, reviewer_keys: ["claude", "codex", "gemini"].map(pubPem) };
-  const base = { verdict: "APPROVED", rationale: "# construct-rooms-substrate — objectives met within scope", task_ref: rs.task_ref, conformance: { in_scope: true } };
+  const base = { verdict: "APPROVED", rationale: `${rs.mandated_reads[0].h1} — objectives met within scope`, task_ref: rs.task_ref, conformance: { in_scope: true } };
   // before: no council receipts → P204 (proven in benchmarks.test.mjs)
   assert.equal(judge(rs, base).code, "P204");
   // after: attach the council's receipts → G4 clears, receipt minted. The council

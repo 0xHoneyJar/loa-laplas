@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://loa-hounfour/laplas/named-gap/1",
+  "title": "named_gap — the FR-3↔FR-4.5↔FR-5 stall interface (C9, Flatline-PRD HC6)",
+  "description": "What GECKO's diagnose sense emits when a leaf stalls: the missing capability, the evidence, and the bounded recommendation a stall-exit can act on. The stable shape across the sensor (FR-3), the Phase-1 exit (FR-4.5), and the future summon/retune loop (FR-5).",
+  "type": "object",
+  "required": ["item_id", "missing_role", "recommendation"],
+  "additionalProperties": true,
+  "properties": {
+    "item_id": { "type": "string", "minLength": 1 },
+    "missing_role": { "type": "string", "minLength": 1 },
+    "evidence": { "type": "string" },
+    "recommendation": { "type": "string", "pattern": "^(re-quest|escalate|summon:.+)$" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+  }
+}

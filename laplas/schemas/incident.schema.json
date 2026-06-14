@@ -8,7 +8,7 @@
   "properties": {
     "ts": { "type": "string", "minLength": 1 },
     "run_id": { "type": "string" },
-    "event": { "type": "string", "enum": ["break_glass", "max_blocks_checkpoint", "council_waived", "stale_pointer"] },
+    "event": { "type": "string", "enum": ["break_glass", "max_blocks_checkpoint", "council_waived", "stale_pointer", "stalled_no_summon"] },
     "reason": { "type": "string" },
     "actor": { "type": "string", "enum": ["operator", "watchdog", "system"] },
     "blocks": { "type": "integer" }

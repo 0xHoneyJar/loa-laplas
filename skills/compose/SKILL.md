@@ -92,8 +92,24 @@ RT="$HOME/.loa/constructs/substrates/construct-rooms-substrate"
    (`workflow_file`, `agent_types`, `kind`, `iterate`, `ends_at_seam`) + `seams[]`
    (`kind`, `after_segment`, `clew_targets`).
 
+2.5. **RESOLVE ITEMS — bare goal → DAG fan-out (RFC #35 / decompose-bridge S3.3).** If the
+   operator gave a **bare goal** (no `items[]` already in the carry), resolve the fan-out
+   BEFORE running:
+   ```sh
+   node "$RT/laplas/bin/compose-resolve.mjs" --goal "<goal>" [--module <module.json>]
+   ```
+   Branch on the JSON `mode`: `fanout` → set `args.items = <items>`, `args.gate_batch_max =
+   <gate_batch_max>` **and** `args.stall_s = <stall_s>` (the emitter waves them, batched by the
+   cap; `stall_s` drives the per-wave stall watchdog — absent ⇒ the emitter's DEFAULT_STALL_S);
+   `single` → run with **no** `items` (one context); `refuse` → **surface the refusal and do
+   NOT run** (the CLI exits ≠ 0). **A pre-supplied `items[]` skips this step entirely** (D10 —
+   the existing RFC #35 path is unchanged).
+
 3. **RUN EACH SEGMENT IN ORDER** via the **Workflow tool**:
-   `Workflow({ scriptPath: <segment.workflow_file>, args: <carry> })`. Returns
+   `Workflow({ scriptPath: <segment.workflow_file>, args: <carry> })`. Here `<carry>` is the
+   **union**: the seed `{ task, scope }` **merged with** any `items` / `gate_batch_max` /
+   `stall_s` resolved in step 2.5 (merge them INTO the carry — do not pass them *instead of* it,
+   or the segment runs with no task). Returns
    `{ outcome, converged, handoff_seeds, context_carry, seam }`. agentTypes resolve to the
    global `~/.claude/agents/construct-<slug>.md` adapters (room authority via the baked packet).
 

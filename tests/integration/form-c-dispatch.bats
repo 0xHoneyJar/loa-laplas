@@ -1467,9 +1467,24 @@ DAG_RESPONSES='{"general-purpose":{"output":"did the item","rationale":"stub"},"
     run node "$HARNESS" "$js" "$bad" '{"task":"T","items":[{"id":"a","task":"x"},{"id":"b","task":"y"}]}'
     [ "$status" -eq 0 ]
     [ "$(echo "$output" | jq -r '.outcome')" = "degraded" ]
-    [ "$(echo "$output" | jq -r '.degraded.reason')" = "dag-wave-failed" ]
+    # S4.4/x7l: both items are INDEPENDENT and both fail → partial-failure, both in .failed
+    [ "$(echo "$output" | jq -r '.degraded.reason')" = "dag-partial-failure" ]
     [ "$(echo "$output" | jq -r '.result.partial')" = "true" ]
-    [ "$(echo "$output" | jq -r '.degraded.failures | length')" = "2" ]
+    [ "$(echo "$output" | jq -r '.degraded.failed | keys | length')" = "2" ]
+}
+
+@test "dag B7 (x7l): a failed item strands only its DEPENDENT, not the whole dag (DEPENDENCY_FAILED)" {
+    command -v node >/dev/null || skip "node not available"
+    local js; js="$(_emit_dag_seg)"
+    # uniform bad response → wave-1 'a' fails; wave-2 'b' depends on 'a' → STRANDED, never run.
+    # (the old loop aborted the WHOLE dag on the first wave failure; B7 strands selectively.)
+    local bad='{"general-purpose":{"output":"only-output"},"construct-fagan":{"verdict":"APPROVED","findings":[]}}'
+    run node "$HARNESS" "$js" "$bad" '{"task":"T","items":[{"id":"a","task":"x"},{"id":"b","task":"y","depends_on":["a"]}]}'
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | jq -r '.outcome')" = "degraded" ]
+    [ "$(echo "$output" | jq -r '.degraded.failed.a.reason')" != "null" ]
+    [ "$(echo "$output" | jq -r '.degraded.stranded.b.reason')" = "DEPENDENCY_FAILED" ]
+    [ "$(echo "$output" | jq -r '.degraded.stranded.b.failed_dep')" = "a" ]
 }
 
 @test "dag R35: emitted tier map is the python TIER_MODEL by value (no drift)" {
