@@ -12,11 +12,17 @@ export function sentinelWrap(goal, opts = {}) {
   const text = String(goal ?? '');
   const id = opts.uuid ?? randomUUID(); // opts.uuid is a test seam only
 
-  // Collision check (B10): the goal must not already contain our boundary id. With a v4
-  // UUID this is astronomically unlikely — but "unlikely" is not "impossible", and a
-  // boundary the goal can name is no boundary at all. Detected → security hard-block.
-  if (text.includes(id)) {
-    return { type: 'refusal', refusal_reason: 'SANITIZE_REJECT', exit: 4, detail: 'sentinel id collision' };
+  // Boundary-integrity check (B10). A goal can collide with the sentinel two ways:
+  //   (1) it contains our unguessable id (astronomically unlikely, checked anyway);
+  //   (2) it contains sentinel tag syntax (`<goal …>` / `</goal>`). The id makes the
+  //       OPENING tag unforgeable — but the CLOSING tag is not id-bound, so a literal
+  //       `</goal>` would break the goal OUT of the envelope into the worker's instruction
+  //       surface (the invariant only calls text *inside* the span data). The closing tag
+  //       is the collision that matters. Either → security hard-block (exit 4). Reject, not
+  //       escape: a legitimate goal almost never carries literal goal-tags, and reject is
+  //       fail-closed (no second decode contract to keep in sync).
+  if (text.includes(id) || /<\/?goal(\s|>|\/)/i.test(text)) {
+    return { type: 'refusal', refusal_reason: 'SANITIZE_REJECT', exit: 4, detail: 'sentinel boundary collision' };
   }
   return { type: 'ok', id, wrapped: `<goal id="${id}">${text}</goal>` };
 }

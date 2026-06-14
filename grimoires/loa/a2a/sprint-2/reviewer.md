@@ -36,10 +36,14 @@ so it is callable as the first gate in the S3 pipeline (`sprint.md` S3.2:
 > "AC-S2.1: sentinel collision → exit 4; two calls → two distinct UUIDs."
 
 **✓ Met.** `sentinelWrap` mints a fresh `crypto.randomUUID()` per call and wraps the goal
-as `<goal id="{uuid}">…</goal>`; if the goal already contains the boundary id it returns a
-hard-block refusal with `exit: 4` (`laplas/lib/sentinel.mjs:11-23`, collision check :18-20).
-Evidence: `laplas/test/worker-boundary.test.mjs:40-53` (pinned-id collision → exit 4; two
-calls → distinct ids; wrapped form carries id + verbatim goal).
+as `<goal id="{uuid}">…</goal>`; the boundary-integrity check (`laplas/lib/sentinel.mjs:15-26`)
+hard-blocks (`exit: 4`) on **both** collision forms: (a) the goal containing the unguessable
+id, and (b) the goal containing sentinel tag syntax — the id makes the *opening* tag
+unforgeable, but a literal `</goal>` would break the goal *out* of the envelope, so any
+`<goal …>` / `</goal>` is rejected (review finding **C1**, fixed). Evidence:
+`laplas/test/worker-boundary.test.mjs:40-53` (id collision → exit 4; distinct ids; wrapped
+form) and `:55-67` (closing-tag breakout → exit 4; bare "goal" / `<goalkeeper>` no
+false-positive).
 
 ### AC-S2.2 (DoS, B2-CRIT)
 > "AC-S2.2 (DoS, B2-CRIT): a no-response detector fixture → the 2s timeout fires and the
@@ -91,7 +95,7 @@ success with no binding, and nothing-issued all → not verified; matched → ve
 ### AC — full suite green
 > "`node --test laplas/test/` green."
 
-**✓ Met.** `node --test laplas/test/*.test.mjs` → **54 pass / 0 fail** (44 prior + 10 new).
+**✓ Met.** `node --test laplas/test/*.test.mjs` → **55 pass / 0 fail** (44 prior + 11 new).
 Note: the glob form is required on this Node (v23.3.0) — a bare `laplas/test/` directory
 arg is parsed as a module path.
 
@@ -133,7 +137,7 @@ pinned in S1 (`laplas/lib/constants.mjs`, `laplas/schemas/decompose-result.schem
 
 ## Testing Summary
 
-- **File**: `laplas/test/worker-boundary.test.mjs` — 10 tests, every Sprint-2 AC.
+- **File**: `laplas/test/worker-boundary.test.mjs` — 11 tests, every Sprint-2 AC.
 - **Run**: `node --test laplas/test/*.test.mjs` (full suite, 54 tests) or
   `node --test laplas/test/worker-boundary.test.mjs` (Sprint 2 only).
 - **Determinism**: banding / fail-closed / B3 use an injected `spawn` double; the real
@@ -155,6 +159,16 @@ pinned in S1 (`laplas/lib/constants.mjs`, `laplas/schemas/decompose-result.schem
 - **`readonly_tools` is a new optional dungeon field.** It is consumed but not yet added to
   `dungeon.schema.json`; the schema addition is low-risk and can ride S3 or a follow-up
   (noted in NOTES.md Decision Log).
+
+## Review Feedback Addressed
+
+- **C1 (blocking, security) — sentinel `</goal>` breakout** → **Fixed.** The collision check
+  in `sentinelWrap` (`laplas/lib/sentinel.mjs:15-26`) now rejects any goal containing
+  sentinel tag syntax (`<goal …>` / `</goal>`), not just the unguessable id — closing the
+  envelope-breakout vector. Regression test added (`worker-boundary.test.mjs:55-67`), with a
+  false-positive guard (bare "goal", `<goalkeeper>`). Suite 54→55 green.
+- The 3 non-blocking concerns (role-independent floor, structural gate, layout-bound detector
+  default) were acknowledged as explicit assumptions/limitations; no code change required.
 
 ## Verification Steps (for reviewer)
 
