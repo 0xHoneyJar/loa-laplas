@@ -77,6 +77,34 @@ _clew_resolve_run_id() {
   fi
 }
 
+# Confirm the target skill is a REAL skill of the construct's pack. The schema's
+# `confirmed` flag means "validated home" (FR-2: false = QUARANTINED, awaiting operator
+# confirm at distill) — NOT "the operator typed something". Marker capture historically
+# hardcoded confirmed=true, so a typo'd or non-existent <skill> dead-lettered silently
+# against a home that never existed (the drain then shows it "NOT FOUND"). We still CAPTURE
+# (never lose the correction — mis-homed beats lost), but quarantine it LOUDLY so the drain
+# can surface it for re-homing. stdout = the boolean; stderr = the operator nudge.
+_clew_skill_confirmed() {
+  local construct="$1" skill="$2" explicit="$3"
+  local root="${LOA_CLEW_LEDGER_ROOT:-$HOME/.loa/constructs/packs}"
+  local norm="${construct#construct-}"          # mirror ledger-append's slug normalization
+  local skills_dir="${root}/${norm}/skills"
+  if [[ "$explicit" != "true" ]]; then
+    echo "clew: '>>clew@${norm}' named no /<skill> — captured UNCONFIRMED; name the taught skill at distill." >&2
+    printf 'false'; return 0
+  fi
+  if [[ ! -d "$skills_dir" ]]; then
+    echo "clew: construct '${norm}' not installed locally — skill '${skill}' unvalidated; captured UNCONFIRMED." >&2
+    printf 'false'; return 0
+  fi
+  if [[ -d "${skills_dir}/${skill}" ]]; then
+    printf 'true'; return 0
+  fi
+  local avail; avail="$(ls -1 "$skills_dir" 2>/dev/null | tr '\n' ' ')"
+  echo "clew: '${skill}' is not a skill of '${norm}' — captured QUARANTINED (re-tag at distill). available: ${avail:-none}" >&2
+  printf 'false'; return 0
+}
+
 clew_capture() {
   local prompt; prompt="$(_clew_read_prompt "$@")"
 
@@ -101,6 +129,8 @@ clew_capture() {
 
   # Split construct[/skill]; default skill_slug to the construct.
   local construct="${slugspec%%/*}" skill="${slugspec#*/}"
+  local skill_explicit=false
+  [[ "$slugspec" == */* ]] && skill_explicit=true
   [[ "$skill" == "$slugspec" ]] && skill="$construct"
 
   # Trim a single trailing whitespace run from the verbatim quote; preserve the rest.
@@ -110,18 +140,23 @@ clew_capture() {
     return 0
   fi
 
+  # Validate the target skill against the construct's real skill set — sets the schema's
+  # `confirmed` flag honestly (true = validated home) instead of fabricating it.
+  local clew_confirmed; clew_confirmed="$(_clew_skill_confirmed "$construct" "$skill" "$skill_explicit")"
+
   # Assemble the ledger line in python so the verbatim quote can contain any character.
   local clew_run_id; clew_run_id="$(_clew_resolve_run_id)"
   local json line_id
-  json="$(CLEW_CONSTRUCT="$construct" CLEW_SKILL="$skill" CLEW_WHY="$why" CLEW_RUN_ID="$clew_run_id" python3 -c '
+  json="$(CLEW_CONSTRUCT="$construct" CLEW_SKILL="$skill" CLEW_WHY="$why" CLEW_RUN_ID="$clew_run_id" CLEW_CONFIRMED="$clew_confirmed" python3 -c '
 import json,os,sys,datetime,hashlib
 now=datetime.datetime.now(datetime.timezone.utc)
 construct=os.environ["CLEW_CONSTRUCT"]; skill=os.environ["CLEW_SKILL"]; why=os.environ["CLEW_WHY"]
 run_id=os.environ.get("CLEW_RUN_ID") or None
+confirmed=os.environ.get("CLEW_CONFIRMED")=="true"
 h=hashlib.sha1((why+now.isoformat()).encode()).hexdigest()[:6]
 line={"id":f"lrn-{now:%Y%m%d}-{construct}-{h}","tier":"construct","type":"correction",
       "trigger":why,
-      "target":{"skill_slug":skill,"construct":construct,"confirmed":True},
+      "target":{"skill_slug":skill,"construct":construct,"confirmed":confirmed},
       "tags":[construct],"verified":False,"captured_by":"clew-marker",
       "captured_at":now.isoformat(),"run_id":run_id,"distilled_at":None,"distill_status":"pending"}
 sys.stdout.write(json.dumps(line,separators=(",",":"),ensure_ascii=False))')"
