@@ -626,10 +626,14 @@ const withRetry = async (stageName, required, fn) => {
 // a parallel() thunk would otherwise crash the whole run). The iterating loop
 // below is sequential and does not use this — kept for fan-out segments.
 const RATE_BOUND = 8;
-const boundedParallel = async (thunks) => {
+// width defaults to RATE_BOUND (existing callers unchanged); the DAG fan-out (S3.4)
+// passes the composition's gate_batch_max so casual (8) and competitive (4) batch
+// differently. A bad/missing width falls back to RATE_BOUND.
+const boundedParallel = async (thunks, width = RATE_BOUND) => {
+  const cap = Number.isInteger(width) && width >= 1 ? width : RATE_BOUND;
   const out = [];
-  for (let i = 0; i < thunks.length; i += RATE_BOUND) {
-    const chunk = thunks.slice(i, i + RATE_BOUND);
+  for (let i = 0; i < thunks.length; i += cap) {
+    const chunk = thunks.slice(i, i + cap);
     const settled = await parallel(chunk.map((t, j) => () => safe("parallel-" + (i + j), t)));
     for (const r of settled) out.push(r);
   }
@@ -1053,7 +1057,7 @@ def emit_iterating_body(comp, seg, cycle_id, run_id):
       log("DAG wave " + (w + 1) + "/" + dagWavesResolved.length + " (" + wave.length + " item(s)): " + wave.map((i) => i.id).join(", "));
       const results = await boundedParallel(wave.map((it) => () =>
         withRetry({js(wst['construct'])} + ":" + it.id, {_emit_stage_required(wst)}, () =>
-          agent(leafPrompt(it, itemResults), Object.assign({{ label: {js(wst['construct'])} + ":item-" + it.id, phase: {js(w_name)}, agentType: {js(_agent_type(wst['construct']))}, model: leafModel(it), schema: {_emit_stage_schema(wst)} }}, it.isolation === "worktree" ? {{ isolation: "worktree" }} : {{}})))));
+          agent(leafPrompt(it, itemResults), Object.assign({{ label: {js(wst['construct'])} + ":item-" + it.id, phase: {js(w_name)}, agentType: {js(_agent_type(wst['construct']))}, model: leafModel(it), schema: {_emit_stage_schema(wst)} }}, it.isolation === "worktree" ? {{ isolation: "worktree" }} : {{}})))), gateBatchMax);
       // Drain the WHOLE wave before failing: sibling results were already paid
       // for and are kept as partial progress (council: claude + cursor).
       const waveFailures = [];
@@ -1135,6 +1139,9 @@ const dagWaves = (items) => {
   return waves;
 };
 const dagItems = (Array.isArray(input.items) && input.items.length) ? input.items : null;
+// S3.4 gate batch cap (C12): the DAG fan-out batches each wave by the composition's
+// gate_batch_max (rel_policy: casual 8 / competitive 4); absent/invalid → RATE_BOUND.
+const gateBatchMax = Number.isInteger(input.gate_batch_max) && input.gate_batch_max >= 1 ? input.gate_batch_max : RATE_BOUND;
 let dagWavesResolved = null;
 if (dagItems) {
   const dagErr = dagValidate(dagItems);

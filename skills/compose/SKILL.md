@@ -92,6 +92,18 @@ RT="$HOME/.loa/constructs/substrates/construct-rooms-substrate"
    (`workflow_file`, `agent_types`, `kind`, `iterate`, `ends_at_seam`) + `seams[]`
    (`kind`, `after_segment`, `clew_targets`).
 
+2.5. **RESOLVE ITEMS — bare goal → DAG fan-out (RFC #35 / decompose-bridge S3.3).** If the
+   operator gave a **bare goal** (no `items[]` already in the carry), resolve the fan-out
+   BEFORE running:
+   ```sh
+   node "$RT/laplas/bin/compose-resolve.mjs" --goal "<goal>" [--module <module.json>]
+   ```
+   Branch on the JSON `mode`: `fanout` → set `args.items = <items>` **and**
+   `args.gate_batch_max = <gate_batch_max>` (the emitter waves them, batched by the cap);
+   `single` → run with **no** `items` (one context); `refuse` → **surface the refusal and do
+   NOT run** (the CLI exits ≠ 0). **A pre-supplied `items[]` skips this step entirely** (D10 —
+   the existing RFC #35 path is unchanged).
+
 3. **RUN EACH SEGMENT IN ORDER** via the **Workflow tool**:
    `Workflow({ scriptPath: <segment.workflow_file>, args: <carry> })`. Returns
    `{ outcome, converged, handoff_seeds, context_carry, seam }`. agentTypes resolve to the

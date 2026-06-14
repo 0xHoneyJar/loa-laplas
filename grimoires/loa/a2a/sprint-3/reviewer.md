@@ -1,11 +1,13 @@
-# Sprint 3 — Implementation Report (PARTIAL: S3.1 + S3.2)
+# Sprint 3 — Implementation Report
 
 > Cycle: decompose-bridge · Branch: cycle/decompose-bridge · Sprint 3 of 4
-> **Status: PARTIAL by operator decision.** S3.1 (split-goal) + S3.2 (decompose binary) are
-> complete and tested with a mocked provider. **S3.3 (/compose driver wiring) + S3.4 (Python
-> emitter gate-cap) are DEFERRED** — they mutate the live composition runtime (highest blast
-> radius this cycle) and were paused for a clean-context / explicit-go step (NOTES Decision Log).
-> This report will be completed when S3.3/S3.4 land; review/audit run on the whole sprint then.
+> **Status: S3.1–S3.3 complete; S3.4 config-touch complete; S3.4 stranding DEFERRED.**
+> S3.1 (split-goal), S3.2 (decompose binary), S3.3 (/compose driver wiring) are done and
+> tested. S3.4's **gate-batch-cap config touch** (gate_batch_max → emitter wave width) is done
+> and verified (emitter bats 94/94). S3.4's **DEPENDENCY_FAILED stranding rewrite + G-6
+> benchmark** is deferred by operator decision (beads `construct-rooms-substrate-x7l`) — it
+> rewrites the live emitter's wave-failure semantics (every composition) with an integration-only
+> AC. Ready for review/audit on the in-scope work.
 
 ## Executive Summary
 
@@ -56,12 +58,35 @@ D9).
 **✓ Met.** size→7, sanitize→4, roster→6, LLM→5, dagValidate→3, ok→0. Evidence:
 `decompose-binary.test.mjs:104-119` + the AC tests above.
 
-### AC-S3.3 / AC-S3.4
-> Driver auto-fan / serial / refusal routing; pre-supplied `items[]` bypass (RFC #35); gate
-> batch cap + `DEPENDENCY_FAILED` stranding.
+### AC-S3.3
+> "AC-S3.3: `/compose <goal>` auto-fans; `refusal`→no worker; `serial`→single-context; a
+> pre-supplied items[] skips the decomposer (RFC #35 unchanged)."
 
-**⏸ [ACCEPTED-DEFERRED]** — live-runtime wiring, paused by operator decision (NOTES Decision
-Log: "decompose-bridge Sprint 3 — live-wiring deferral"). Not implemented in this batch.
+**✓ Met.** `resolveComposeItems` (`laplas/lib/compose-items.mjs`) branches decompose's typed
+result: `dag`→`{mode:'fanout', items}` (emitter-shaped, with the tier→intelligence_tier map so
+an opus leaf is `deep`, never silently downgraded), `serial`→`{mode:'single'}`,
+`refusal`→`{mode:'refuse'}` (do not run). A pre-supplied `items[]` returns `{mode:'bypass'}`
+**without ever consulting decompose** (D10). Driver CLI: `laplas/bin/compose-resolve.mjs`;
+wired into the executor at `skills/compose/SKILL.md` step 2.5. Evidence:
+`laplas/test/compose-driver.test.mjs:18-71` (bypass proven by an oversized goal that still
+bypasses; fanout shape; opus→deep; single; refuse).
+
+### AC-S3.4
+> "AC-S3.4 (G-6): a >8-item DAG (casual) → sequential gate passes; gate wall-clock ≤
+> `GATE_LATENCY_BOUND` (25% of wave) on the benchmark; a failed batch strands dependents with
+> `DEPENDENCY_FAILED`, independent batches complete."
+
+**⚠ Partial — config touch Met, stranding [ACCEPTED-DEFERRED].** The gate-batch-cap is wired:
+the emitter's DAG fan-out now batches each wave by `rel_policy.gate_batch_max` (casual 8 /
+competitive 4) instead of the hardcoded `RATE_BOUND` — `boundedParallel` is width-parameterized
+(`scripts/lib/segment-emitter.py`, default `RATE_BOUND` so existing callers are byte-identical),
+`gateBatchMax` derived from `input.gate_batch_max`, passed at the wave dispatch; surfaced to the
+driver as `compose-items.mjs` `gate_batch_max`. Verified: emitter bats **94/94** green; emitted
+JS inspected for the wiring; driver test asserts casual→8.
+The **`DEPENDENCY_FAILED` stranding** (rewrite the wave loop so a failed item strands only its
+dependents while independent batches complete) and the **G-6 wall-clock benchmark** are deferred
+to beads `construct-rooms-substrate-x7l` — a live-emitter behavioral change with an
+integration-only AC, paired out by operator decision (NOTES Decision Log).
 
 ## Tasks Completed
 
@@ -69,6 +94,8 @@ Log: "decompose-bridge Sprint 3 — live-wiring deferral"). Not implemented in t
 |------|------|-------|
 | S3.1 split-goal provider boundary | `laplas/lib/split-goal.mjs` | AC-S3.1, stripFences |
 | S3.2 decompose binary (core + main) | `laplas/bin/decompose.mjs` | AC-S3.2, AC-S3.2b, §0.2, D9 |
+| S3.3 driver decision + CLI | `laplas/lib/compose-items.mjs`, `laplas/bin/compose-resolve.mjs`, `skills/compose/SKILL.md` (step 2.5) | AC-S3.3 (bypass, fanout, tier-map, single, refuse) |
+| S3.4 gate-batch-cap (config touch) | `scripts/lib/segment-emitter.py` (boundedParallel width + gateBatchMax) | emitter bats 94/94; driver test casual→8 |
 | (runtime provider) | `laplas/lib/claude-provider.mjs` | runtime-only (see Limitations) |
 
 ## Technical Highlights
