@@ -44,6 +44,13 @@ PRD hardened against Flatline (9 blockers + 9 high-consensus) before SDD; entere
 | S2 refusal carries its own `exit` code | Yes — `{type:'refusal', refusal_reason, exit}` | S2 *is* the security boundary; the exit code (§0.2: 4 vs 7) is part of its contract, making ACs testable without the S3 binary. S3's `decompose.mjs` just propagates `result.exit`. |
 | `dungeon.readonly_tools` schema | **[ACCEPTED-DEFERRED]** consumed by `containmentLoadout` but not yet added to `dungeon.schema.json` | New optional field, low-risk; schema addition rides S3 or a follow-up. Containment fails closed (empty floor) when absent, so the missing schema cannot cause unsafe behavior. |
 
+### decompose-bridge Sprint 3 (2026-06-13) — split + binary; live-wiring deferral
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Sprint 3 split into two batches | S3.1 (split-goal) + S3.2 (decompose binary) built now; **S3.3 (/compose driver) + S3.4 (segment-emitter gate-cap) DEFERRED** | Operator decision: S3.3/S3.4 mutate the LIVE composition runtime (highest blast radius this cycle) and the real seam (`compose-bridge.mjs` is envelope-chaining, not goal→items — the driver is the `/compose` skill + Python emitter) needs investigation. Built the new self-contained laplas code now; live wiring is an explicit-go step. **Sprint 3 is NOT complete; review/audit run when S3.3/S3.4 land.** |
+| split-goal failure taxonomy | throw = transport failure (retry → exit 5); successful-but-unusable (empty/non-JSON) → `serial`, never exit 5 | A model that *ran* but declined/fumbled is a safe-degrade case (single-context), not a hard failure. Only a provider/transport throw is exit 5. |
+| `claude-provider.mjs` (real sonnet call) | Shipped behind the provider boundary, **runtime-only / not unit-tested** | No real LLM in tests by design (Flatline D8); ~10 lines, isolated, swappable. Does NOT touch the live /compose runtime (it's the standalone binary's default), so it was in-scope for the S3.1/S3.2 batch. |
+
 ## laplas-poteau cycle (2026-06-12)
 - Hounfour module-format ascension PROPOSAL: `grimoires/loa/proposals/hounfour-module-format-ascension.md` (schemas attached, trinity framing). Return trigger: S6 close or +30 days (2026-07-12). loa-hounfour is local — operator files when ready (the kit proposes; hounfour ratifies).
 - S2 close = the PR #43 (observatory) rebase-vs-stack checkpoint (U7).
