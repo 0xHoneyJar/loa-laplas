@@ -106,7 +106,10 @@ RT="$HOME/.loa/constructs/substrates/construct-rooms-substrate"
    the existing RFC #35 path is unchanged).
 
 3. **RUN EACH SEGMENT IN ORDER** via the **Workflow tool**:
-   `Workflow({ scriptPath: <segment.workflow_file>, args: <carry> })`. Returns
+   `Workflow({ scriptPath: <segment.workflow_file>, args: <carry> })`. Here `<carry>` is the
+   **union**: the seed `{ task, scope }` **merged with** any `items` / `gate_batch_max` /
+   `stall_s` resolved in step 2.5 (merge them INTO the carry — do not pass them *instead of* it,
+   or the segment runs with no task). Returns
    `{ outcome, converged, handoff_seeds, context_carry, seam }`. agentTypes resolve to the
    global `~/.claude/agents/construct-<slug>.md` adapters (room authority via the baked packet).
 
