@@ -64,7 +64,7 @@ export async function decompose(goal, opts = {}) {
     if (split.type === 'serial') return { result: { type: 'serial', items: [spanItem(goal)], fallback_reason: split.fallback_reason }, exit: 0 };
 
     // split.type === 'raw' — D9: a retry must keep the SAME id-set (no different-shaped DAG)
-    const idSet = split.items.map((i) => i.id).slice().sort().join('');
+    const idSet = JSON.stringify(split.items.map((i) => i.id).slice().sort());
     if (firstIdSet == null) firstIdSet = idSet;
     else if (idSet !== firstIdSet) return { result: null, exit: 3, stderr: 'P602: retry DAG id-set differs from original (D9)' };
 
