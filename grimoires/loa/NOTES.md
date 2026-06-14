@@ -37,6 +37,13 @@
 
 PRD hardened against Flatline (9 blockers + 9 high-consensus) before SDD; entered /simstim at `--from architect`. SDD: `grimoires/loa/sdd.md`.
 
+### decompose-bridge Sprint 2 (2026-06-13) — worker prompt boundary
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Sanitize score bands (`BLOCK_SCORE=0.7`, `CONTAIN_SCORE=0.4`) placement | Live in `sanitize-goal.mjs` (opts-overridable), NOT `constants.mjs` | They are detector-tuning knobs local to the S2 security boundary, not values shared across the S1↔S3 layers (which is what `constants.mjs` §0.4 is for). Promotion to §0 would be deliberate, not default. |
+| S2 refusal carries its own `exit` code | Yes — `{type:'refusal', refusal_reason, exit}` | S2 *is* the security boundary; the exit code (§0.2: 4 vs 7) is part of its contract, making ACs testable without the S3 binary. S3's `decompose.mjs` just propagates `result.exit`. |
+| `dungeon.readonly_tools` schema | **[ACCEPTED-DEFERRED]** consumed by `containmentLoadout` but not yet added to `dungeon.schema.json` | New optional field, low-risk; schema addition rides S3 or a follow-up. Containment fails closed (empty floor) when absent, so the missing schema cannot cause unsafe behavior. |
+
 ## laplas-poteau cycle (2026-06-12)
 - Hounfour module-format ascension PROPOSAL: `grimoires/loa/proposals/hounfour-module-format-ascension.md` (schemas attached, trinity framing). Return trigger: S6 close or +30 days (2026-07-12). loa-hounfour is local — operator files when ready (the kit proposes; hounfour ratifies).
 - S2 close = the PR #43 (observatory) rebase-vs-stack checkpoint (U7).
