@@ -133,15 +133,24 @@ chain:
     iterates_with: 2
     thinking_effort: high   # production code authoring is multi-step synthesis
     notes: >
-      First iteration: implement against the operator's task within scope.
-      Subsequent iterations: read the previous review Verdict, apply
-      every finding's fixed_code, re-emit Diff. Don't introduce new
-      changes outside of fix scope unless the fix requires them.
+      READS: Intent (the operator's task) · Artifact (scope — the files/modules to
+      stay within) · and on iteration 2+ the prior review Verdict. WRITES: an
+      Artifact Diff + a Signal trajectory.
 
-      On iteration 2+, the implementer MAY reject a finding with an
-      explanation. The convergence prompt in stage 2 instructs FAGAN
-      to accept reasonable explanations — operator context is fuller
-      than the reviewer's diff-scoped view.
+      Iteration 1 — implement the task strictly within scope. Run lint, type-check,
+      and tests YOURSELF before emitting the Diff; the reviewer reads the diff, it
+      does not run your toolchain. Iterations 2+ — apply every finding's fixed_code
+      from the prior Verdict and re-emit the Diff; touch nothing outside fix scope
+      unless a fix strictly requires it.
+
+      You MAY reject a finding — but only with an explicit, diff-grounded reason
+      (stage 2's convergence prompt is told to accept reasonable ones, since your
+      operator context is fuller than the reviewer's diff-scoped view). Silent
+      non-application is drift: apply the fix, or say why.
+
+      DONE when the Diff implements the task within scope and every accepted finding
+      is resolved. Do NOT widen scope to "improve while I'm here" — unrequested
+      scope creep is the #1 drift this loop exists to catch.
 
   - stage: 2
     name: review
@@ -155,16 +164,26 @@ chain:
     iterates_with: 1
     thinking_effort: high   # bug-finding + fix-authoring is multi-step synthesis
     notes: >
-      Stage 1 emits Diff; this stage runs codex-review-api.sh review-diff
-      against it. Returns structured JSON Verdict (APPROVED |
-      CHANGES_REQUIRED + findings[]). On APPROVED, composition completes.
-      On CHANGES_REQUIRED, loop back to stage 1 with findings as context.
+      READS: the stage-1 Artifact (the diff). WRITES: a structured JSON Verdict
+      (APPROVED | CHANGES_REQUIRED + findings[], conforming to the published
+      codex-review-finding schema) + a Signal. Runs codex-review-api.sh review-diff.
 
-      Iteration cap: 3 total reviews (CODEX_REVIEW_MAX_ITERATIONS).
-      Past the cap, the reviewer's API auto-approves at the wrapper
-      level — Verdict carries `auto_approved: true` and
-      `note: "iteration-cap-reached"`. Surface this back to the
-      operator on completion; do not silently treat as a clean approval.
+      Hunt the bugs the implementer missed AND the security holes they would not
+      think to look for — each finding line-anchored with executable fixed_code.
+      NOT style nits, NOT scope the diff doesn't touch. On APPROVED the composition
+      completes; on CHANGES_REQUIRED, loop back to stage 1 with findings as context.
+
+      mode: fresh — you carry NO memory of prior reviews, so convergence rests on
+      discipline: on iteration 2+, VERIFY the prior findings were resolved; do not
+      mine for net-new issues outside the changed lines. (Finding fresh issues every
+      iteration past the first is prompt-drift — file it against construct-fagan,
+      don't loop on it.)
+
+      Iteration cap: 3 total reviews (CODEX_REVIEW_MAX_ITERATIONS). Past the cap the
+      reviewer's API auto-approves at the wrapper level — Verdict carries
+      `auto_approved: true` and `note: "iteration-cap-reached"`. That is a SIGNAL,
+      not a SUCCESS: surface it to the operator on completion; never fold it into a
+      clean approval.
 
 # ================================================================
 

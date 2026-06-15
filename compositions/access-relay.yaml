@@ -17,17 +17,19 @@ pattern: pair-relay
 artifact_name: accessibility-decision
 sequence:
   - construct: kansei
-    role: name-exclusion     # kansei names interaction-feel gaps that exclude users
+    role: name-exclusion     # INPUT — kansei names the interaction-feel gaps that exclude users: WHO is shut out and HOW, specific (not "needs a11y work")
     persona: null
   - construct: artisan
-    role: respond-with-taste # artisan adjusts taste tokens / motion physics / contrast
+    role: respond-with-taste # RESPOND — artisan closes each named gap via taste tokens / motion physics / contrast; no free-form redesign beyond the gaps
     persona: ALEXANDER
   - construct: kansei
-    role: validate-feel      # kansei validates the response works for the excluded
+    role: validate-feel      # VERIFY — kansei checks the response actually works for the excluded; closes the gap or names what is still residual
     persona: null
 max_cycles: 3
 surface_mode: summary
 domain: accessibility
 convergence_criteria: >
-  kansei's final-cycle envelope confirms the exclusion gap is addressed
-  (or explicitly names the residual gap if not).
+  kansei's final-cycle envelope confirms the named exclusion gap is CLOSED for the
+  excluded users — concretely (the contrast / motion / interaction fix works for
+  them), not merely that artisan responded — OR explicitly names the residual gap
+  and why this loop could not close it. "Looks better" is not convergence.
