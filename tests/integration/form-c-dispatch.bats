@@ -1491,3 +1491,33 @@ DAG_RESPONSES='{"general-purpose":{"output":"did the item","rationale":"stub"},"
     local js; js="$(_emit_dag_seg)"
     grep -q 'TIER_MODEL_JS = {"tiny": "haiku", "cheap": "sonnet", "mid": "opus", "standard": "opus", "deep": "opus", "max": "fable"}' "$js" || fail "tier map must be emitted from the python constant"
 }
+
+# --- PyYAML dependency preflight (dispatcher must fail loud, not crash cryptically) ---
+
+@test "preflight: missing PyYAML -> exit 1 + actionable message, no raw traceback" {
+    local shimdir="$TMPROOT/pybin-noyaml"
+    mkdir -p "$shimdir"
+    local real_py; real_py="$(command -v python3)"
+    # python3 shim that simulates a missing PyYAML: fail the 'import yaml' probe,
+    # delegate every other call to the real interpreter.
+    cat > "$shimdir/python3" <<SH
+#!/usr/bin/env bash
+for a in "\$@"; do case "\$a" in *"import yaml"*) exit 1;; esac; done
+exec "$real_py" "\$@"
+SH
+    chmod +x "$shimdir/python3"
+
+    PATH="$shimdir:$PATH" run "$DISPATCH" "$PILOT" --form-c --run-id pf
+    [[ "$status" -eq 1 ]] || fail "expected exit 1, got $status: $output"
+    [[ "$output" == *"PyYAML not available"* ]] || fail "missing actionable PyYAML message: $output"
+    [[ "$output" == *"pip install pyyaml"* ]] || fail "missing install hint: $output"
+    [[ "$output" != *"ModuleNotFoundError"* ]] || fail "leaked a raw python traceback: $output"
+}
+
+@test "preflight: PyYAML present -> guard is a transparent no-op (usage reachable)" {
+    python3 -c 'import yaml' 2>/dev/null || skip "PyYAML not installed in this env"
+    run "$DISPATCH" -h
+    [[ "$status" -eq 0 ]] || fail "expected exit 0 from -h, got $status: $output"
+    [[ "$output" != *"PyYAML not available"* ]] || fail "guard false-fired with yaml present: $output"
+    [[ "$output" == *"Usage:"* ]] || fail "usage not reached past guard: $output"
+}

@@ -88,6 +88,19 @@ PAIR_RELAY_VALIDATOR_HOST="$PROJECT_ROOT/.claude/scripts/pair-relay-validate.sh"
 SURFACE_ENVELOPE_SUBSTRATE="$SUBSTRATE_ROOT/scripts/surface-envelope.sh"
 SURFACE_ENVELOPE_HOST="$PROJECT_ROOT/.claude/scripts/surface-envelope.sh"
 
+# Dependency preflight (loud, fail-closed): the Form C pipeline parses compositions
+# and runs the cut / emit / cost libs through python3 — all of which need PyYAML.
+# Without this guard the first python3 use throws a bare
+# `ModuleNotFoundError: No module named 'yaml'`. compose-doctor already hard_fails on
+# this; the dispatcher must too, with the same actionable fix.
+if ! python3 -c 'import yaml' >/dev/null 2>&1; then
+    echo "ERROR: PyYAML not available to python3 ($(command -v python3 || echo 'python3 not found'))." >&2
+    echo "       The Form C pipeline needs it to parse compositions. Install it:" >&2
+    echo "         python3 -m pip install pyyaml   # or: pip install pyyaml" >&2
+    echo "       Then re-run; compose-doctor will confirm READY." >&2
+    exit 1
+fi
+
 usage() {
     cat <<EOF
 Usage: compose-dispatch.sh <composition.yaml> [options]
