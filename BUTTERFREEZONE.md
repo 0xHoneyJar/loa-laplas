@@ -1,5 +1,5 @@
 <!-- AGENT-CONTEXT
-name: construct-rooms-substrate
+name: loa-laplas
 type: framework
 purpose: Loa composition runtime (Form C) — compiles composition.yaml into workflow segments cut at gate seams, executed by the Claude Code main loop with typed handoffs and a proof-of-run terminal gate
 key_files: [CLAUDE.md, scripts/compose-dispatch.sh, scripts/compose-verify-run.sh, scripts/lib/compose-cut.py, scripts/lib/segment-emitter.py, skills/compose/SKILL.md]
@@ -10,7 +10,7 @@ installation_mode: submodule
 trust_level: L2-verified
 -->
 
-# construct-rooms-substrate
+# loa-laplas
 
 <!-- provenance: CODE-FACTUAL -->
 The Loa composition runtime (Form C). Compiles `composition.yaml` into workflow
