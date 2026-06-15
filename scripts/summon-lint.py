@@ -81,7 +81,8 @@ def joints_for(comp):
 
 def main():
     root = sys.argv[1] if len(sys.argv) > 1 else "compositions"
-    files = sorted(glob.glob(os.path.join(root, "*.yaml")) + glob.glob(os.path.join(root, "*.yml")))
+    files = sorted(glob.glob(os.path.join(root, "**", "*.yaml"), recursive=True) +
+                   glob.glob(os.path.join(root, "**", "*.yml"), recursive=True))
     if not files:
         print(f"summon-lint: no compositions in {root}/")
         return 0
@@ -99,7 +100,7 @@ def main():
             print(f"  {os.path.basename(f):28} {c('parse-error', '31')}: {e}")
             continue
         shape = "workflow" if comp.get("chain") else (comp.get("pattern") or "?")
-        print(bold(f"  {os.path.basename(f)}") + dim(f"  [{shape}]"))
+        print(bold(f"  {os.path.relpath(f, root)}") + dim(f"  [{shape}]"))
         any_joint = False
         for label, text in joints_for(comp):
             any_joint = True
