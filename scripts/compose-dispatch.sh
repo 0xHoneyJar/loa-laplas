@@ -157,6 +157,19 @@ if [[ ! -f "$COMP_PATH" ]]; then
     exit 1
 fi
 
+# Dependency preflight (loud, fail-closed): the Form C pipeline parses this
+# composition and runs the cut / emit / cost libs through python3 — all of which
+# need PyYAML. Scoped to AFTER arg-parsing + path validation so `-h`/`--help` and
+# usage stay dependency-free (BB #49 F1); fires only once a real composition is
+# about to be parsed. compose-doctor hard_fails on this too — same actionable fix.
+if ! python3 -c 'import yaml' >/dev/null 2>&1; then
+    echo "ERROR: PyYAML not available to python3 ($(command -v python3 || echo 'python3 not found'))." >&2
+    echo "       The Form C pipeline needs it to parse compositions. Install it:" >&2
+    echo "         python3 -m pip install pyyaml   # or: pip install pyyaml" >&2
+    echo "       Then re-run; compose-doctor will confirm READY." >&2
+    exit 1
+fi
+
 # Mode detection if not forced
 if [[ -z "$MODE" ]]; then
     if [[ -n "${CLAUDE_CODE_INTERACTIVE_SESSION:-}" ]] || { [[ -t 0 ]] && [[ -z "${CI:-}" ]]; }; then
