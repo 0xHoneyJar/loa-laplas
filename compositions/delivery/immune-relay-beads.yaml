@@ -44,10 +44,9 @@ backend: headless-tmux
 # would be rejected by $defs.Stage additionalProperties:false).
 surface_class:
   default: culturetech-loose   # estate-health is loose-surface, summarized — not a defi-strict gate
-  rationale: >
-    The immune relay surfaces a coherence summary to the operator. Agreement
-    is silence; only drift saturates. Loose surface drives a summarized run,
-    not a hard blocking gate.
+  # rationale (comment, not a key — SurfaceClass is additionalProperties:false; BB #51 F3):
+  #   The immune relay surfaces a coherence summary to the operator. Agreement is silence;
+  #   only drift saturates. Loose surface drives a summarized run, not a hard blocking gate.
 
 # depends_on (a valid root key) — declares the CONTRACT this composition
 # consumes, not a hardcoded path. The resolved doctor/aligner paths live in

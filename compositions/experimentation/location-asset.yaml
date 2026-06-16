@@ -106,7 +106,7 @@ chain:
 
   # ----------------------------------------------------------------
   - stage: 3
-    construct: blender-adapter   # tool, not a construct — the execution substrate
+    construct: general-purpose   # was 'blender-adapter' — a TOOL, not a dispatchable construct (BB #51 F4); a general-purpose agent drives Blender via the run_python_code skill below
     skill: run_python_code
     mode: persistent
     reads: [Artifact]
@@ -194,7 +194,7 @@ when_to_use: >
 
 known_limitations:
   - "LIGHT by design — names the team + hand-offs, not a rich spec. Tune it as the loop teaches what's missing."
-  - "Stage 3 (blender-adapter) is a tool, not a construct skill — run_python_code drives Blender directly. The composition references it; it does not load as a construct."
+  - "Stage 3 drives Blender as a TOOL (tools/blender-addon/) via the run_python_code skill, dispatched by a general-purpose agent. blender-adapter is the tool, not a construct — so the construct slug is general-purpose (which resolves), not blender-adapter (which would not). BB #51 F4."
   - "Rosenzu (stage 5) is web-route-spatial, not 3D-scene-spatial. It places the asset into a web room; it does not reason about mesh geometry. Do not ask it to."
   - "Three.js is the current shader constraint — stage 2 specs translate web shaders to Blender materials. A WebGPU migration would remove that translation step."
 

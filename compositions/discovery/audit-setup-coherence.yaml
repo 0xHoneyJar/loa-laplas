@@ -97,7 +97,7 @@ chain:
     - seams
     - root_cause_candidate
     - fix_shape_candidate
-    - symlink_self_critique
+    - routing_self_critique
     additionalProperties: false
     properties:
       seams:
@@ -150,10 +150,11 @@ chain:
         type: string
       fix_shape_candidate:
         type: string
-      symlink_self_critique:
+      routing_self_critique:
         type: string
-        description: is the session ~/.claude/constructs->~/.loa/constructs 
-          symlink a CONTRACT or a BAND-AID? argue honestly.
+        description: for each layer (composition surface_class, kickoff stakes-tier,
+          cheval detection) — does the declared link actually DRIVE a mandatory
+          multimodal gate at runtime, or is it declared-but-inert? argue honestly.
 - stage: 2
   name: council-review
   construct: fagan               # was codex-review (retired); real reviewer, routes the cheval council below (bd-ii1m)
