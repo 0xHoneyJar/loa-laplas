@@ -15,17 +15,18 @@ pattern: pair-relay
 artifact_name: macro-pattern-recommendation
 sequence:
   - construct: rosenzu
-    role: name-topology      # rosenzu names the route/data shape under question
+    role: name-topology      # NAME — rosenzu names the route / data shape under question (what is being laid out, and how it flows)
     persona: LYNCH
   - construct: artisan
-    role: critique-fit       # artisan critiques whether component primitives fit the topology
+    role: critique-fit       # CRITIQUE — artisan judges whether the component primitives actually fit that topology, citing specifics
     persona: ALEXANDER
   - construct: rosenzu
-    role: select-pattern     # rosenzu picks the macro-pattern given the critique
+    role: select-pattern     # SELECT — rosenzu picks ONE macro-pattern given the critique; a named archetype, never a free-form design
     persona: LYNCH
 max_cycles: 3
 surface_mode: summary
 domain: frame
 convergence_criteria: >
-  rosenzu's final-cycle envelope names a macro-pattern (dashboard / feed /
-  canvas / etc.) with rationale grounded in the artisan critique.
+  rosenzu's final-cycle envelope names exactly ONE macro-pattern (dashboard / feed /
+  canvas / etc.) — not a shortlist — with rationale that cites the specific artisan
+  critique points it answers. A named archetype, never a free-form design.

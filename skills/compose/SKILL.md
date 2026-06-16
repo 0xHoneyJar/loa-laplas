@@ -59,11 +59,14 @@ the seam protocol + terminal gate: `$RT/docs/compose-as-cc-workflow.md`. Readine
 
 ## Registry (the deck)
 
-Canonical registry: **`~/.loa/constructs/substrates/construct-compositions/compositions/**/<name>.yaml`** (23
-compositions across `delivery/ discovery/ experimentation/ persona/ sorry-for-ur-loss/`).
-Also check the current repo's `compositions/` for local overrides.
+Canonical registry: **`$RT/compositions/**/<name>.yaml`** (32 compositions across
+`delivery/ discovery/ experimentation/ persona/ sorry-for-ur-loss/`, plus the native
+`access-relay` · `fidelity-relay` · `frame-relay` · `code-implement-and-review`). The
+library was consolidated here from the now-deprecated `construct-compositions` (port
+2026-06-15) — loa-laplas, the runtime that compiles them, is their home. Also check the
+current repo's `compositions/` for local overrides.
 
-- **Browse / "what compositions exist":** `ls ~/.loa/constructs/substrates/construct-compositions/compositions/**/*.yaml` — list by folder; surface name + the composition's `intent`/`description`.
+- **Browse / "what compositions exist":** `ls $RT/compositions/**/*.yaml` — list by folder; surface name + the composition's `intent`/`description`.
 - **Inspect a recipe:** read the YAML; summarize the chain (stages, roles, gates, `iterate`).
 - If the operator names a chain inline, author a minimal YAML (kind: workflow; chain[] of `{stage, construct, skill, persona, mode, role}`; add `iterate` + `max_iterations` + `terminate_when` if it loops).
 

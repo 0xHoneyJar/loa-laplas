@@ -12,17 +12,19 @@ pattern: pair-relay
 artifact_name: fidelity-audit-verdict
 sequence:
   - construct: artisan
-    role: declare-taste     # ALEXANDER inscribes the spec being audited against
+    role: declare-taste     # DECLARE — ALEXANDER inscribes the taste spec being audited against (the ground truth the diff is measured from)
     persona: ALEXANDER
   - construct: crucible
-    role: validate-shipped  # crucible compares shipped surface to declared taste
+    role: validate-shipped  # INSPECT — crucible compares the shipped surface to the declared taste and reports each concrete divergence
     persona: null
   - construct: artisan
-    role: confirm-intent    # ALEXANDER validates that crucible's diff matches taste intent
+    role: confirm-intent    # CONFIRM — ALEXANDER rules each divergence intentional-as-shipped or a fix-required regression
     persona: ALEXANDER
 max_cycles: 3
 surface_mode: summary
 domain: fidelity
 convergence_criteria: >
-  Operator accepts artisan's final-cycle verdict; diff between declared and
-  shipped is either acknowledged-as-intentional or accepted-as-fix-required.
+  artisan's final-cycle verdict resolves EVERY divergence crucible found between
+  declared taste and shipped reality into exactly one of: acknowledged-as-intentional
+  (with why it is acceptable) or accepted-as-fix-required (with what must change). No
+  divergence left in limbo; the operator accepts that verdict.
