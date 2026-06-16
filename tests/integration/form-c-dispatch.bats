@@ -1521,3 +1521,21 @@ SH
     [[ "$output" != *"PyYAML not available"* ]] || fail "guard false-fired with yaml present: $output"
     [[ "$output" == *"Usage:"* ]] || fail "usage not reached past guard: $output"
 }
+
+@test "preflight: -h/--help is dependency-free even when PyYAML is missing (BB #49 F1)" {
+    local shimdir="$TMPROOT/pybin-noyaml-help"
+    mkdir -p "$shimdir"
+    local real_py; real_py="$(command -v python3)"
+    cat > "$shimdir/python3" <<SH
+#!/usr/bin/env bash
+for a in "\$@"; do case "\$a" in *"import yaml"*) exit 1;; esac; done
+exec "$real_py" "\$@"
+SH
+    chmod +x "$shimdir/python3"
+
+    # help must NOT require PyYAML — the guard is now scoped after arg-parsing.
+    PATH="$shimdir:$PATH" run "$DISPATCH" -h
+    [[ "$status" -eq 0 ]] || fail "help must exit 0 without PyYAML, got $status: $output"
+    [[ "$output" == *"Usage:"* ]] || fail "help text missing: $output"
+    [[ "$output" != *"PyYAML not available"* ]] || fail "guard fired on help path: $output"
+}
