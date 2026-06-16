@@ -324,22 +324,25 @@ outputs:
 # Surface Class — the setup is high-stakes infra (gates every build)
 # ================================================================
 surface_class:
-  default: defi-strict           # schema-valid SurfaceClass.default (was 'data-validity' — not in the canonical 4-value enum)
-  enum: [data-validity, auth-contract, defi-strict, mixed, unspecified]
+  default: defi-strict           # the setup is high-stakes infra; canonical 4-value SurfaceClass enum
+  enum: [culturetech-loose, defi-strict, mixed, unspecified]
   inferred_when_unspecified: defi-strict
 
 # Top-level cheval-routed multimodal-council mandate (schema v1.4 review_routing).
 # Was nested under surface_class (schema-INVALID: SurfaceClass is additionalProperties:false),
 # and declared a bare `mandatory: true` the runtime can't act on — itself the declared-vs-
 # actual routing gap this composition exists to catch. Lifted + given a real mandatory_when.
+# Audit domains in scope — data-validity + auth-contract coherence — are documented HERE, not
+# encoded as surface_class enum values: surface_class is the stakes axis (canonical 4), not a
+# domain tag, and a non-canonical value (or an extra top-level field) fails the closed schema. (BB #51 F2)
 review_routing:
-  mandatory_when: [data-validity, auth-contract, defi-strict]   # this audit MUST route through the cheval council
+  mandatory_when: [defi-strict]   # high-stakes (this audit's default) MUST route through the cheval council
   router: cheval
   runner: construct-fagan/scripts/cheval-council.sh
   voices: [gpt-reviewer, reviewing-code, deep-thinker]
   min_surviving_voices: 2
   audit: modelinv-required
-  optional_when: [mixed, unspecified]
+  optional_when: [culturetech-loose, mixed, unspecified]
 
 when_to_use: >
   - After changing cheval / compositions / FAGAN / kickoff / rooms-substrate wiring
