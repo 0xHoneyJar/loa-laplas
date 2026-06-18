@@ -2,16 +2,25 @@
   "consensus_outcome": "consensus",
   "truncation_waiver_applied": false,
   "voices_planned": 3,
-  "voices_succeeded": 3,
+  "voices_succeeded": 2,
   "voices_succeeded_ids": [
     "codex-headless",
-    "claude-headless",
-    "gemini-headless"
+    "claude-headless"
   ],
-  "voices_dropped": [],
-  "chain_health": "ok",
-  "confidence_floor": "high",
-  "rationale": "multi-voice aggregate (3/3 succeeded); chain_health=ok",
+  "voices_dropped": [
+    {
+      "voice": "gemini-headless",
+      "reason": "RetriesExhausted",
+      "exit_code": 1,
+      "blocker_risk": "unknown",
+      "chain_walk": [
+        "google:gemini-headless"
+      ]
+    }
+  ],
+  "chain_health": "degraded",
+  "confidence_floor": "med",
+  "rationale": "multi-voice aggregate (2/3 succeeded); chain_health=degraded; dropped: gemini-headless(RetriesExhausted/unknown)",
   "single_voice_call": false,
-  "status": "APPROVED"
+  "status": "DEGRADED"
 }

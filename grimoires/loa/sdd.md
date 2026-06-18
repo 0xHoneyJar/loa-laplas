@@ -89,52 +89,74 @@ chain:
 A thin, deterministic renderer projects the structured findings into the BEAUVOIR markdown house-style, wrapping the machine block in `<!-- bridge-findings-start -->` / `<!-- bridge-findings-end -->` (already parsed by `post-pr-triage.sh` — zero net-new consumer code).
 
 ### 2.5 No emitter change
-Because the schema is an inline object, the emitter path (`_validated_output_schema`, validate-and-retry) handles it as-is. Epic A's net-new is exactly: the schema artifact, the registered composition, and the renderer.
+Because the schema is an inline object, the emitter path (`_validated_output_schema`, validate-and-retry) handles it as-is. Epic A's net-new is exactly: the schema artifact, the registered composition, the renderer, and the anchor-resolution step (§2.6).
+
+### 2.6 Anchor resolution — presence ≠ grounding (PRD FR-A1 / Flatline B1)
+The `output_schema` proves a finding *has* an `anchor`; it cannot prove the anchor is *real* (`anchor: foo.ts:999` validates identically to a true reference). A post-validation step in the renderer/consumer path resolves every `observed`-tagged finding's `anchor` against the reviewed tree:
+- `file:line` form → the path must exist and have that line; a text-anchor → the quoted text must be found in the cited file.
+- A dangling `observed` anchor **fails the synthesis** (or downgrades the finding to `claimed` with a logged reason — composition-configurable, default fail).
+- Non-file synthesis (strategy/research) tags findings `claimed`, which skip resolution — so the step never forces a code lens onto non-code work.
+- **[Flatline H7]** The emitter's retry-on-miss is bounded; on exhaustion the synthesis fails or emits an explicitly `partial` result, never an ungrounded finding that satisfies the schema by accident.
 
 ---
 
 ## 3. Epic B — proof-of-operation gate (owner: kranz / poteau + protocol)
 
-### 3.1 Receipt-contract declaration
-A construct/stage declares its verifiable operation in `construct.yaml` capabilities (and mirrored in `docs/runtime/construct-adapters.md`):
+### 3.1 Receipt-contract declaration (PRD FR-B1)
+A construct/stage declares its verifiable operation in `construct.yaml` capabilities (mirrored in `docs/runtime/construct-adapters.md`):
 ```yaml
 capabilities:
   verify:
     operation: multimodal-review
     receipt: model-invoke.jsonl
-    min_model_families: 2
+    min_model_families: 2          # FAMILIES, not final_model_ids (Flatline B6)
 ```
-This is the only authoring-time surface; everything downstream is mechanical.
+**Normalized receipt schema (Flatline B7).** Each receipt record is `{provider, model_family, final_model_id, invocation_id, timestamp, compose_run_id, stage_index, stage_id, operation, envelope_hash}`. The `final_model_id → model_family` map is a **pinned table** (its source named in `docs/runtime/construct-adapters.md`, drift-guarded by a test) so `opus`+`sonnet` resolve to one family and a 2-family declaration cannot be satisfied by two same-family models. Fixtures cover aliases, provider gateways, repeated same-family models, and renamed models.
 
-### 3.2 Receipt capture (dispatcher)
-`compose-dispatch.sh` folds the emitted receipt into the custody tree:
-```
-.run/compose/<run_id>/receipts/<stage_index>.json
-```
-bound to `stage_index` + `run_id` (the same binding the envelopes use). FAGAN already emits the source receipt to `.run/model-invoke.jsonl` via `cheval-council.sh` (per-voice MODELINV with real `final_model_id` + `panel:{voices,dropped[],models_ran[]}`). Capture = copy-with-binding, not generation.
+### 3.2 Receipt capture (dispatcher, PRD FR-B2 / FR-B5)
+`compose-dispatch.sh` folds the receipt into the custody tree at `.run/compose/<run_id>/receipts/<stage_index>.json`. Four properties the original "copy-with-binding" glossed over:
+- **Isolated writer (FR-B5).** The receipt is written by the **cheval / MODELINV emitter** — the same isolated process that issues the provider calls and reads back the provider-returned id — **not** by the stage prompt/agent under verification. `final_model_id` is the *provider-returned* id, not a string the stage chose.
+- **Verifier-checkable attestation (SDD B2/B3 — the load-bearing addition).** Write-time isolation alone is *not verifiable post-hoc*: Check 6 reads a file, and the threat actor (a stage that can write the receipt path) can write a well-formed receipt too. So each record carries a **detached Ed25519 signature** (`receipt.sig`) produced by the isolated writer with the **gatekeeper key the stage cannot access** — the SAME key/infra legba already uses for the audit chain (`audit_emit_signed`; no new primitive). The signed payload binds `{provider, model_family, final_model_id, invocation_id, provider_response_hash, compose_run_id, stage_index, stage_id, operation, envelope_hash}`. Optionally (provider permitting) the record also carries the **provider-returned response-id + `provider_response_hash`** for an independent cross-check. The distinction that makes the gate real: a forged receipt can copy field *values* but cannot produce a signature that verifies under the gatekeeper public key.
+- **Mandatory correlation (FR-B2 / B4).** The signed payload binds `compose_run_id` + `stage_index` + `stage_id` + `operation` + `envelope_hash`. A receipt that does not correlate exactly to the stage it claims to prove is rejected (defeats cross-stage / cross-run replay).
+- **Isolation controls (SDD B4).** `.run/compose/<run>/receipts/` and `…/attempted/` are created `0700`, owned by the cheval process; writes are **atomic** (temp-file + `rename`); records are **append-only / hash-chained** under legba so a stage cannot rewrite a marker or receipt before verification. Check 6 treats a receipt whose ownership/mode is wrong, or whose signature/chain fails, as `broken_run` (not a pass).
 
-### 3.3 Check 6 — proof-of-operation (verifier, fail-closed)
-A new check in `compose-verify-run.sh`, sibling to Checks 1–5, gated behind a flag (e.g. `--proof-of-operation`, defaulting on once stable — mirrors how `--legba` was introduced as opt-in then promoted):
+### 3.3 Check 6 — proof-of-operation (verifier, fail-closed; PRD FR-B3)
+A new check in `compose-verify-run.sh`, sibling to Checks 1–5, gated behind `--proof-of-operation` (default-off → default-on once stable, mirroring `--legba`). The **operation-attempted marker** (`.run/compose/<run>/attempted/<stage_index>` — written by the dispatcher *before* model invocation, independent of the receipt write) is what separates "infra flake" from "operation never ran":
 ```
 for each stage S in the manifest that DECLARED verify.operation:
+    marker  = .run/compose/<run>/attempted/<S.index>          # emitted pre-invocation
     receipt = .run/compose/<run>/receipts/<S.index>.json
-    if receipt absent            → _verdict broken_run 3 "stage S declared <op> but emitted no receipt"
-    families = distinct final_model_id in receipt
-    if families < S.min_model_families → _verdict broken_run 3 "stage S <op>: <families> model family/families < required <min>"
-    if envelope.verdict ≠ receipt.verdict → _verdict broken_run 3 "stage S verdict/receipt mismatch"
+    if marker absent  and receipt absent → _verdict broken_run 3   "stage S <op>: operation never ran"        # FAIL
+    if marker present and receipt absent → _verdict degraded_run 2 "stage S <op>: attempted, capture failed"  # DEGRADED (retryable deny)
+    # receipt present → validate it, IN THIS ORDER (cheapest-fail-first):
+    if receipt.sig does NOT verify under the gatekeeper public key → broken_run 3 "receipt signature invalid"          # FR-B5 — THE check
+    if receipt dir ownership/mode wrong OR legba chain broken      → broken_run 3 "receipt tamper / isolation breach"  # SDD B4
+    if signed payload does NOT correlate (compose_run_id/stage_index/stage_id/envelope_hash) → broken_run 3 "correlation mismatch"  # FR-B2/B4
+    if provider_response_hash present AND ≠ envelope's recorded hash → broken_run 3 "provider-response cross-check failed"
+    families = distinct model_family over the receipt (pinned id→family map)            # FR-B1/B6/B7
+    if families < S.min_model_families                           → broken_run 3 "<families> family/families < required <min>"
+    if envelope.verdict ≠ receipt.verdict                       → broken_run 3 "verdict/receipt mismatch"
 ```
-Reuses `.loa/tools/modelinv-coverage-audit.py` for the family-count extraction. No new hash-chain primitive — receipts ride the existing legba custody (Check 5).
+The signature check is the load-bearing one: it is what the verifier *can* check post-hoc (SDD B2/B3) — a hand-written receipt copies values but cannot forge a gatekeeper-key signature. Reuses `.loa/tools/modelinv-coverage-audit.py` for per-family extraction and the **existing legba Ed25519 infra** (`audit_emit_signed` / `legba verify`) for the signature — **no new hash-chain primitive**.
 
-### 3.4 Verdict semantics
-- **FAIL (`broken_run`, exit 3)**: a stage *declared* a verifiable op and the evidence is absent or under-min. Fail-closed: the absence of proof is a failure, not a pass.
-- **DEGRADED vs FAIL distinction**: if the receipt file exists but is unreadable/corrupt (capture fault, not an operation fault), emit a distinct degraded note so a flaky capture is not misread as a forged operation. (A receipt that is *absent* is always FAIL — the whole point.)
-- A stage that declares **no** verifiable op is unaffected (Check 6 is a no-op for it) — fully back-compatible with every existing composition.
+### 3.4 Verdict semantics (PRD FR-B3 table; DEGRADED taxonomy resolved — SDD B1)
+The existing taxonomy is `valid_run`(0) / `compiled_run`(2) / `broken_run`(3). DEGRADED slots in as a **new verdict string `degraded_run` at exit 2** — the "not proven, *retryable*" deny class (sibling of `compiled_run`), distinct from `broken_run`(3) "integrity-broken / forged". Both are non-zero (never a pass). `_verdict` gains the `degraded_run` string + a `degraded: true` JSON flag so downstream automation branches deterministically; every consumer that switches on the verdict adds a `degraded_run` arm (treated as a retryable deny, not a hard stop).
+
+| attempted-marker | receipt | verdict | exit |
+|---|---|---|---|
+| absent | absent | `broken_run` — operation never ran | 3 |
+| present | absent / unreadable | **`degraded_run`** — attempted, capture failed (retryable; *not* a forged pass) | 2 |
+| present | signature invalid / tampered / uncorrelated | `broken_run` — forged or replayed | 3 |
+| present | valid sig, < min families | `broken_run` — under-family | 3 |
+| present | valid sig, ≥ min families, correlated | `valid_run` | 0 |
+
+A stage that declares **no** verifiable op is unaffected (Check 6 is a no-op) — fully back-compatible. `degraded_run` is never folded into `valid_run`, so a flaky capture neither silently blocks a legitimate run nor passes a missing operation.
 
 ### 3.5 Automated-driver non-deadlock path (carried from decompose-bridge)
 Under `/run`, `/simstim`, or cron, a Check-6 FAIL surfaces a **non-deadlocking handoff** (queued to the run-mode failure channel / `.run/bridge-pending-bugs.jsonl`-style), never a blocking prompt. The gate denies the run; it does not hang the automated driver.
 
-### 3.6 Forcing function (why record-gate, not dispatch-policing)
-Two distinct provider `final_model_id`s cannot be produced by a single role-playing agent. Demanding the receipt makes honest multi-model execution the only path to a green gate. The verifier never tries to force the dispatcher to shell a specific script (fragile); it demands the evidence (robust).
+### 3.6 Forcing function (why record-gate, not dispatch-policing — Flatline-qualified)
+Demanding the receipt (not policing the dispatch) is robust — but the forcing function only bites when the receipt is **provider-attested by an isolated writer** (§3.2 / FR-B5). A *self-written* log line with two invented `final_model_id` strings is trivially forgeable; two distinct provider *families*, captured from real provider responses by a writer the stage cannot author, are not. So the precise property is: "honest multi-family execution is the only path to a **correlated, attested** receipt." The verifier demands that evidence (robust); it never forces the dispatcher to shell a specific script (fragile).
 
 ---
 
@@ -143,7 +165,10 @@ Two distinct provider `final_model_id`s cannot be produced by a single role-play
 | Artifact | Shape | Lives at |
 |----------|-------|----------|
 | `bridge-findings` schema | inline JSON-schema object (§2.1) | `construct-compositions` shared schema, inlined per composition (V1) |
-| receipt | `{stage_index, run_id, operation, final_model_id[], verdict, panel}` | `.run/compose/<run>/receipts/<stage>.json` |
+| receipt (normalized + signed) | `{provider, model_family, final_model_id, invocation_id, provider_response_hash, timestamp, compose_run_id, stage_index, stage_id, operation, envelope_hash, verdict}` + detached `sig` (Ed25519 over the payload) | `.run/compose/<run>/receipts/<stage>.json` (`0700` dir, atomic write, legba-chained) |
+| gatekeeper signing key | Ed25519; the existing legba/audit-chain key, isolated from stage sandboxes | legba key store (reused; SDD §8 Q5 on rotation) |
+| operation-attempted marker | empty/stamp file per stage, written pre-invocation by the isolated writer | `.run/compose/<run>/attempted/<stage_index>` |
+| `final_model_id → model_family` map | pinned table, drift-guarded | `docs/runtime/construct-adapters.md` (source named) |
 | verify declaration | `capabilities.verify:{operation, receipt, min_model_families}` | each construct's `construct.yaml` |
 
 ---
@@ -151,9 +176,11 @@ Two distinct provider `final_model_id`s cannot be produced by a single role-play
 ## 5. Security Architecture
 
 - **Schema-key safety (A)**: `bridge-findings` keys pass `_assert_safe_schema_keys` (`segment-emitter.py:927`) — no unsafe interpolation into emitted JS.
-- **Receipt unforgeability (B)**: the security property is the *cost to forge* two distinct provider `final_model_id`s — there is none cheaper than actually running two model families. Self-report is never trusted; the gate verifies against the receipt.
-- **Fail-closed (B)**: absence of proof = FAIL. The conservative-by-default discipline already in `compose-verify-run.sh` (only exit 0 passes; any other code is non-pass — `:406`) is preserved and extended.
-- **Custody binding (B)**: receipts are bound to `stage_index`+`run_id` and ride the legba chain, so a receipt cannot be copied from another run without breaking custody.
+- **Anchor grounding (A — Flatline B1)**: schema *presence* of `anchor` is not grounding. A post-validation resolve step (§2.6) fails the synthesis when an `observed`-tagged finding's `anchor` does not resolve to a real path/line, so the contract proves *truth*, not just non-emptiness.
+- **Receipt trust boundary (B — Flatline B5 + SDD B2/B3, the load-bearing property)**: unforgeability is NOT "cost to forge two `final_model_id` strings" (those are self-reportable). It is **writer–subject separation made verify-time checkable**. Write-time isolation alone fails the threat model — the verifier reads a file post-hoc, and the threat actor (a stage that can write the receipt path) can write a well-formed receipt. The control is therefore a **detached Ed25519 signature** over the receipt by the isolated MODELINV writer, under the **gatekeeper key the stage cannot access** (the existing legba/audit-chain key — no new primitive); Check 6 verifies the signature first. A forged receipt copies field values but cannot produce a valid signature. Plus correlation binding (`compose_run_id`/`stage_index`/`envelope_hash`), `0700`-owned receipt dirs, atomic writes, and an append-only legba chain so markers/receipts cannot be rewritten pre-verification. Negative tests are first-class (unsigned/wrong-key, replayed, mismatched-run/stage, tampered, two-same-family).
+- **Family counting (B — Flatline B6/B7)**: the gate counts distinct *families* via the pinned `final_model_id → model_family` map, never raw ids, so two same-family models cannot satisfy a 2-family declaration.
+- **Fail-closed + DEGRADED (B — Flatline B3)**: absence of *both* marker and receipt = FAIL; marker-without-receipt = DEGRADED (distinct non-zero verdict, never folded into `valid_run`). The conservative-by-default discipline in `compose-verify-run.sh` (only exit 0 passes — `:406`) is preserved and extended.
+- **Custody binding (B)**: receipts are bound to `compose_run_id`/`stage_index`/`stage_id`/`envelope_hash` and ride the legba chain, so a receipt cannot be replayed from another run/stage without breaking custody or failing the correlation check.
 
 ---
 
@@ -165,12 +192,16 @@ Mirror the existing hermetic bats harness (`tests/integration/form-c-dispatch.ba
 - A composition with the `bridge-findings` schema: a synthesis output missing `anchor`/`severity`/`recommendation` → emitter retry-on-miss fires (validation rejects).
 - A `claims_ledger` with a `tag: observed` claim and empty `grounding` → validation fails.
 - `rigorous-review.yaml` emits → `workflow-syntax-check.js` green; renderer produces `bridge-findings` markers that `post-pr-triage.sh` parses.
+- **[B1] Anchor resolution**: an `observed` finding with `anchor: foo.ts:999` (no such line) → synthesis fails (or downgrades to `claimed`); a real anchor passes; a `claimed` finding skips resolution.
 
-**Epic B** (`tests/integration/compose-verify-run.bats` extended) — the four PRD acceptance metrics:
-- VC-B1: declared `multimodal-review`, no receipt → `broken_run` exit 3.
-- VC-B2: single-model receipt, `min_model_families: 2` → exit 3.
-- VC-B3: ≥2 distinct `final_model_id` → `valid_run` exit 0; receipt in custody.
+**Epic B** (`tests/integration/compose-verify-run.bats` extended) — the four PRD metrics **plus the Flatline negative tests** (the security property is only as good as these):
+- VC-B1: declared `multimodal-review`, no marker + no receipt → `broken_run` exit 3.
+- VC-B2: receipt with two *same-family* ids (e.g. `opus`+`sonnet`), `min_model_families: 2` → exit 3 (**[B6]** family count, not id count).
+- VC-B3: ≥2 distinct *families*, correlated + attested → `valid_run` exit 0; receipt in custody.
 - VC-B4: a non-FAGAN construct declaring a receipt contract is gate-checked identically.
+- **[B5] Forgery**: a receipt hand-written with two invented `final_model_id`s but no provider attestation → exit 3 ("not provider-attested").
+- **[B4] Replay**: a valid receipt from another `run_id`/`stage_index` copied in → exit 3 ("correlation mismatch").
+- **[B3] DEGRADED**: marker present, receipt absent/unreadable → distinct DEGRADED verdict (non-zero, not `valid_run`); marker absent + receipt absent → FAIL.
 - Back-compat: a composition declaring no verify op → Check 6 no-op, verdict unchanged.
 
 ---
@@ -187,7 +218,8 @@ Mirror the existing hermetic bats harness (`tests/integration/form-c-dispatch.ba
 
 1. **A — schema home**: `construct-compositions` shared vs `construct-rooms-substrate` runtime schemas vs `loa-hounfour`. Leaning shared-in-`construct-compositions`, inlined until a `$ref` resolver exists.
 2. **B — receipt contract generality**: the scaffold must accept receipt contracts beyond `multimodal-review` (VC-B4). Ship the generic `{operation, receipt, min_*}` shape with `multimodal-review` as the reference op; defer additional operation kinds.
-3. **B — DEGRADED taxonomy**: exact verdict string for "receipt present but unreadable" vs reusing `broken_run` with a distinct message. Recommend a distinct note field, not a new exit code (keep exit semantics at 0/2/3).
+3. ~~**B — DEGRADED taxonomy**~~ **RESOLVED (SDD B1)**: `degraded_run` verdict string at **exit 2** (retryable-deny class, sibling of `compiled_run`) + a `degraded: true` flag; never folded into `valid_run`. Exit semantics stay 0/2/3. See §3.4.
+5. **B — attestation key management (new, from SDD B2/B3)**: the gatekeeper Ed25519 key the MODELINV writer signs with must be provisioned + isolated from stage sandboxes; reuse legba's existing key handling (`audit_emit_signed`). Open: per-run vs per-host key, and rotation.
 4. **A/B convergence**: whether Epic A's `bridge-findings` and the Bridgebuilder TS app's findings schema should unify (out of scope this cycle; noted).
 
 > **Next**: `/sprint-plan` — Epic A first.
