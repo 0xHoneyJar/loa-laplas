@@ -1,0 +1,278 @@
+{
+  "consensus_summary": {
+    "high_consensus_count": 8,
+    "disputed_count": 2,
+    "low_value_count": 0,
+    "blocker_count": 12,
+    "model_agreement_percent": 85,
+    "models": 3,
+    "tertiary_items": 0,
+    "confidence": "full"
+  },
+  "high_consensus": [
+    {
+      "id": "IMP-001",
+      "description": "Critical contract gap. LLM API failure is a predictable operational path distinct from semantic fallback, and leaving it unspecified will cause incompatible retry/audit behavior. Low implementation cost: add an exit code and response semantics.",
+      "gpt_score": 930,
+      "opus_score": 920,
+      "tertiary_score": 950,
+      "delta": 10,
+      "average_score": 925,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-002",
+      "description": "Critical because an invariant with no numeric bound is untestable. The fix is cheap and directly supports validation and tuning of gate batching.",
+      "gpt_score": 900,
+      "opus_score": 880,
+      "tertiary_score": 880,
+      "delta": 20,
+      "average_score": 890,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-003",
+      "description": "High-value determinism fix. Ambiguous default behavior for gate coverage can produce different gate_blind results across implementations, especially during migration. Cost is low: define the decision rule or choose one default.",
+      "gpt_score": 890,
+      "opus_score": 855,
+      "tertiary_score": 880,
+      "delta": 35,
+      "average_score": 872.5,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-004",
+      "description": "Important edge case for the only nondeterministic source. Null or absent domain_hint is plausible and affects routing/domain invariants. Needs a deterministic policy, though the exact policy may require design judgment.",
+      "gpt_score": 860,
+      "opus_score": 870,
+      "tertiary_score": 900,
+      "delta": 10,
+      "average_score": 865,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-005",
+      "description": "Critical seam-contract improvement. If decomposer to emitter is the core binary boundary, a machine-readable schema is the right authority for tests and drift detection. Implementation cost is moderate but justified.",
+      "gpt_score": 920,
+      "opus_score": 845,
+      "tertiary_score": 890,
+      "delta": 75,
+      "average_score": 882.5,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-006",
+      "description": "Valuable phasing clarification. Dead or deferred fields often create premature wiring or ignored data, but this is less severe if stall_s is harmless metadata. Marking consumption status is low-cost and worthwhile.",
+      "gpt_score": 730,
+      "opus_score": 755,
+      "tertiary_score": 710,
+      "delta": 25,
+      "average_score": 742.5,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-010",
+      "description": "Strong determinism issue. DOMAIN_UNRESOLVED must map predictably to fallback or refusal based on rel_policy; otherwise implementations cannot be tested against one expected behavior.",
+      "gpt_score": 840,
+      "opus_score": 735,
+      "tertiary_score": 850,
+      "delta": 105,
+      "average_score": 787.5,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    },
+    {
+      "id": "IMP-011",
+      "description": "Valuable quality-gate improvement. The nondeterministic component needs a fixture/schema-based test strategy to avoid brittle LLM-dependent tests. Slightly broader than a spec patch, but important for Phase 1 acceptance.",
+      "gpt_score": 780,
+      "opus_score": 835,
+      "tertiary_score": 860,
+      "delta": 55,
+      "average_score": 807.5,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "HIGH"
+    }
+  ],
+  "disputed": [
+    {
+      "id": "IMP-013",
+      "description": "Valuable edge-case closure. Zero-item output is covered by bounds conceptually, but the response path should be explicit for diagnostics and test cases. Lower priority than API failure or domain ambiguity.",
+      "gpt_score": 690,
+      "opus_score": 0,
+      "tertiary_score": 690,
+      "delta": 690,
+      "average_score": 690,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    },
+    {
+      "id": "IMP-014",
+      "description": "Nice-to-have cleanup. Undefined ecosystem shorthand creates reviewer friction, but it is unlikely to affect implementation behavior unless finn has runtime implications. Remove or define briefly.",
+      "gpt_score": 430,
+      "opus_score": 0,
+      "tertiary_score": 510,
+      "delta": 430,
+      "average_score": 430,
+      "source": "gpt_scored",
+      "would_integrate": true,
+      "agreement": "DISPUTED"
+    }
+  ],
+  "low_value": [],
+  "blockers": [
+    {
+      "id": "SKP-001",
+      "concern": "C10 (stall-exit) ships in Phase 1 but its trigger — the stall_s watchdog — is deferred to Phase 1.5. Nothing in Phase 1 fires stallExit. C10 is dead code on day one.",
+      "severity": "CRITICAL",
+      "severity_score": 845,
+      "why_matters": "A stall in Phase 1 has no exit path. Workers that block will block indefinitely (automated) or silently (interactive). The safety guarantee the SDD advertises for Phase 1 ('fails safe') does not hold until Phase 1.5. Any autonomous run between Phase 1 and Phase 1.5 is exposed.",
+      "location": "§7 Phasing, C9, C10, §3 Data Flow step 8",
+      "recommendation": "Either defer C10 to Phase 1.5 and explicitly document that Phase 1 has no stall handler (timeout will be the external kill), or ship a minimal stall_s watchdog in Phase 1 as an atomic unit with C10. The current split ships a half-formed safety gate.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-004",
+      "concern": "C5 back-compat default: a gate room with no covers_domains declared defaults to [\"*\"] for generic craft-gates. This means existing compositions with a single generic craft-gate become globally gate-non-blind, silently suppressing opus tier for all leaves regardless of domain coverage.",
+      "severity": "HIGH",
+      "severity_score": 760,
+      "why_matters": "The cost model depends on gate_blind correctly identifying unreviewed domains. A [\"*\"] default inverts the intent: a composition that hasn't declared domain coverage gets treated as if it covers everything. The §10 risk entry says the opposite problem (all-gate-blind → opus everywhere), but the actual back-compat default creates the reverse failure: no domain is blind, everything is cheap, and quality gates are bypassed silently.",
+      "location": "C5 — gate-coverage.mjs, §2 C5, §10 Risks row 1",
+      "recommendation": "Change the back-compat default to the room's declared domain only (never [\"*\"]). A generic craft-gate with no domain declaration should default to covering nothing (empty set), making all undeclared-domain leaves gate-blind and opus-tiered. This is conservative and safe. Document the migration path explicitly. Add a test asserting that a composition with a gate and no covers_domains still produces at least one gate-blind leaf.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-001",
+      "concern": "Calling a shell script (injection-detect.sh) from a Node.js binary with untrusted input introduces a severe command injection vulnerability if the 'goal' string is improperly escaped or interpolated into the execution command.",
+      "severity": "CRITICAL",
+      "severity_score": 900,
+      "why_matters": "An attacker could bypass the injection detector by exploiting the detector's own invocation mechanism, gaining arbitrary RCE on the machine running the compose driver.",
+      "location": "C11 — prompt boundary (sentinel + sanitizer)",
+      "recommendation": "Pass the untrusted goal payload to injection-detect.sh strictly via standard input (stdin) or a securely mapped environment variable, never via command-line arguments or string interpolation.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-003",
+      "concern": "No defined handling for LLM JSON parsing failures. Sonnet may wrap the JSON in markdown blocks or emit malformed JSON, which will crash the deterministic derivation steps.",
+      "severity": "HIGH",
+      "severity_score": 750,
+      "why_matters": "Lack of robust parser error handling will result in ungraceful crashes (e.g., TypeError in deriveRouting) rather than the intended serial fallback or controlled error routing.",
+      "location": "C2 — split-goal.mjs",
+      "recommendation": "Implement strict JSON schema validation (e.g., Zod) on the raw LLM output, strip markdown fences prior to parsing, and route unparseable outputs to the serial fallback path.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-003",
+      "concern": "Serial fallback for low confidence, indivisible, unresolved domain, and sanitize reject conflates safe degradation with hard refusal.",
+      "severity": "HIGH",
+      "severity_score": 710,
+      "why_matters": "A sanitize reject should not produce a spanning item that may still contain unsafe content. Domain unresolved may require operator clarification, not execution. Collapsing these into similar fallback output risks accidental execution of work the system explicitly failed to understand or trust.",
+      "location": "C1 stdout contract; C8 validation; Data Flow step 5",
+      "recommendation": "Split fallback semantics into executable serial fallback versus non-executable refusal. For SANITIZE_REJECT and ambiguous domain failures, emit no runnable item and require explicit handling by the driver.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-006",
+      "concern": "The 'party roster' is referenced throughout the SDD as a required C2 input but its schema, source, and validation are never defined.",
+      "severity": "HIGH",
+      "severity_score": 710,
+      "why_matters": "The role↔roster dagValidate (C8, Flatline B1) depends on the roster being correct and complete. If the roster is stale, malformed, or missing a role the LLM legitimately assigns, every dagValidate run will exit 3 for a valid DAG. The SDD specifies the check but not the contract being checked against.",
+      "location": "C2 — split-goal.mjs, C8 — dag-validate.mjs, §4 Interface Contracts",
+      "recommendation": "Add a §4 roster contract: define the party roster schema (suggest: `{ roles: [{ id, domain, tier_ceiling }] }`), its source (module.json party field or a dungeon manifest), and a validation step in C1 before invoking C2. An empty or malformed roster should exit 3 immediately with a clear diagnostic, not propagate to the LLM call.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-002",
+      "concern": "The design trusts LLM-emitted decomposition confidence as a gating signal without calibration, provenance, or adversarial resistance.",
+      "severity": "HIGH",
+      "severity_score": 760,
+      "why_matters": "An LLM can overstate confidence on bad splits, understate confidence on valid ones, or be manipulated by goal text. This can either fan out unsafe work or collapse useful decompositions into serial fallback, undermining both correctness and performance.",
+      "location": "C2 split-goal.mjs; C8 confidence floor; Operational Definitions",
+      "recommendation": "Separate model self-confidence from validator confidence. Compute confidence from deterministic checks where possible, record model confidence only as telemetry, and require tests showing confidence correlates with decomposition quality across representative fixtures.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-002",
+      "concern": "The one sonnet call (C2) has no specified failure modes, exit codes, retry policy, or timeout. Network error, rate limit, empty response, and malformed JSON are all unaddressed.",
+      "severity": "CRITICAL",
+      "severity_score": 820,
+      "why_matters": "The decomposer's only nondeterministic step has no resilience contract. A transient API failure produces an unspecified exit code and unknown stdout, which the driver will misinterpret. In automated runs this silently aborts the composition with no diagnostic.",
+      "location": "C2 — split-goal.mjs, C1 exit codes (0/3/4), §3 Data Flow step 3",
+      "recommendation": "Add exit code 5 (LLM_CALL_FAILURE) with a structured stderr payload. Define the retry budget (suggest: 1 retry with 2s backoff, then fast-fail). Specify that an empty or non-JSON response is treated as INDIVISIBLE → serial fallback, not an unhandled exception.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-001",
+      "concern": "The sanitizer is treated as a hard security gate despite relying on pattern detection with a fixed threshold, which will miss novel prompt injection and may also reject legitimate goals.",
+      "severity": "CRITICAL",
+      "severity_score": 870,
+      "why_matters": "If the decomposer LLM receives malicious instructions that bypass the detector, it can produce poisoned tasks, roles, dependencies, or confidence values that downstream deterministic code will treat as valid input. False positives can also make the system unusable for goals containing code, logs, or adversarial text that needs analysis.",
+      "location": "C11 prompt-boundary.mjs; Security Architecture; Data Flow step 2",
+      "recommendation": "Define sanitizer behavior as advisory plus strict structural containment, not the primary control. Add adversarial test corpora, explicit allow/deny outcomes, logging, reviewable rejection reasons, and ensure all LLM outputs are schema-validated and constrained independently of sanitizer success.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-003",
+      "concern": "The sentinel delimiter used by C11 (sentinelWrap) is never specified. If the LLM's own training data or the goal literal contains text that resembles the sentinel, the boundary silently fails.",
+      "severity": "CRITICAL",
+      "severity_score": 815,
+      "why_matters": "The sentinel is the primary injection containment control for the one LLM call. Without a specified, high-entropy delimiter (e.g., UUID-bracketed XML tag), any goal containing the sentinel string breaks the boundary. The SDD calls this CRITICAL (B6) but leaves the control unspecified at the design level.",
+      "location": "C11 — prompt-boundary.mjs, §5 Security Architecture, §5.1",
+      "recommendation": "Specify the sentinel format in the SDD: a randomly-generated UUID per invocation, wrapped in a structured XML-like tag (e.g., <goal id=\"{uuid}\">…</goal>). Document that the prompt template checks for sentinel collisions in the input and exits 4 if one is detected. Add a test asserting that a goal containing a sentinel-shaped string is rejected, not silently passed through.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-004",
+      "concern": "Undefined fan-out wave cancellation semantics. If one leaf stalls and triggers a STALLED_NO_SUMMON incident causing an automated nonzero exit, the state of concurrent workers in the same wave is unstated.",
+      "severity": "HIGH",
+      "severity_score": 720,
+      "why_matters": "Concurrent workers could be orphaned, leaving dangling LLM calls, corrupting partial workspace state, or causing race conditions when the orchestrator tears down the driver.",
+      "location": "C10 — Phase-1 stall exit / Section 3 Data Flow",
+      "recommendation": "Explicitly define whether a stall exit issues a cancellation signal to sibling workers in the wave or waits for wave drain before emitting the nonzero exit.",
+      "source": "tertiary_skeptic"
+    },
+    {
+      "id": "SKP-002",
+      "concern": "dagValidate exits fail-loud (exit 3) if the LLM hallucinates a role not in the party roster. LLMs naturally hallucinate classifications, making this a highly brittle failure mode for a nondeterministic component.",
+      "severity": "HIGH",
+      "severity_score": 780,
+      "why_matters": "The system will frequently crash on valid requests simply because the LLM generated 'frontend_dev' instead of 'ui_engineer', destroying the reliability of the automated pipeline.",
+      "location": "C8 — dagValidate (extended) / C2 — Goal splitter",
+      "recommendation": "Instead of a hard CLI exit 3, implement a bounded retry loop (e.g., max 2 retries) feeding the dagValidate failure reason back to the LLM to correct its role assignment, or use constrained decoding for the 'role' field.",
+      "source": "tertiary_skeptic"
+    }
+  ],
+  "degraded": false,
+  "degraded_model": null,
+  "confidence": "full",
+  "phase": "sdd",
+  "document": "grimoires/loa/sdd.md",
+  "domain": " architecture decisions operator signed",
+  "tertiary_model_used": "gemini-headless",
+  "tertiary_status": "active",
+  "execution": {
+    "mode": "hitl",
+    "mode_reason": "Simstim workflow active (.run/simstim-state.json state=RUNNING)",
+    "run_id": null
+  },
+  "timestamp": "2026-06-13T22:08:21Z",
+  "metrics": {
+    "total_latency_ms": 217000,
+    "cost_cents": 0,
+    "cost_usd": 0
+  }
+}
