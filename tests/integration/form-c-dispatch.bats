@@ -1136,6 +1136,79 @@ JSON
     grep -q 'Array.isArray' <<<"$output" || fail "sequential body missing array guard (shared preamble drifted)"
 }
 
+# -----------------------------------------------------------------------------
+# Issue #55 regression — declared inputs[] must reach the segment + stage prompt.
+# The recurring "declared composition surface that does not reach the segment"
+# class (siblings #28/#29, fixed). Before the fix the emitter read only the magic
+# keys (task/scope/items/gate_batch_max/stall_s); any other declared input name
+# was silently dropped at runtime.
+# -----------------------------------------------------------------------------
+@test "args wiring: declared non-magic inputs[] reach the segment + stage prompt (issue #55)" {
+    command -v node >/dev/null || skip "node not available"
+    cat > "$TMPROOT/inp-seg.json" <<'JSON'
+{"segment_name":"inp","index":0,"kind":"sequential","stages":[{"stage":1,"name":"x","construct":"general-purpose","skill":"implement","role":"primary"}]}
+JSON
+    cat > "$TMPROOT/inp-comp.json" <<'JSON'
+{"name":"inp-test","description":"d","intent":"inp intent","inputs":[{"type":"Artifact","name":"prior_grounding","required":false}]}
+JSON
+    local js="$TMPROOT/inp.workflow.js"
+    run python3 "$EMIT" --segment "$TMPROOT/inp-seg.json" --composition "$TMPROOT/inp-comp.json"
+    [[ "$status" -eq 0 ]] || fail "emit failed: $output"
+    printf '%s' "$output" > "$js"
+    # The declared input name must reach the emitted segment (not be dropped).
+    grep -q 'prior_grounding' "$js" || fail "declared input prior_grounding never reaches the segment (silently dropped — issue #55)"
+    grep -q 'declaredInputs' "$js" || fail "declaredInputs wiring missing from preamble"
+    # ...and be surfaced into the stage prompt next to TASK/SCOPE.
+    grep -q 'DECLARED INPUTS' "$js" || fail "declared inputs not surfaced into the stage prompt"
+    # The magic keys must NOT be re-declared (that would shadow the preamble/DAG bindings).
+    ! grep -Eq 'declaredInputs\[("|.)(task|scope|items)\b' "$js" || fail "magic key leaked into declared-input wiring"
+    # Emitted workflow still passes the syntax + determinism check.
+    run node "$SYNTAX" "$js"
+    [[ "$status" -eq 0 ]] || fail "emitted workflow fails syntax check after input wiring: $output"
+}
+
+@test "args wiring: a required declared input that is absent warns loudly, never throws (issue #55)" {
+    command -v node >/dev/null || skip "node not available"
+    cat > "$TMPROOT/req-seg.json" <<'JSON'
+{"segment_name":"req","index":0,"kind":"sequential","stages":[{"stage":1,"name":"x","construct":"general-purpose","skill":"implement","role":"primary"}]}
+JSON
+    cat > "$TMPROOT/req-comp.json" <<'JSON'
+{"name":"req-test","description":"d","intent":"req intent","inputs":[{"type":"Artifact","name":"must_have","required":true}]}
+JSON
+    local js="$TMPROOT/req.workflow.js"
+    python3 "$EMIT" --segment "$TMPROOT/req-seg.json" --composition "$TMPROOT/req-comp.json" > "$js" || fail "emit failed"
+    local pre="$TMPROOT/req-pre.js"
+    sed -n '/@preamble-start/,/@preamble-end/p' "$js" > "$pre"
+    [[ -s "$pre" ]] || fail "could not extract args preamble"
+    # Execute the preamble with the required input ABSENT — must warn, never throw.
+    run node -e "
+        const logs = [];
+        const log = (m) => logs.push(String(m));
+        const args = { task: 'T' };
+        $(cat "$pre")
+        const warned = logs.some((m) => /must_have/.test(m) && /WARNING/.test(m));
+        console.log(JSON.stringify({ warned, hasObj: typeof declaredInputs === 'object' }));
+    "
+    [[ "$status" -eq 0 ]] || fail "preamble threw on an absent required input (must degrade, not throw): $output"
+    grep -q '"warned":true' <<<"$output" || fail "absent required declared input must warn loudly: $output"
+    grep -q '"hasObj":true' <<<"$output" || fail "declaredInputs object must always be defined"
+}
+
+@test "args wiring: 'prior' (sequential handoff carrier) is magic — never double-surfaced (issue #55)" {
+    cat > "$TMPROOT/pri-seg.json" <<'JSON'
+{"segment_name":"pri","index":0,"kind":"sequential","stages":[{"stage":1,"name":"x","construct":"general-purpose","skill":"implement","role":"primary"}]}
+JSON
+    cat > "$TMPROOT/pri-comp.json" <<'JSON'
+{"name":"pri-test","description":"d","intent":"i","inputs":[{"type":"Artifact","name":"prior","required":false}]}
+JSON
+    local js="$TMPROOT/pri.workflow.js"
+    python3 "$EMIT" --segment "$TMPROOT/pri-seg.json" --composition "$TMPROOT/pri-comp.json" > "$js" || fail "emit failed"
+    # 'prior' is the sequential chain seed (let prior = input.prior) — it must NOT also
+    # be surfaced as a declared input (the magic-skip set must match the emitter's reads).
+    ! grep -Eq 'declaredInputs\[("|.)prior' "$js" || fail "'prior' double-surfaced as a declared input"
+    grep -q 'let prior = input.prior' "$js" || fail "sequential chain seed 'prior' missing"
+}
+
 @test "emitted segments carry no issue-tracker literals (council: claude — strings rot when issues close)" {
     local js; js="$(_emit_pilot_seg0)"
     ! grep -q 'issue #2[89]' "$js" || fail "emitted JS embeds tracker IDs: $(grep -n 'issue #2' "$js")"

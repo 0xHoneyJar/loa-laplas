@@ -448,7 +448,33 @@ def _persona_clause(persona):
     return f"You are {persona}. " if persona else ""
 
 
-def _emit_args_preamble(default_task):
+# Magic arg names the runtime already reads out of `args` directly: the preamble
+# (task/scope), the DAG branch (items/gate_batch_max/stall_s), and the sequential
+# body (prior — the inter-stage handoff carrier, `let prior = input.prior`). A
+# composition's declared inputs[] may re-list these; re-emitting them in the
+# declared-input wiring would shadow / double-surface those bindings, so they are
+# skipped. This tuple MUST stay in sync with every `input.<name>` the emitter reads.
+_MAGIC_INPUT_NAMES = ("task", "scope", "items", "gate_batch_max", "stall_s", "prior")
+
+
+def _declared_input_specs(declared_inputs):
+    """Non-magic composition-declared inputs[] reduced to {name, required} specs —
+    de-duped and name-validated. The magic names (_MAGIC_INPUT_NAMES) are already wired
+    by the preamble / DAG bindings; everything else used to be silently dropped because
+    the emitter only ever read task/scope (issue #55)."""
+    specs, seen = [], set()
+    for d in (declared_inputs or []):
+        if not isinstance(d, dict):
+            continue
+        name = d.get("name")
+        if not isinstance(name, str) or not name or name in _MAGIC_INPUT_NAMES or name in seen:
+            continue
+        seen.add(name)
+        specs.append({"name": name, "required": bool(d.get("required"))})
+    return specs
+
+
+def _emit_args_preamble(default_task, declared_inputs=None):
     """The args→input→task/scope preamble, emitted identically into every
     segment body. ONE source — the iterating/sequential copies drifted once
     (sequential lacked scope; PR #32 council review) and placeholder-task bugs
@@ -458,7 +484,34 @@ def _emit_args_preamble(default_task):
     (bounded unwrap — a single parse reproduces the placeholder fallback one
     encoding layer up), array-shaped payloads (typeof [] === "object" admits
     arrays), and a loud warning that names what actually runs when no task
-    arrives."""
+    arrives.
+
+    Declared inputs[] (issue #55): every composition-declared input name beyond the
+    magic keys is read from `input` into a collision-safe `declaredInputs` OBJECT (never
+    `const <name>`, which would risk JS-identifier + internal-local collisions) and
+    surfaced into the stage prompt via `declaredInputsLine`. A required-but-absent input
+    warns loudly; nothing throws. The wiring stays INSIDE the @preamble sentinels so the
+    preamble-exec tests execute it. For a composition declaring no non-magic inputs the
+    block is inert (empty object, empty line, no logs) — v1-safe."""
+    specs = _declared_input_specs(declared_inputs)
+    declared_block = f"""
+// --- declared inputs[] (composition-declared, non-magic; wired generically) ---
+// Each declared inputs[].name beyond the magic keys (task/scope/items/gate_batch_max/
+// stall_s) is read from `input` into declaredInputs and surfaced into the stage prompt
+// next to TASK/SCOPE. Required-but-absent warns loudly; nothing throws. The object form
+// (not `const <name>`) sidesteps JS-identifier + internal-local collisions.
+const __declaredInputSpecs = {js(specs)};
+const declaredInputs = {{}};
+const __absentRequiredInputs = [], __absentOptionalInputs = [];
+for (const __spec of __declaredInputSpecs) {{
+  if (Object.prototype.hasOwnProperty.call(input, __spec.name) && input[__spec.name] !== undefined) {{
+    declaredInputs[__spec.name] = input[__spec.name];
+  }} else if (__spec.required) {{ __absentRequiredInputs.push(__spec.name); }}
+  else {{ __absentOptionalInputs.push(__spec.name); }}
+}}
+if (__absentRequiredInputs.length) {{ log("WARNING: required declared input(s) absent from args — segment running without them: " + __absentRequiredInputs.join(", ")); }}
+if (Object.keys(declaredInputs).length || __absentOptionalInputs.length) {{ log("declared inputs[] wired: [" + Object.keys(declaredInputs).join(", ") + "]" + (__absentOptionalInputs.length ? "; absent(optional): [" + __absentOptionalInputs.join(", ") + "]" : "")); }}
+const declaredInputsLine = Object.keys(declaredInputs).length ? "DECLARED INPUTS (composition-declared, authoritative task context): " + JSON.stringify(declaredInputs) : "";"""
     return f"""\
 // @preamble-start (sentinels anchor test extraction — keep stable across edits)
 // --- inputs (the `args` global; main loop passes them at invocation) ---
@@ -475,7 +528,7 @@ if (Array.isArray(_args)) {{ log("WARNING: args arrived as an array — expected
 const input = (_args && typeof _args === "object" && !Array.isArray(_args)) ? _args : {{}};
 if (!input.task) {{ log("WARNING: no usable task reached the segment — running on the composition's intent prose as the task"); }}
 const task = input.task || {js(default_task)};
-const scope = input.scope || "unscoped — the work stage infers the minimal blast radius";
+const scope = input.scope || "unscoped — the work stage infers the minimal blast radius";{declared_block}
 // @preamble-end"""
 
 
@@ -1026,6 +1079,7 @@ def _work_stage_js(st, var_suffix, prior_context_js):
       {lrn},
       "TASK: " + JSON.stringify(task),
       "SCOPE: " + JSON.stringify(scope),{extra}
+      declaredInputsLine,
       {js(_return_instruction(st, "Return the structured output per the WORK schema (output + rationale)."))}
     ].filter(Boolean).join("\\n");
     const {var} = await withRetry({js(st['construct'])}, {required}, () => agent({prompt_var}, {{ label: {js(st['construct'])} + ":iter-" + iteration, phase: {js((st.get('name') or st['construct']))}, agentType: {js(_agent_type(st['construct']))}, model: {js(resolved_model)}, schema: {schema} }}));"""
@@ -1119,6 +1173,7 @@ def emit_iterating_body(comp, seg, cycle_id, run_id):
       {lrn},
       "TASK: " + JSON.stringify(task),
       "SCOPE: " + JSON.stringify(scope),
+      declaredInputsLine,
       {ctx_js},
       {js(_return_instruction(st, "Return the structured output per the WORK schema (output + rationale [+ rejected_findings on iteration 2+])."))}
     ].filter(Boolean).join("\\n");
@@ -1150,6 +1205,7 @@ def emit_iterating_body(comp, seg, cycle_id, run_id):
       {(preamble_ctx + ",") if preamble_ctx else ""}
       "TASK (composition-level): " + JSON.stringify(task),
       "SCOPE: " + JSON.stringify(scope),
+      declaredInputsLine,
       "YOUR ITEM — implement EXACTLY this one item. Sibling agents handle the other items in parallel waves; do NOT touch their scope: " + JSON.stringify({{ id: it.id, task: it.task, acceptance: it.acceptance || null }}),
       ((it.depends_on || []).length ? "COMPLETED UPSTREAM DEPENDENCIES (their outputs — build on these, do not redo them):\\n" + JSON.stringify(Object.fromEntries((it.depends_on || []).map((d) => [d, ((done[d] || {{}}).output || "")]))) : ""),
       {js(_return_instruction(wst, "Return the structured output per the WORK schema (output + rationale)."))}
@@ -1289,7 +1345,7 @@ if (dagItems) {
 if (Array.isArray(input.items) && input.items.length) { log("WARNING: args.items ignored — DAG fan-out requires exactly one work stage in the iterate pair (RFC #35)"); }"""
 
     return f"""\
-{_emit_args_preamble(comp.get('intent') or 'No task provided — pass { task, scope } as args.')}
+{_emit_args_preamble(comp.get('intent') or 'No task provided — pass { task, scope } as args.', comp.get('inputs') or [])}
 
 const MAX_ITER = {js(cap)};
 let workState = null;          // mode:persistent carry across iterations
@@ -1330,6 +1386,7 @@ while (iteration < MAX_ITER) {{
     {(preamble_ctx + ",") if preamble_ctx else ""}
     "TASK the work stage was asked to implement: " + JSON.stringify(task),
     "SCOPE: " + JSON.stringify(scope),
+    declaredInputsLine,
     "WORK OUTPUT under review:\\n" + JSON.stringify(workState),
     (workState && workState.dag ? "The work output is a DAG fan-out merge; anchor findings to item ids ([item-id]) where applicable." : ""),
     (iteration >= 2 ? "This is a RE-REVIEW. Accept reasonable declines (the work stage's context is fuller than your scoped view); raise only NEW material defects. If you keep surfacing net-new issues every pass, say so in note (signals prompt drift)." : "First pass: full adversarial scan. Anchor every finding to text (not a line number) and supply an executable fix."),
@@ -1418,6 +1475,7 @@ def emit_sequential_body(comp, seg, cycle_id, run_id):
       {lrn},
       "TASK: " + JSON.stringify(task),
       "SCOPE: " + JSON.stringify(scope),
+      declaredInputsLine,
 {prior}
       {js(_return_instruction(st, "Return the structured output per the WORK schema."))}
     ].filter(Boolean).join("\\n");
@@ -1434,7 +1492,7 @@ def emit_sequential_body(comp, seg, cycle_id, run_id):
         )
     body = "\n".join(blocks)
     return f"""\
-{_emit_args_preamble(comp.get('intent') or 'No task provided — pass { task, scope } as args.')}
+{_emit_args_preamble(comp.get('intent') or 'No task provided — pass { task, scope } as args.', comp.get('inputs') or [])}
 let prior = input.prior || null;
 const outputs = [];
 const handoffSeeds = [];
