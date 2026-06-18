@@ -1,0 +1,158 @@
+schema_version: "1.0"
+kind: workflow
+name: rigorous-review
+description: >
+  Multi-lens review/analysis whose synthesis stage emits a structured bridge-findings
+  contract instead of freeform markdown. The REQUIRED fields (severity, anchor,
+  recommendation per finding; a claims_ledger tagging each claim observed|claimed)
+  force grounding DURING analysis — the format is a contract that forces content, not
+  a formatter bolted on the end. Sibling of tiered-code-review.yaml (Epic A, RFC #56).
+
+intent: >
+  "Review the target across independent lenses, then synthesize a findings report that
+  CANNOT be ungrounded: every finding carries a severity, a text/file:line anchor, and a
+  specific fix, and every claim is tagged observed-vs-claimed in a claims_ledger. Make
+  the rigor mechanical (schema-enforced), not a discipline the agent must remember."
+
+hivemind_labels:
+  product_area: "Loa pipeline"
+  workstream: discovery
+  jtbd:
+    category: personal
+    description: "Reassure Me This Is Safe — review output is grounded by contract, not by vibes"
+  source: team-internal
+
+inputs:
+  - type: Artifact
+    name: target
+    description: Path or artifact to review/analyze
+    required: true
+
+chain:
+  - stage: 1
+    construct: gecko
+    skill: observe
+    reads: [Artifact]
+    writes: [Signal]
+    role: primary
+    notes: >
+      Sense the target: what it claims, its seams, where drift or risk would hide.
+      Emit a Signal — the surface map the deeper lenses anchor to.
+
+  - stage: 2
+    construct: gygax
+    skill: analyze
+    reads: [Signal, Artifact]
+    writes: [Verdict]
+    role: primary
+    notes: >
+      Adversarial systems lens: where does the design fail, what does it over- or
+      under-provision, what is asserted but not proven. Emit a Verdict — findings with
+      a concrete anchor (text or file:line) each, never a bare line number.
+
+  - stage: 3
+    construct: kranz
+    skill: diagnose
+    reads: [Signal, Verdict, Artifact]
+    writes: [Verdict]
+    role: primary
+    notes: >
+      Operational lens: failure modes, blast radius, what breaks under autonomous
+      drivers. Add operational findings to the Verdict with the same anchored shape.
+
+  - stage: 4
+    construct: the-weaver
+    persona: BEAUVOIR
+    skill: synthesize
+    reads: [Signal, Verdict, Artifact]
+    writes: [Artifact]
+    role: primary                  # WORK stage (not craft-gate): a gate would emit the fixed
+                                    # GATE_SCHEMA; a work stage emits THIS stage's output_schema
+                                    # (bridge-findings) via _emit_stage_schema. The schema IS the gate.
+    intelligence_tier: deep
+    notes: >
+      Synthesize the lenses into ONE bridge-findings report. You cannot emit a finding
+      without a dimension, severity, anchor, issue, and recommendation; you must record
+      every claim in the claims_ledger tagged observed (grounded in the target) or
+      claimed (asserted). Distinguish observed from claimed — the ledger is the
+      anti-confabulation primitive. Generous and rigorous (BEAUVOIR).
+    output_schema:
+      type: object
+      required:
+      - summary
+      - findings
+      - claims_ledger
+      additionalProperties: false
+      properties:
+        summary:
+          type: string
+        findings:
+          type: array
+          items:
+            type: object
+            required:
+            - dimension
+            - severity
+            - anchor
+            - issue
+            - recommendation
+            additionalProperties: false
+            properties:
+              dimension:
+                type: string                 # OPEN vocab: code dims OR correctness/completeness/risk/coherence
+              severity:
+                type: string
+                enum: [critical, high, medium, low]
+              anchor:
+                type: string                 # text anchor or file:line — never a bare line number
+              issue:
+                type: string
+              recommendation:
+                type: string
+              decision_trail:
+                type: string                 # optional
+              industry_parallel:
+                type: string                 # optional
+              metaphor:
+                type: string                 # optional
+        positive_callouts:
+          type: array
+          items:
+            type: string
+        claims_ledger:                        # anti-confabulation primitive (REQUIRED)
+          type: array
+          items:
+            type: object
+            required:
+            - claim
+            - grounding
+            - tag
+            additionalProperties: false
+            properties:
+              claim:
+                type: string
+              grounding:
+                type: string
+              tag:
+                type: string
+                enum: [observed, claimed]
+
+outputs:
+  - type: Artifact
+    destination: .run/rigorous-review.json
+    description: Structured bridge-findings report — the source of truth (a renderer projects the BEAUVOIR markdown in sprint-2)
+
+compose_with:
+  - gecko
+  - gygax
+  - kranz
+  - the-weaver
+
+when_to_use: >
+  - Any review/analysis-class compose run where the output must be grounded by contract
+    (severity + anchor + recommendation per finding; observed-vs-claimed ledger)
+  - NOT a default on all /compose — opt-in for review/analysis work only
+
+version: "1.0.0"
+authored_at: "2026-06-18"
+authored_by: verifiable-compose Epic A sprint-1
