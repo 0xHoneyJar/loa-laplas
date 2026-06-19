@@ -28,6 +28,11 @@
 ## Decision Log
 <!-- Major decisions with rationale -->
 
+### verifiable-compose sprint-2 (2026-06-18) — anchor observed/claimed is shape-derived
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| observed-vs-claimed signal for a finding's anchor | Derive from anchor *shape* (cites a file → observed/resolve; no file ref → claimed/skip) | The sprint-1 `bridge-findings` finding schema is `additionalProperties:false` with no `tag` field, so an explicit per-finding tag would fail schema validation upstream. Shape-derivation matches SDD §2.6 ("text-anchor → quoted text in the cited file" / "non-file synthesis tags findings claimed"). `--on-dangling downgrade` exposes the composition-configurable reclassification. Default is fail (SDD §2.6). |
+
 ### decompose-bridge cycle (2026-06-13) — SDD architecture (operator-signed)
 | Decision | Choice | Rationale |
 |----------|--------|-----------|

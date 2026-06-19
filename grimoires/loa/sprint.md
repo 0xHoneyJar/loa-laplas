@@ -39,9 +39,9 @@
 3. **Marker integration test** — assert `post-pr-triage.sh` parses the rendered markers without modification.
 
 **Acceptance Criteria**
-- [ ] **VC-A3**: `rigorous-review` output renders to BEAUVOIR markdown with `bridge-findings` markers that `post-pr-triage.sh` parses unchanged. *(test)*
-- [ ] **[B1]** an `observed` finding with `anchor: foo.ts:999` (no such line) fails the synthesis; a real anchor passes; a `claimed` finding skips resolution. *(test)*
-- [ ] Renderer is deterministic; structured findings remain the source of truth (markdown is a projection).
+- [x] **VC-A3**: `rigorous-review` output renders to BEAUVOIR markdown with `bridge-findings` markers that `post-pr-triage.sh` parses unchanged. *(test)*
+- [x] **[B1]** an `observed` finding with `anchor: foo.ts:999` (no such line) fails the synthesis; a real anchor passes; a `claimed` finding skips resolution. *(test)*
+- [x] Renderer is deterministic; structured findings remain the source of truth (markdown is a projection).
 
 ---
 
