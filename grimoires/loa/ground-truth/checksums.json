@@ -1,0 +1,9 @@
+{
+  "generated_at": "2026-06-19T04:42:44Z",
+  "git_sha": "a37383d7d0c2ca69e30c15402d74f2abcd3dad14",
+  "algorithm": "sha256",
+  "files": {
+    "construct.yaml": "4755264b79ff634d73028b0ba895124c8a0ac2b4800659db5823ba0037903cac",
+    "scripts/clew/VENDORED.md": "4cbfa4a0bd47ffc9980de1ce18d3e57a11805768276b26652dad8b927e10333a"
+  }
+}
