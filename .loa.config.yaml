@@ -88,3 +88,20 @@ flatline_protocol:
 # =============================================================================
 simstim:
   enabled: true
+
+# =============================================================================
+# Model routing override (hounfour — Layer 2, deep-merged over .claude/defaults/model-config.yaml)
+# =============================================================================
+# Operator decision 2026-06-18: Claude Fable 5 is retired/unavailable. The
+# System-zone default pins claude-headless to `extra.cli_model: fable` (set
+# 2026-06-10), so every headless dispatch ran `claude --model fable` → "Fable 5
+# is currently unavailable" → cheval circuit breaker (anthropic/headless) tripped
+# OPEN → Flatline got no claude voice. Re-pin to `opus` (the claude CLI alias for
+# the latest Opus = 4.8) WITHOUT editing the System-zone default.
+hounfour:
+  providers:
+    anthropic:
+      models:
+        claude-headless:
+          extra:
+            cli_model: opus

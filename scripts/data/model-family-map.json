@@ -1,0 +1,27 @@
+{
+  "_doc": "Pinned final_model_id -> vendor FAMILY table for proof-of-operation (verifiable-compose Epic B, RFC #57). FAMILY = vendor, NOT tier: claude-opus + claude-sonnet are BOTH the 'anthropic' family (one family), so min_model_families:2 demands genuine cross-vendor diversity, not opus+sonnet (Flatline B6/B7). Source of truth: .claude/defaults/model-config.yaml provider sections. Drift-guarded by tests/integration/compose-proof.bats [B7]. An id absent from this map resolves to null and CANNOT satisfy a family slot (sprint-4 SB6 fail-closed).",
+  "providers": ["anthropic", "openai", "google"],
+  "model_prefix_family": {
+    "claude-": "anthropic",
+    "gpt-": "openai",
+    "o1": "openai",
+    "o3": "openai",
+    "gemini-": "google"
+  },
+  "known_ids": {
+    "claude-opus-4-8": "anthropic",
+    "claude-opus-4-7": "anthropic",
+    "claude-opus-4-6": "anthropic",
+    "claude-sonnet-4-6": "anthropic",
+    "claude-sonnet-4-5-20250929": "anthropic",
+    "claude-haiku-4-5-20251001": "anthropic",
+    "claude-fable-5": "anthropic",
+    "gpt-5.5": "openai",
+    "gpt-5.5-pro": "openai",
+    "gpt-5.3-codex": "openai",
+    "gemini-2.5-pro": "google",
+    "gemini-2.5-flash": "google",
+    "gemini-3-flash": "google",
+    "gemini-3.1-pro": "google"
+  }
+}

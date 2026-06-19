@@ -171,6 +171,7 @@ OUTPUT_JSON=0
 REQUIRE_EXECUTED=0
 LEGBA=0
 POTEAU=0       # laplas (S3.4b / T4): verify the poteau receipt chain, adoption-aligned
+PROOF_OF_OP=0  # verifiable-compose Epic B (#57): Check 6 proof-of-OPERATION gate (mirrors --legba default-off -> default-on)
 POTEAU_GOVERNANCE=null
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -179,6 +180,7 @@ while [[ $# -gt 0 ]]; do
         --require-executed) REQUIRE_EXECUTED=1; shift ;;
         --legba) LEGBA=1; shift ;;
         --poteau) POTEAU=1; shift ;;
+        --proof-of-operation) PROOF_OF_OP=1; shift ;;
         -h|--help) usage; exit 0 ;;
         -*) echo "ERROR: unknown flag '$1'" >&2; usage >&2; exit 1 ;;
         *) if [[ -z "$RUN_ID" ]]; then RUN_ID="$1"; else echo "ERROR: extra arg '$1'" >&2; exit 1; fi; shift ;;
@@ -537,6 +539,33 @@ if [[ "$POTEAU" == "1" ]]; then
             _verdict "broken_run" 3 "--poteau: receipt chain is broken or splices across runs (IMP-011) — the gate receipts do not form an unbroken single-run chain"
         fi
         # POTEAU_GOVERNANCE already stamped "armed" early; chain integrity verified here.
+    fi
+fi
+
+# -----------------------------------------------------------------------------
+# Check 6 (--proof-of-operation, #57): proof-of-OPERATION. A stage that DECLARED
+# capabilities.verify.operation must leave a gatekeeper-signed, correlated receipt
+# proving >= min_model_families distinct VENDOR families ran. Fail-closed; the
+# verdict table lives in compose-proof-capture.py (same canonicalizer + sig
+# verify the capture used — no drift). Maps its exit to a compose-verify verdict:
+#   3 -> broken_run (forged/uncorrelated/under-family/never-ran)
+#   2 -> degraded_run (attempted, capture failed — retryable deny, never green)
+#   0 -> no declared ops, or all proven (fall through to the normal verdict)
+if [[ "$PROOF_OF_OP" == "1" ]]; then
+    _proof_cap="$SCRIPT_DIR/compose-proof-capture.py"
+    _pubkey_dir="${LOA_AUDIT_KEY_DIR:-$HOME/.config/loa/audit-keys}"
+    if [[ ! -f "$_proof_cap" ]]; then
+        _verdict "broken_run" 3 "--proof-of-operation requested but compose-proof-capture.py absent (cannot prove operation — fail closed)"
+    fi
+    _p6_out="$(python3 "$_proof_cap" check --run-dir "$RUN_DIR" --run-id "$RUN_ID" --pubkey-dir "$_pubkey_dir" 2>&1)"
+    _p6_rc=$?
+    # Default-DENY (Bridgebuilder #1): rc 0 = pass-through; rc 2 = degraded; ANY
+    # other non-zero (3, or a crash/usage exit like 1 or argparse's 2-on-stderr)
+    # is broken_run — NEVER fall through to valid_run. The verifier fails closed.
+    if [[ "$_p6_rc" -eq 2 ]]; then
+        _verdict "degraded_run" 2 "proof-of-operation Check 6 DEGRADED (attempted, capture failed — retryable deny): $_p6_out"
+    elif [[ "$_p6_rc" -ne 0 ]]; then
+        _verdict "broken_run" 3 "proof-of-operation Check 6 FAILED (verifier exit $_p6_rc, fail-closed): $_p6_out"
     fi
 fi
 

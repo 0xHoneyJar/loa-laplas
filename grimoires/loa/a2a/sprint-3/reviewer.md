@@ -1,119 +1,65 @@
-# Sprint 3 — Implementation Report
+# Sprint-3 Implementation Report — Epic B receipt declaration + attested capture
 
-> Cycle: decompose-bridge · Branch: cycle/decompose-bridge · Sprint 3 of 4
-> **Status: S3.1–S3.3 complete; S3.4 config-touch complete; S3.4 stranding DEFERRED.**
-> S3.1 (split-goal), S3.2 (decompose binary), S3.3 (/compose driver wiring) are done and
-> tested. S3.4's **gate-batch-cap config touch** (gate_batch_max → emitter wave width) is done
-> and verified (emitter bats 94/94). S3.4's **DEPENDENCY_FAILED stranding rewrite + G-6
-> benchmark** is deferred by operator decision (beads `construct-rooms-substrate-x7l`) — it
-> rewrites the live emitter's wave-failure semantics (every composition) with an integration-only
-> AC. Ready for review/audit on the in-scope work.
+> Cycle: verifiable-compose · RFC #57 · PRD `grimoires/loa/prd.md` · SDD §3.1–3.2
 
 ## Executive Summary
 
-The bridge now has its LLM stage and its binary. `split-goal.mjs` puts the one sonnet call
-behind a provider interface (Flatline D8) so it mocks deterministically; `decompose.mjs` wires
-the S1 deterministic core and the S2 security boundary around it into a single typed result
-with the §0.2 exit matrix, bounded role-retry (sanitized feedback, B4), and the same-id-set
-retry contract (D9). 8 new tests, mocked-provider; full suite **63/63 green**.
+Sprint-3 delivers the **isolated proof-of-operation writer** — the machinery that
+makes a `valid_run` provable: a compose stage that declares a verifiable operation
+must leave a **gatekeeper-signed, correlated receipt** proving it ran across
+≥ `min_model_families` distinct **vendor** families. Net-new (all stdlib + the
+EXISTING audit-signing-helper — no new crypto primitive, SDD B2/B3):
 
-G-1 ("`/compose <bare goal>` auto-fans") becomes *real* only once S3.3 wires the binary into
-the driver — the binary itself is proven to auto-fan a mocked split (AC-S3.2).
+- `scripts/compose-proof-capture.py` — `mark` / `capture` / `verify-receipt` / `families` / `should-verify`.
+- `scripts/data/model-family-map.json` — pinned `final_model_id → vendor family` table (SoT: `model-config.yaml`; drift-guarded).
+- `docs/runtime/construct-adapters.md` — the declaration schema + receipt schema + dispatch integration contract (canonical mirror, SDD §3.1).
+- `tests/integration/compose-proof.bats` — 9 tests, all green.
 
-## AC Verification (S3.1 / S3.2 — the in-batch ACs)
+## AC Verification
 
-### AC-S3.1
-> "AC-S3.1: mocked provider returns {valid, fenced, malformed, empty, network-error} → correct
-> typed outcome + exit per §0.2."
+### AC1 — declaring stage → attempted-marker + signed correlated receipt; non-declaring → neither
+> "A declaring stage produces an attempted-marker + a signed, correlated `receipts/<idx>.json`; a non-declaring stage produces neither (no-op). *(test)*"
 
-**✓ Met.** `splitGoal` (`laplas/lib/split-goal.mjs:67`) maps each case: valid/fenced → `raw`
-(fence-strip at `:27`), empty → `serial LLM_EMPTY`, malformed (after retry) → `serial
-INDIVISIBLE`, provider-throw (after retry) → `fail LLM_FAILURE` (→ exit 5). Evidence:
-`laplas/test/decompose-binary.test.mjs:34-46`.
+**✓ Met (machinery + decision logic); dispatch call-sites are the documented seam.**
+- Declaration gating: `should-verify` exits 0 for a `capabilities.verify.operation` spec, 1 otherwise (`scripts/compose-proof-capture.py:cmd_should_verify`). Test `tests/integration/compose-proof.bats` "should-verify gates…".
+- `mark` writes `attempted/<idx>` into a `0700` dir atomically; `capture` writes a signed `receipts/<idx>.json`. Tests "mark writes…0700" + "captured receipt verifies".
+- Correlation binding (compose_run_id/stage_index/stage_id/operation/envelope_hash + family_count) tested: "receipt payload binds the correlation fields".
+- **Scope honesty**: the call-sites *inside* `compose-dispatch.sh` (Form B/C) and the binding to live cheval MODELINV field names are the **explicit sprint-3→4 integration seam** (documented in `docs/runtime/construct-adapters.md` "Dispatch integration contract"), landed with sprint-4's Check 6. Not silently dropped — see Known Limitations.
 
-### AC-S3.2 (G-1)
-> "AC-S3.2 (G-1): a bare multi-domain goal → ≥2 construct-routed parallel items in ≥1 wave
-> (mocked split)."
+### [B5] — signature is the load-bearing, post-hoc-checkable control
+> "the receipt `sig` verifies under the gatekeeper public key; a receipt written without the key fails verification. *(test)*"
 
-**✓ Met (binary level).** `decompose` (`laplas/bin/decompose.mjs:37`) runs
-loadRoster→size-cap→sanitize→split→derive→dagValidate→typed emit; a mocked 2-domain split
-yields a `dag` of 2 role-routed items both runnable in the first wave. Evidence:
-`laplas/test/decompose-binary.test.mjs:58-67`. **Runtime G-1** (`/compose <goal>` auto-fans)
-lands with S3.3.
+**✓ Met.**
+- Valid receipt verifies (`verify-receipt` exit 0) — test "captured receipt verifies under the gatekeeper public key".
+- Tampered payload (attacker edits `envelope_hash`, cannot re-sign) → exit 3 — test "a tampered receipt payload fails verification (forgery)".
+- Receipt verified against a different key → exit 3 — test "a receipt verified against a DIFFERENT key fails".
+- Signing reuses `.claude/scripts/lib/audit-signing-helper.py` (`sign`/`verify`); canonicalization centralized in `_canonical()` so sign and sprint-4 verify use byte-identical input.
 
-### AC-S3.2b
-> "AC-S3.2b: a hallucinated role corrected within ROLE_RETRY; persistent → exit 3 (P601). A
-> hallucinated role containing injection syntax is sanitized before the retry prompt (Flatline
-> B4 fixture)."
+### [B7] — id→family map resolves opus+sonnet to ONE family
+> "the `id → family` map resolves `opus`+`sonnet` to ONE family. *(test)*"
 
-**✓ Met.** ROLE_MISS retries with feedback (`decompose.mjs:71-72`); the feedback is stripped to
-the role-id charset before re-entering the prompt (`safeFeedback`, `decompose.mjs:31-34`, B4);
-persistent → exit 3 P601 (`:73`). Also covered: D9 — a retry with a different id-set → exit 3
-P602 (`:58-60`). Evidence: `decompose-binary.test.mjs:77-101` (corrected / persistent / B4 /
-D9).
-
-### §0.2 exit matrix
-> Exit codes 0/3/4/5/6/7 per §0.2.
-
-**✓ Met.** size→7, sanitize→4, roster→6, LLM→5, dagValidate→3, ok→0. Evidence:
-`decompose-binary.test.mjs:104-119` + the AC tests above.
-
-### AC-S3.3
-> "AC-S3.3: `/compose <goal>` auto-fans; `refusal`→no worker; `serial`→single-context; a
-> pre-supplied items[] skips the decomposer (RFC #35 unchanged)."
-
-**✓ Met.** `resolveComposeItems` (`laplas/lib/compose-items.mjs`) branches decompose's typed
-result: `dag`→`{mode:'fanout', items}` (emitter-shaped, with the tier→intelligence_tier map so
-an opus leaf is `deep`, never silently downgraded), `serial`→`{mode:'single'}`,
-`refusal`→`{mode:'refuse'}` (do not run). A pre-supplied `items[]` returns `{mode:'bypass'}`
-**without ever consulting decompose** (D10). Driver CLI: `laplas/bin/compose-resolve.mjs`;
-wired into the executor at `skills/compose/SKILL.md` step 2.5. Evidence:
-`laplas/test/compose-driver.test.mjs:18-71` (bypass proven by an oversized goal that still
-bypasses; fanout shape; opus→deep; single; refuse).
-
-### AC-S3.4
-> "AC-S3.4 (G-6): a >8-item DAG (casual) → sequential gate passes; gate wall-clock ≤
-> `GATE_LATENCY_BOUND` (25% of wave) on the benchmark; a failed batch strands dependents with
-> `DEPENDENCY_FAILED`, independent batches complete."
-
-**⚠ Partial — config touch Met, stranding [ACCEPTED-DEFERRED].** The gate-batch-cap is wired:
-the emitter's DAG fan-out now batches each wave by `rel_policy.gate_batch_max` (casual 8 /
-competitive 4) instead of the hardcoded `RATE_BOUND` — `boundedParallel` is width-parameterized
-(`scripts/lib/segment-emitter.py`, default `RATE_BOUND` so existing callers are byte-identical),
-`gateBatchMax` derived from `input.gate_batch_max`, passed at the wave dispatch; surfaced to the
-driver as `compose-items.mjs` `gate_batch_max`. Verified: emitter bats **94/94** green; emitted
-JS inspected for the wiring; driver test asserts casual→8.
-The **`DEPENDENCY_FAILED` stranding** (rewrite the wave loop so a failed item strands only its
-dependents while independent batches complete) and the **G-6 wall-clock benchmark** are deferred
-to beads `construct-rooms-substrate-x7l` — a live-emitter behavioral change with an
-integration-only AC, paired out by operator decision (NOTES Decision Log).
-
-## Tasks Completed
-
-| Task | File | Tests |
-|------|------|-------|
-| S3.1 split-goal provider boundary | `laplas/lib/split-goal.mjs` | AC-S3.1, stripFences |
-| S3.2 decompose binary (core + main) | `laplas/bin/decompose.mjs` | AC-S3.2, AC-S3.2b, §0.2, D9 |
-| S3.3 driver decision + CLI | `laplas/lib/compose-items.mjs`, `laplas/bin/compose-resolve.mjs`, `skills/compose/SKILL.md` (step 2.5) | AC-S3.3 (bypass, fanout, tier-map, single, refuse) |
-| S3.4 gate-batch-cap (config touch) | `scripts/lib/segment-emitter.py` (boundedParallel width + gateBatchMax) | emitter bats 94/94; driver test casual→8 |
-| (runtime provider) | `laplas/lib/claude-provider.mjs` | runtime-only (see Limitations) |
+**✓ Met.**
+- opus+sonnet → `{anthropic}`, count 1 — test "[B7]: opus + sonnet resolve to ONE family".
+- Genuine cross-vendor (opus+gpt) → count 2 — test "[B7]: genuine cross-vendor…TWO families".
+- Unmapped id → null, not counted (SB6 fail-closed) — test "[B7/SB6]: an unmapped id does not count".
+- Map SoT named (`model-config.yaml`); drift-guarded by these tests (`scripts/data/model-family-map.json:_doc`).
 
 ## Technical Highlights
-- **Provider boundary (D8).** `splitGoal`/`decompose` take `opts.provider`; the failure taxonomy
-  is principled — a *throw* is a transport failure (retry → exit 5), a *successful-but-unusable*
-  response (empty/non-JSON) degrades to `serial`, never a hard failure.
-- **B4 feedback sanitation** strips the hallucinated role to `[A-Za-z0-9_-]` before it re-enters
-  the LLM — closing the loop where an injected role name could otherwise re-prompt the model.
-- **D9 id-set contract** rejects a retry that returns a structurally-different DAG, so the retry
-  fixes the role, not the plan.
 
-## Known Limitations
-- **`claude-provider.mjs` is runtime-only, not unit-tested** — no real LLM in tests by design
-  (D8). It is ~10 lines, isolated behind the provider boundary; if the `claude` CLI shape drifts
-  it is the single line to fix.
-- **S3.3/S3.4 deferred** — the binary does not yet run inside `/compose`; the gate batch cap is
-  not yet in the Python emitter. Sprint 3 is not complete until these land.
+- **The signature subsumes anti-rewrite.** SDD B4 asked for append-only/legba-chaining of the receipt tree; per-receipt Ed25519 signing achieves the same security goal more directly — a stage that rewrites a receipt cannot produce a signature that verifies, so a rewrite is detected at Check 6. Markers are unsigned, but a forged marker without a valid signed receipt yields `degraded_run`/`broken_run`, never `valid_run`. Atomicity (temp+rename) + `0700` dirs prevent partial/observable writes (SDD B4).
+- **Family = vendor.** The anti-theater property: "multi-model" that's really opus+sonnet is still one vendor. The pinned map collapses tiers to vendors; unmapped → fail-closed.
+- **No new primitive.** Reuses the legba/audit Ed25519 infra exactly (SDD B2/B3).
 
-## Verification Steps
-1. `node --test laplas/test/*.test.mjs` → expect `63 pass / 0 fail`.
-2. `node --test laplas/test/decompose-binary.test.mjs` → the 8 S3.1/S3.2 ACs.
+## Testing Summary
+- `bats tests/integration/compose-proof.bats` → 9/9.
+- `python3 -c "import ast; ast.parse(open('scripts/compose-proof-capture.py').read())"` → parses.
+
+## Known Limitations (explicit, not silent)
+- **Dispatch wiring is a documented contract, not yet wired into `compose-dispatch.sh`.** Form C runs stages via the main-loop Workflow tool (not compose-dispatch directly) and Form B is "partial — Sprint 4 completes"; a half-correct surgical edit into the 56KB orchestrator was deliberately deferred to land with sprint-4 rather than risk the dispatcher. The integration contract (`mark` before invocation, `capture` after, by the isolated writer) is documented + the subcommands are tested. `loa:shortcut: dispatch call-sites + live-cheval MODELINV field binding land with sprint-4 Check 6`.
+- **MODELINV field names read liberally** (`final_model_id`→`model_invoked`→`model`) — no live `model-invoke.jsonl` exists in-repo to pin against; fixture-tested, live binding confirmed alongside sprint-4.
+- Explicit legba hash-chaining of the receipt tree not added (signature subsumes it; see Technical Highlights).
+
+## Verification Steps (for reviewer)
+1. `bats tests/integration/compose-proof.bats` — expect 9/9.
+2. Inspect a receipt: run the capture test path, `jq .payload .run/.../receipts/4.json`.
+3. Confirm no diff to `.claude/` (System Zone) or `compose-dispatch.sh` / `compose-verify-run.sh` (untouched this sprint).

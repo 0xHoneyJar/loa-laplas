@@ -1,234 +1,225 @@
-# Software Design Document — The Decomposition Bridge
+# Software Design Document — Verifiable Compose
 
-> **Cycle**: decompose-bridge · **Repo**: loa-laplas · **Date**: 2026-06-13 · **Branch**: cycle/decompose-bridge
-> **Traces**: `grimoires/loa/prd.md` (hardened, Flatline-integrated). Every component maps to a PRD FR (§10).
-> **Architecture decisions (operator-signed, 2026-06-13)**: decomposer = **lean laplas binary** (`laplas/bin/decompose.mjs`); gate-blind = **derived from the composition's own manifests**; decomposition LLM call = **sonnet**. (NOTES.md Decision Log.)
-> **Hardened by Flatline** (3-model, 2026-06-13, 85% agreement): 12 blockers + 8 high-consensus integrated — see §11 (flatline log). Result: `grimoires/loa/a2a/flatline/sdd-review.json`.
-> **Runtime scope**: the landed compose-speed fan-out substrate (RFC #35, on main). `finn` parked.
+> **Cycle**: verifiable-compose · **Repo**: loa-laplas · **Date**: 2026-06-18
+> **PRD**: `grimoires/loa/prd.md` · **Briefs**: `grimoires/loa/context/arch-brief-bridge-findings-contract.md` (#56), `arch-brief-proof-of-operation.md` (#57)
+> **Design principle**: *a compose stage's claim must carry checkable evidence.* Two tracks under one principle — Epic A makes the **output** checkable (format forces content); Epic B makes the **operation** checkable (record-gate forces honesty). They share no code; they ship independently, A first.
 
 ---
 
 ## 1. Architecture Overview
 
-The bridge is a **pre-pass** in front of the existing RFC #35 fan-out. The `/compose` driver calls one new lean binary; everything downstream is unchanged.
+The Form C compose runtime today has three relevant surfaces:
+
+| Surface | File | Role |
+|---------|------|------|
+| Segment emitter | `scripts/lib/segment-emitter.py` | compiles a composition stage → an emitted `.workflow.js` agent prompt; already validates a stage's `output_schema` and retries-on-miss (`:945`, V1 INLINE-OBJECT-ONLY) |
+| Dispatcher | `scripts/compose-dispatch.sh` | drives the run; writes the manifest, room packets, envelopes; folds per-stage state into `.run/compose/<run>/` |
+| Verifier | `scripts/compose-verify-run.sh` | the "proof-of-run gate (FIRST tooth)" — Checks 1–5 (manifest/segments/orchestrator/envelopes/`--legba`), all custody integrity; verdicts `valid_run` (exit 0) / `compiled_run` (exit 2) / `broken_run` (exit 3) via `_verdict` |
+
+**Epic A** adds an *output contract* on top of the emitter's existing schema enforcement — no emitter change. **Epic B** adds a *Check 6* to the verifier plus receipt capture in the dispatcher. Neither touches the other's surface.
 
 ```
-/compose <goal> [--module M.json] [--run-mode interactive|automated]
-  │
-  ├─ laplas/bin/decompose.mjs ─────────────────────── THE BRIDGE (new, Phase 1)
-  │     0. loadRoster(module)        ── §4 roster contract (validate or exit 6)
-  │     1. sanitizeGoal(goal)        ── §5 advisory pre-flight (stdin to detector)
-  │     2. splitGoal(goal, roster)   ── ONE sonnet call, hardened (retry/schema/fences)
-  │     3. deriveRouting(raw, M)     ── domain · centrality · gate_coverage ·
-  │                                      opus_predicate→tier · rel_policy · confidence
-  │     4. dagValidate(items, roster)── cycle/dangling/dup · role↔roster (retry-w-feedback) ·
-  │                                      one-room-one-domain · confidence floor
-  │     5. emit                      ── DAG  |  serial-fallback{reason}  |  refusal{reason}
-  │
-  └─ scripts/lib/segment-emitter.py (RFC #35) ──────── UNCHANGED
-        resolves topology → waves → fan-out workers → single craft-gate (batch-capped)
-        stall path: stall_s watchdog → GECKO diagnose → named_gap → stallExit(run_mode)
+Epic A (output-side)            Epic B (operation-side)
+ bridge-findings schema          construct.yaml: verify:{op,receipt,min_model_families}
+   │ (output_schema, reused)        │ declare
+   ▼                                ▼
+ BEAUVOIR synthesis stage        skill emits MODELINV receipt (cheval-council.sh, exists)
+   │                                │ emit
+   ▼                                ▼
+ rigorous-review.yaml            compose-dispatch.sh → .run/compose/<run>/receipts/<stage>.json
+   │ → thin renderer                │ capture (legba custody)
+   ▼                                ▼
+ BEAUVOIR markdown + markers     compose-verify-run.sh Check 6 (fail-closed)
+ (post-pr-triage.sh parses)        no/under-min receipt → broken_run (exit 3)
 ```
 
-**Design invariant**: the interchange is **`args.items[]` (data)** — the emitter never imports the decomposer, and vice-versa (PRD §5 seam).
+---
 
-**Two halves, by determinism**: `splitGoal` is the *only* nondeterministic step (one LLM call). Everything after — routing derivation, validation, tier placement — is **deterministic code** over the raw split + the composition manifests. This is what makes the opus_predicate and rel_policy *computable* (Flatline-PRD B2/B9), not LLM-judged. **Corollary (Flatline-SDD)**: because the one nondeterministic step can fail or hallucinate, C2 and C8 carry explicit failure-handling (retry-with-feedback, schema validation, fence-stripping, typed exit codes) — see C2/C8.
+## 2. Epic A — bridge-findings output contract (owner: the-weaver / BEAUVOIR)
+
+### 2.1 The schema artifact
+A reusable inline JSON-schema **object** (V1 requires `type: object` with named properties; `$ref` is not yet resolvable, so it is referenced inline per composition until a resolver exists).
+
+```yaml
+output_schema:
+  type: object
+  required: [summary, findings, claims_ledger]
+  properties:
+    summary: {type: string}
+    findings:
+      type: array
+      items:
+        type: object
+        required: [dimension, severity, anchor, issue, recommendation]   # REQUIRED forces grounding
+        properties:
+          dimension:      {type: string}                                  # OPEN vocab (code dims OR correctness/completeness/risk/coherence)
+          severity:       {type: string, enum: [critical, high, medium, low]}
+          anchor:         {type: string}                                  # text anchor or file:line, never a bare line number
+          issue:          {type: string}
+          recommendation: {type: string}
+          decision_trail:    {type: string}    # optional
+          industry_parallel: {type: string}    # optional
+          metaphor:          {type: string}    # optional
+    positive_callouts: {type: array, items: {type: string}}
+    claims_ledger:                              # anti-confabulation primitive
+      type: array
+      items:
+        type: object
+        required: [claim, grounding, tag]
+        properties:
+          claim:     {type: string}
+          grounding: {type: string}
+          tag:       {type: string, enum: [observed, claimed]}
+```
+
+The REQUIRED fields are the design: the emitter's existing `_validated_output_schema` + retry-on-miss (`segment-emitter.py:945`) makes them mechanically unskippable. `_assert_safe_schema_keys` (`:927`) already guards the keys.
+
+### 2.2 BEAUVOIR synthesis stage
+The final synthesis stage carries `persona: BEAUVOIR` (already shipped at `.loa/.claude/skills/bridgebuilder-review/resources/BEAUVOIR.md`) and the `output_schema` above, so the "generous and rigorous" dimensions are demanded *during* analysis, not at a final render.
+
+### 2.3 `rigorous-review.yaml` composition
+A sibling of `compositions/experimentation/tiered-code-review.yaml`, same shape (`schema_version`/`kind: workflow`/`name`/`intent`/`inputs[]`/`chain[]`):
+```
+chain:
+  - N analysis lenses (configurable: gecko / gygax / kranz / fagan / domain constructs) → each writes Signal/Verdict
+  - terminal synthesis stage: persona BEAUVOIR, output_schema: <bridge-findings>, writes a structured Artifact
+```
+
+### 2.4 The renderer
+A thin, deterministic renderer projects the structured findings into the BEAUVOIR markdown house-style, wrapping the machine block in `<!-- bridge-findings-start -->` / `<!-- bridge-findings-end -->` (already parsed by `post-pr-triage.sh` — zero net-new consumer code).
+
+### 2.5 No emitter change
+Because the schema is an inline object, the emitter path (`_validated_output_schema`, validate-and-retry) handles it as-is. Epic A's net-new is exactly: the schema artifact, the registered composition, the renderer, and the anchor-resolution step (§2.6).
+
+### 2.6 Anchor resolution — presence ≠ grounding (PRD FR-A1 / Flatline B1)
+The `output_schema` proves a finding *has* an `anchor`; it cannot prove the anchor is *real* (`anchor: foo.ts:999` validates identically to a true reference). A post-validation step in the renderer/consumer path resolves every `observed`-tagged finding's `anchor` against the reviewed tree:
+- `file:line` form → the path must exist and have that line; a text-anchor → the quoted text must be found in the cited file.
+- A dangling `observed` anchor **fails the synthesis** (or downgrades the finding to `claimed` with a logged reason — composition-configurable, default fail).
+- Non-file synthesis (strategy/research) tags findings `claimed`, which skip resolution — so the step never forces a code lens onto non-code work.
+- **[Flatline H7]** The emitter's retry-on-miss is bounded; on exhaustion the synthesis fails or emits an explicitly `partial` result, never an ungrounded finding that satisfies the schema by accident.
 
 ---
 
-## 2. Components
+## 3. Epic B — proof-of-operation gate (owner: kranz / poteau + protocol)
 
-| # | Component | File | PRD FR |
-|---|-----------|------|--------|
-| C1 | Decomposer binary (entry) | `laplas/bin/decompose.mjs` | FR-1 |
-| C2 | Goal splitter (the hardened LLM call) | `laplas/lib/split-goal.mjs` | FR-1 |
-| C3 | Routing derivation | `laplas/lib/derive-routing.mjs` | FR-2, §9 |
-| C4 | rel_policy compiler | `laplas/lib/rel-policy.mjs` | FR-4, §9 |
-| C5 | gate-coverage / gate_blind | `laplas/lib/gate-coverage.mjs` | FR-2, §9 |
-| C6 | centrality / high_centrality | `laplas/lib/centrality.mjs` | FR-2, §9 |
-| C7 | opus_predicate | `laplas/lib/opus-predicate.mjs` | FR-2, G-3 |
-| C8 | dagValidate (extended, retry-aware) | `laplas/lib/dag-validate.mjs` | FR-1, FR-2 |
-| C9 | named_gap schema + GECKO sense | `laplas/schema/named-gap.json` | FR-3 |
-| C10 | Phase-1 stall: **minimal watchdog + exit** | `laplas/lib/stall-watch.mjs` + `stall-exit.mjs` | FR-4.5 |
-| C11 | prompt boundary (sentinel + sanitizer) | `laplas/lib/prompt-boundary.mjs` | §5.1 |
-| C12 | gate batch cap | emitter config via rel_policy | §5, G-6 |
-| C13 | summon dials (Phase 2, deferred) | `dungeon.budgets` additive | FR-5 |
+### 3.1 Receipt-contract declaration (PRD FR-B1)
+A construct/stage declares its verifiable operation in `construct.yaml` capabilities (mirrored in `docs/runtime/construct-adapters.md`):
+```yaml
+capabilities:
+  verify:
+    operation: multimodal-review
+    receipt: model-invoke.jsonl
+    min_model_families: 2          # FAMILIES, not final_model_ids (Flatline B6)
+```
+**Normalized receipt schema (Flatline B7).** Each receipt record is `{provider, model_family, final_model_id, invocation_id, timestamp, compose_run_id, stage_index, stage_id, operation, envelope_hash}`. The `final_model_id → model_family` map is a **pinned table** (its source named in `docs/runtime/construct-adapters.md`, drift-guarded by a test) so `opus`+`sonnet` resolve to one family and a 2-family declaration cannot be satisfied by two same-family models. Fixtures cover aliases, provider gateways, repeated same-family models, and renamed models.
 
-### C1 — `decompose.mjs` (the binary)
-CLI: `decompose.mjs --goal <str> --module <module.json> --run-mode <interactive|automated> [--rel casual|competitive]`.
-Stdout is exactly one of three typed results (**Flatline-SDD B5** — degradation ≠ refusal):
-- **DAG**: `{ kind: "dag", items: [<item>…], rel_policy, decomposition_confidence }`
-- **Serial fallback** (safe, runnable): `{ kind: "serial", items: [<single spanning item>], fallback_reason: "LOW_CONFIDENCE|INDIVISIBLE|LLM_EMPTY" }` — the goal still runs, single-context.
-- **Refusal** (no runnable item; driver MUST handle): `{ kind: "refusal", refusal_reason: "SANITIZE_REJECT|DOMAIN_AMBIGUOUS|ROSTER_INVALID|LLM_FAILURE" }` — emits NO item; the driver decides (abort / re-goal).
+### 3.2 Receipt capture (dispatcher, PRD FR-B2 / FR-B5)
+`compose-dispatch.sh` folds the receipt into the custody tree at `.run/compose/<run_id>/receipts/<stage_index>.json`. Four properties the original "copy-with-binding" glossed over:
+- **Isolated writer (FR-B5).** The receipt is written by the **cheval / MODELINV emitter** — the same isolated process that issues the provider calls and reads back the provider-returned id — **not** by the stage prompt/agent under verification. `final_model_id` is the *provider-returned* id, not a string the stage chose.
+- **Verifier-checkable attestation (SDD B2/B3 — the load-bearing addition).** Write-time isolation alone is *not verifiable post-hoc*: Check 6 reads a file, and the threat actor (a stage that can write the receipt path) can write a well-formed receipt too. So each record carries a **detached Ed25519 signature** (`receipt.sig`) produced by the isolated writer with the **gatekeeper key the stage cannot access** — the SAME key/infra legba already uses for the audit chain (`audit_emit_signed`; no new primitive). The signed payload binds `{provider, model_family, final_model_id, invocation_id, provider_response_hash, compose_run_id, stage_index, stage_id, operation, envelope_hash}`. Optionally (provider permitting) the record also carries the **provider-returned response-id + `provider_response_hash`** for an independent cross-check. The distinction that makes the gate real: a forged receipt can copy field *values* but cannot produce a signature that verifies under the gatekeeper public key.
+- **Mandatory correlation (FR-B2 / B4).** The signed payload binds `compose_run_id` + `stage_index` + `stage_id` + `operation` + `envelope_hash`. A receipt that does not correlate exactly to the stage it claims to prove is rejected (defeats cross-stage / cross-run replay).
+- **Isolation controls (SDD B4).** `.run/compose/<run>/receipts/` and `…/attempted/` are created `0700`, owned by the cheval process; writes are **atomic** (temp-file + `rename`); records are **append-only / hash-chained** under legba so a stage cannot rewrite a marker or receipt before verification. Check 6 treats a receipt whose ownership/mode is wrong, or whose signature/chain fails, as `broken_run` (not a pass).
 
-Exit codes (typed, never silent): `0` dag|serial · `3` dagValidate fail after retry (role↔roster/cycle, P601 voice on stderr) · `4` sanitize hard-block · `5` LLM_CALL_FAILURE · `6` ROSTER_INVALID.
+### 3.3 Check 6 — proof-of-operation (verifier, fail-closed; PRD FR-B3)
+A new check in `compose-verify-run.sh`, sibling to Checks 1–5, gated behind `--proof-of-operation` (default-off → default-on once stable, mirroring `--legba`). The **operation-attempted marker** (`.run/compose/<run>/attempted/<stage_index>` — written by the dispatcher *before* model invocation, independent of the receipt write) is what separates "infra flake" from "operation never ran":
+```
+for each stage S in the manifest that DECLARED verify.operation:
+    marker  = .run/compose/<run>/attempted/<S.index>          # emitted pre-invocation
+    receipt = .run/compose/<run>/receipts/<S.index>.json
+    if marker absent  and receipt absent → _verdict broken_run 3   "stage S <op>: operation never ran"        # FAIL
+    if marker present and receipt absent → _verdict degraded_run 2 "stage S <op>: attempted, capture failed"  # DEGRADED (retryable deny)
+    # receipt present → validate it, IN THIS ORDER (cheapest-fail-first):
+    if receipt.sig does NOT verify under the gatekeeper public key → broken_run 3 "receipt signature invalid"          # FR-B5 — THE check
+    if receipt dir ownership/mode wrong OR legba chain broken      → broken_run 3 "receipt tamper / isolation breach"  # SDD B4
+    if signed payload does NOT correlate (compose_run_id/stage_index/stage_id/envelope_hash) → broken_run 3 "correlation mismatch"  # FR-B2/B4
+    if provider_response_hash present AND ≠ envelope's recorded hash → broken_run 3 "provider-response cross-check failed"
+    families = distinct model_family over the receipt (pinned id→family map)            # FR-B1/B6/B7
+    if families < S.min_model_families                           → broken_run 3 "<families> family/families < required <min>"
+    if envelope.verdict ≠ receipt.verdict                       → broken_run 3 "verdict/receipt mismatch"
+```
+The signature check is the load-bearing one: it is what the verifier *can* check post-hoc (SDD B2/B3) — a hand-written receipt copies values but cannot forge a gatekeeper-key signature. Reuses `.loa/tools/modelinv-coverage-audit.py` for per-family extraction and the **existing legba Ed25519 infra** (`audit_emit_signed` / `legba verify`) for the signature — **no new hash-chain primitive**.
 
-### C2 — `split-goal.mjs` (the hardened LLM call) — Flatline-SDD B4/B7/B8/B12
-- Model: **sonnet** (operator-signed). One logical call, with a bounded retry budget.
-- **Failure modes (B8)**: network error / rate-limit / empty / non-JSON each handled. Retry budget: **1 retry, 2s backoff, then fast-fail** → exit 5 with structured stderr. An empty or non-JSON response after retry is treated as `INDIVISIBLE` → serial fallback (not an unhandled throw).
-- **Output parsing (B4)**: strip markdown fences, then **schema-validate** the raw output (Zod, or a hand-rolled validator if we avoid the dep) against the raw-item schema `[{ id, task, depends_on[], role, domain_hint, confidence }]`. Unparseable → serial fallback.
-- **Confidence is telemetry, not the gate (B7)**: the LLM's self-reported `confidence` is recorded for the Phase-1.5 calibration set but does NOT by itself gate fan-out. The *gating* confidence is computed by deterministic checks in C3/C8 (domain resolved? role in roster? dag acyclic? single-domain?). Model self-confidence and validator confidence are separate fields.
-- The goal + emitted tasks are wrapped by C11's sentinel; the model is instructed the goal is untrusted data (§5).
+### 3.4 Verdict semantics (PRD FR-B3 table; DEGRADED taxonomy resolved — SDD B1)
+The existing taxonomy is `valid_run`(0) / `compiled_run`(2) / `broken_run`(3). DEGRADED slots in as a **new verdict string `degraded_run` at exit 2** — the "not proven, *retryable*" deny class (sibling of `compiled_run`), distinct from `broken_run`(3) "integrity-broken / forged". Both are non-zero (never a pass). `_verdict` gains the `degraded_run` string + a `degraded: true` JSON flag so downstream automation branches deterministically; every consumer that switches on the verdict adds a `degraded_run` arm (treated as a retryable deny, not a hard stop).
 
-### C3 — `derive-routing.mjs` (deterministic)
-Per raw item, compute (§9): `domain` (resolve `domain_hint` to exactly one registry entry or flag DOMAIN_AMBIGUOUS) · `centrality` (C6) · `gate_coverage`/`gate_blind` (C5) · `tier` via `opus_predicate` (C7) · `rel_policy` ref · `decomposition_confidence` = the *validator* confidence (deterministic), with model self-confidence carried separately as telemetry. Pure, testable.
+| attempted-marker | receipt | verdict | exit |
+|---|---|---|---|
+| absent | absent | `broken_run` — operation never ran | 3 |
+| present | absent / unreadable | **`degraded_run`** — attempted, capture failed (retryable; *not* a forged pass) | 2 |
+| present | signature invalid / tampered / uncorrelated | `broken_run` — forged or replayed | 3 |
+| present | valid sig, < min families | `broken_run` — under-family | 3 |
+| present | valid sig, ≥ min families, correlated | `valid_run` | 0 |
 
-### C4 — `rel-policy.mjs`
-`relPolicy(rel, run_mode)` → `{ tier_default, gate_density, gate_batch_max, confidence_floor, stall_s, summon_generosity, summon_approval }`.
-- `casual` → `{ sonnet, sparse, 8, 0.5, 90, generous, auto }`
-- `competitive` → `{ sonnet, dense, 4, 0.7, 45, tight, break_glass }`
-- **run_mode override (Flatline-PRD DISPUTED-1)**: `automated` resolves `summon_approval` non-interactively — `casual`→`auto` (within budget); `competitive`→`fail` (never operator-wait). REL never compiles to a headless deadlock.
+A stage that declares **no** verifiable op is unaffected (Check 6 is a no-op) — fully back-compatible. `degraded_run` is never folded into `valid_run`, so a flaky capture neither silently blocks a legitimate run nor passes a missing operation.
 
-### C5 — `gate-coverage.mjs` (derive-from-composition — operator-signed)
-`gateCoverage(dungeon, party)` → the SET of domains a *declared* gate in THIS composition can re-check, from gate rooms + council/reviewer seats. Additive manifest field: a gate room/seat declares `covers_domains: [..]`. `gateBlind(domain) = domain ∉ gateCoverage`.
-- **Back-compat default (Flatline-SDD B2 — corrected)**: an undeclared gate covers its **room's declared domain ONLY — never `["*"]`**. A generic craft-gate with no domain declaration covers the **empty set**, so undeclared-domain leaves are gate-blind → opus-tiered. Conservative: the failure mode is over-provision (opus where maybe unneeded), never under-gate (cheap where unverifiable). A migration test asserts `code-implement-and-review` declares its gate's `covers_domains` so it stays cheap.
+### 3.5 Automated-driver non-deadlock path (carried from decompose-bridge)
+Under `/run`, `/simstim`, or cron, a Check-6 FAIL surfaces a **non-deadlocking handoff** (queued to the run-mode failure channel / `.run/bridge-pending-bugs.jsonl`-style), never a blocking prompt. The gate denies the run; it does not hang the automated driver.
 
-### C6 — `centrality.mjs`
-`centrality(item, dag)` = out-degree + transitive-downstream-dependent count. `highCentrality(node) = centrality ≥ centrality_threshold` (default 2). Pure graph metric (Flatline-PRD B2).
-
-### C7 — `opus-predicate.mjs`
-`opusPredicate(item) = gateBlind(item.domain) || highCentrality(item.node)` → `tier = opus` else `rel_policy.tier_default`. Drives G-3. The gate's own tier is separate from leaf tiers.
-
-### C8 — `dag-validate.mjs` (extended, retry-aware) — Flatline-SDD B12
-Existing: dup id, unknown `depends_on`, cycle → fail-loud. **Added**:
-- **role↔roster with bounded retry (B1-PRD + B12-SDD)**: every `item.role` ∈ roster. A miss is likely an LLM hallucination, so instead of an immediate exit 3: feed the specific failure (`role 'X' not in roster {…}`) back to C2 for a **bounded correction retry (max 2)**; only after the budget is spent → exit 3 with the P601 refusal (recruit-or-re-quest). Never dispatch a leaf to nobody.
-- **one-room-one-domain (HC2-PRD)**: `item.domain` resolves to exactly one entry, else DOMAIN_AMBIGUOUS → refusal (not serial — ambiguous routing is unsafe to run).
-- **confidence floor**: validator confidence below `rel_policy.confidence_floor` → serial fallback.
-- **bounds**: `1 ≤ items ≤ N_max` (16); 0 items → refusal (LLM_EMPTY handled in C2).
-
-### C9 — `named-gap.json` + GECKO sense
-Schema: `{ item_id, missing_role, evidence, recommendation: "re-quest"|"summon:<role>"|"escalate", confidence }`. The stable **FR-3↔FR-4.5↔FR-5 interface** (Flatline-PRD HC6). Phase 1 ships the schema + GECKO `diagnose` emitting it.
-
-### C10 — Phase-1 stall: minimal watchdog + exit (the keystone) — Flatline-SDD B1
-**Ships as one atomic unit in Phase 1** so the exit is not dead code:
-- `stall-watch.mjs` — a *minimal* `stall_s` watchdog: a leaf producing no progress-bearing event for `rel_policy.stall_s` wall-seconds fires the stall. (Phase 1.5 enriches this into full loiter telemetry; Phase 1 needs only the trigger.)
-- `stall-exit.mjs` — `stallExit(named_gap, run_mode)`: `interactive` → surface `named_gap`, **escalate to operator** (kaironic boundary); `automated` → **fail the item loud** (`STALLED_NO_SUMMON` incident + named_gap + re-quest rec; nonzero). Never silent retry/re-queue/block.
-- **Wave cancellation (Flatline-SDD B11)**: a stall exit issues a **cooperative cancel to in-flight siblings in the same wave**, then drains and emits the wave result with the stall recorded — bounded, no zombie workers, no partial-wave ambiguity. Already-completed siblings' receipts are preserved.
-
-### C11 — `prompt-boundary.mjs` (§5.1) — Flatline-SDD B3/B9/B10
-- **Sentinel (B10 — specified)**: `sentinelWrap(literal)` interpolates the goal/task only inside a **per-invocation random UUID tag** — `<goal id="{uuid}">…</goal>` — generated fresh each call (UUID passed in via `args`/env since the runtime forbids `Math.random()` in some paths; the binary uses `crypto.randomUUID()`). The prompt template checks the input for a sentinel collision (the literal already containing the tag/uuid) and exits 4 if found.
-- **Sanitizer (B9 — advisory, not the primary control)**: `sanitizeGoal(goal)` is **advisory + logged**, with structural containment (the sentinel + schema-validated, constrained LLM output) as the *primary* control. Reuses `.claude/scripts/injection-detect.sh`. A high-confidence match is a hard block (exit 4) with a reviewable reason; lower matches log + proceed under containment. Adversarial test corpus required.
-- **Detector invocation (B3 — CRITICAL)**: the untrusted goal is passed to `injection-detect.sh` strictly via **stdin** (never argv / shell interpolation) to avoid command injection at the detector boundary.
-- **Worker invariant + privilege floor**: workers receive fixed system instructions the task literal cannot override; tools derive from role+loadout, never the literal.
-- **Gate-verifies-goal**: the craft-gate checks worker output against `item.task` + the original goal, NOT the worker's self-report.
-
-### C13 — summon dials (Phase 2, deferred, telemetry-gated)
-Additive to `dungeon.budgets`: `summons`, `summon_tier_ceiling`, `summon_cooldown_s`. Budget-exhaustion → `STALLED_NO_SUMMON` → C10. NOT built until Phase-1.5 telemetry clears `P%/K` (FR-5). Forward-compat only.
+### 3.6 Forcing function (why record-gate, not dispatch-policing — Flatline-qualified)
+Demanding the receipt (not policing the dispatch) is robust — but the forcing function only bites when the receipt is **provider-attested by an isolated writer** (§3.2 / FR-B5). A *self-written* log line with two invented `final_model_id` strings is trivially forgeable; two distinct provider *families*, captured from real provider responses by a writer the stage cannot author, are not. So the precise property is: "honest multi-family execution is the only path to a **correlated, attested** receipt." The verifier demands that evidence (robust); it never forces the dispatcher to shell a specific script (fragile).
 
 ---
 
-## 3. Data Flow
+## 4. Data Models
 
-`/compose <goal>` → `decompose.mjs`: loadRoster → sanitizeGoal (advisory; stdin) → splitGoal (sonnet, retry/schema/fences) → deriveRouting → dagValidate (role retry-w-feedback; floor) → **{dag | serial | refusal}** → (if runnable) segment-emitter RFC #35 → waves → fan-out → single craft-gate (batched `gate_batch_max`; overflow sequential). **Stall path**: leaf stalls (`stall_s`) → GECKO diagnose → named_gap → stallExit(run_mode) → cooperative sibling cancel + drain.
-
----
-
-## 4. Contracts
-
-### 4.1 Party roster (Flatline-SDD B6 — was undefined)
-Schema: `roster = { roles: [ { id, domain, tier_ceiling } ] }`. Source: the `party` field of `module.json` (the laplas party manifest). C1 calls `loadRoster(module)` first and validates: non-empty, each role unique, each `tier_ceiling` a known tier. Empty/malformed → exit 6 (ROSTER_INVALID), refusal — no LLM call wasted on an un-routable party.
-
-### 4.2 Other contracts
-- **Driver → decomposer**: CLI (C1); typed stdout (dag|serial|refusal); exit codes 0/3/4/5/6.
-- **Decomposer → emitter**: `args.items[]` element schema (C8 fields). Emitter reads `id, task, depends_on, role, tier`; routing fields carried for audit + the gate.
-- **Manifest additive**: gate room/seat `covers_domains: [..]` (C5); undeclared → room domain only.
-- **named_gap** (C9); **rel_policy** (C4).
+| Artifact | Shape | Lives at |
+|----------|-------|----------|
+| `bridge-findings` schema | inline JSON-schema object (§2.1) | `construct-compositions` shared schema, inlined per composition (V1) |
+| receipt (normalized + signed) | `{provider, model_family, final_model_id, invocation_id, provider_response_hash, timestamp, compose_run_id, stage_index, stage_id, operation, envelope_hash, verdict}` + detached `sig` (Ed25519 over the payload) | `.run/compose/<run>/receipts/<stage>.json` (`0700` dir, atomic write, legba-chained) |
+| gatekeeper signing key | Ed25519; the existing legba/audit-chain key, isolated from stage sandboxes | legba key store (reused; SDD §8 Q5 on rotation) |
+| operation-attempted marker | empty/stamp file per stage, written pre-invocation by the isolated writer | `.run/compose/<run>/attempted/<stage_index>` |
+| `final_model_id → model_family` map | pinned table, drift-guarded | `docs/runtime/construct-adapters.md` (source named) |
+| verify declaration | `capabilities.verify:{operation, receipt, min_model_families}` | each construct's `construct.yaml` |
 
 ---
 
-## 5. Security Architecture (PRD §5.1 + Flatline-SDD)
+## 5. Security Architecture
 
-| Threat | Control | Component |
-|--------|---------|-----------|
-| Command injection at the detector boundary (CRITICAL B3) | goal to injection-detect.sh via **stdin only**, never argv | C11 |
-| Sentinel boundary failure / collision (CRITICAL B10) | per-call UUID tag `<goal id=uuid>`; collision check → exit 4 | C11 |
-| Sanitizer over-trusted as hard gate (CRITICAL B9) | sanitizer **advisory + logged**; structural containment (sentinel + schema-constrained output) is primary; adversarial corpus | C11 |
-| Semantic prompt injection (CRITICAL B6-PRD) | sentinel + sanitizer + gate-verifies-goal + privilege floor (defense-in-depth) | C11 |
-| Tainted decomposition / priv-esc (CRITICAL B4-PRD) | goal untrusted-by-default; worker tools from role+loadout | C11, C2 |
-| Worker self-report trusted (B5-PRD) | gate verifies vs item.task+goal | emitter gate |
-| Role spoof / dispatch-to-nobody (B1-PRD) | role↔roster validate (retry then fail-loud) | C8 |
-
-No single point of trust: sanitizer + sentinel + schema-validated constrained output + gate-verifies-goal each hold independently.
+- **Schema-key safety (A)**: `bridge-findings` keys pass `_assert_safe_schema_keys` (`segment-emitter.py:927`) — no unsafe interpolation into emitted JS.
+- **Anchor grounding (A — Flatline B1)**: schema *presence* of `anchor` is not grounding. A post-validation resolve step (§2.6) fails the synthesis when an `observed`-tagged finding's `anchor` does not resolve to a real path/line, so the contract proves *truth*, not just non-emptiness.
+- **Receipt trust boundary (B — Flatline B5 + SDD B2/B3, the load-bearing property)**: unforgeability is NOT "cost to forge two `final_model_id` strings" (those are self-reportable). It is **writer–subject separation made verify-time checkable**. Write-time isolation alone fails the threat model — the verifier reads a file post-hoc, and the threat actor (a stage that can write the receipt path) can write a well-formed receipt. The control is therefore a **detached Ed25519 signature** over the receipt by the isolated MODELINV writer, under the **gatekeeper key the stage cannot access** (the existing legba/audit-chain key — no new primitive); Check 6 verifies the signature first. A forged receipt copies field values but cannot produce a valid signature. Plus correlation binding (`compose_run_id`/`stage_index`/`envelope_hash`), `0700`-owned receipt dirs, atomic writes, and an append-only legba chain so markers/receipts cannot be rewritten pre-verification. Negative tests are first-class (unsigned/wrong-key, replayed, mismatched-run/stage, tampered, two-same-family).
+- **Family counting (B — Flatline B6/B7)**: the gate counts distinct *families* via the pinned `final_model_id → model_family` map, never raw ids, so two same-family models cannot satisfy a 2-family declaration.
+- **Fail-closed + DEGRADED (B — Flatline B3)**: absence of *both* marker and receipt = FAIL; marker-without-receipt = DEGRADED (distinct non-zero verdict, never folded into `valid_run`). The conservative-by-default discipline in `compose-verify-run.sh` (only exit 0 passes — `:406`) is preserved and extended.
+- **Custody binding (B)**: receipts are bound to `compose_run_id`/`stage_index`/`stage_id`/`envelope_hash` and ride the legba chain, so a receipt cannot be replayed from another run/stage without breaking custody or failing the correlation check.
 
 ---
 
-## 6. Scalability & Performance
+## 6. Testing Strategy
 
-- Decomposer cost: **one sonnet call** (+ ≤1 retry) + O(V+E) deterministic derivation. Not an opus cost center (G-3).
-- Gate is **bounded**: `gate_batch_max` (8 casual / 4 competitive); overflow → sequential passes. **G-6**: gate wall-clock ≤ a stated fraction of wave time, measured on a *large* DAG (Flatline-PRD B8).
-- centrality O(V+E); gate-coverage O(rooms); cheap.
+Mirror the existing hermetic bats harness (`tests/integration/form-c-dispatch.bats`, `compose-verify-run.bats`):
 
----
+**Epic A** (`tests/integration/` new or extended):
+- A composition with the `bridge-findings` schema: a synthesis output missing `anchor`/`severity`/`recommendation` → emitter retry-on-miss fires (validation rejects).
+- A `claims_ledger` with a `tag: observed` claim and empty `grounding` → validation fails.
+- `rigorous-review.yaml` emits → `workflow-syntax-check.js` green; renderer produces `bridge-findings` markers that `post-pr-triage.sh` parses.
+- **[B1] Anchor resolution**: an `observed` finding with `anchor: foo.ts:999` (no such line) → synthesis fails (or downgrades to `claimed`); a real anchor passes; a `claimed` finding skips resolution.
 
-## 7. Phasing (maps PRD §6, adjusted for Flatline-SDD B1)
-
-- **Phase 1 (this cycle)**: C1–C11 — decomposer + routing + GECKO schema + **stall watchdog + exit (atomic, C10)** + security. The stall exit fires day one (not dead code). Fan-out automatic, loiter-reduced by construction, fails safe.
-- **Phase 1.5**: enrich the watchdog into full loiter telemetry (`loiter`/`summon_drawn` incidents bucketed by `missing_role`). Gathers the `P%/K` distribution.
-- **Phase 2 (telemetry-gated)**: C13 summon dials — only if the bar clears. FR-6 retune loop.
-- **Out of scope**: named bench (v2), finn integration, heavy-Loa-skill coupling.
-
----
-
-## 8. Testing Strategy
-
-- **Deterministic core** (C3–C8): unit tests over fixed raw-item fixtures — domain resolution, centrality, gate_blind (incl. the back-compat default), opus_predicate, dagValidate (cycle/dangling/dup/role-miss/one-domain/floor/bounds). No LLM in the loop.
-- **C2 robustness**: mock the sonnet call to return: valid JSON, fenced JSON, malformed JSON, empty, network-error, hallucinated-role-then-corrected — assert the typed outcome + exit code for each.
-- **Security**: adversarial goal corpus (instruction-override, role-confusion, exfiltration, encoding-evasion, sentinel-collision) → assert sanitize block / containment; assert detector receives input via stdin (no argv leak).
-- **Migration**: `code-implement-and-review` declares gate `covers_domains` and stays cheap (no opus regression).
-- **G-6**: a large-DAG benchmark asserts gate wall-clock stays within the bound.
+**Epic B** (`tests/integration/compose-verify-run.bats` extended) — the four PRD metrics **plus the Flatline negative tests** (the security property is only as good as these):
+- VC-B1: declared `multimodal-review`, no marker + no receipt → `broken_run` exit 3.
+- VC-B2: receipt with two *same-family* ids (e.g. `opus`+`sonnet`), `min_model_families: 2` → exit 3 (**[B6]** family count, not id count).
+- VC-B3: ≥2 distinct *families*, correlated + attested → `valid_run` exit 0; receipt in custody.
+- VC-B4: a non-FAGAN construct declaring a receipt contract is gate-checked identically.
+- **[B5] Forgery**: a receipt hand-written with two invented `final_model_id`s but no provider attestation → exit 3 ("not provider-attested").
+- **[B4] Replay**: a valid receipt from another `run_id`/`stage_index` copied in → exit 3 ("correlation mismatch").
+- **[B3] DEGRADED**: marker present, receipt absent/unreadable → distinct DEGRADED verdict (non-zero, not `valid_run`); marker absent + receipt absent → FAIL.
+- Back-compat: a composition declaring no verify op → Check 6 no-op, verdict unchanged.
 
 ---
 
-## 9. Operational Definitions → Code (PRD §8 made concrete)
+## 7. Sequencing & Delivery
 
-| Term | Function | File |
-|------|----------|------|
-| `run_mode` | CLI flag, threaded | C1 |
-| `stall` | `stall_s` watchdog (minimal in P1) | C10 |
-| `loitering` | `named_gap` events by `missing_role` | C9 |
-| `one-room-one-domain` | dagValidate domain-resolves-to-one | C8 |
-| `gate_blind` | `gateBlind(domain)` | C5 |
-| `high_centrality` | `highCentrality(node)` | C6 |
-| `opus_predicate` | `opusPredicate(item)` | C7 |
-| `decomposition_confidence` | validator (deterministic); model self = telemetry | C3/C2 |
-| `rel_policy` | `relPolicy(rel, run_mode)` | C4 |
+- **Sprint plan splits by epic.** Epic A first (additive, opt-in, no run-blocking gate — lowest blast radius, fastest win, proves the "contract forces honesty" pattern). Epic B second (the fail-closed gate, on the pattern A established).
+- **Independent merges**: A and B share no files; each is its own sprint(s) and can land separately.
+- **Epic B rollout mirrors `--legba`**: ship Check 6 behind a flag, default-off, promote to default-on once stable across cycles (the verifier already demonstrates this opt-in→default pattern).
 
 ---
 
-## 10. PRD Traceability
+## 8. Open Design Questions
 
-| PRD FR | SDD components |
-|--------|----------------|
-| FR-1 decomposer + contract | C1, C2, C3, C8, §4.1 |
-| FR-2 routing + opus predicate | C3, C5, C6, C7, C8 |
-| FR-3 GECKO sensor + named_gap | C9 |
-| FR-4 REL → rel_policy | C4 |
-| FR-4.5 Phase-1 stall exit | C10 |
-| FR-5 metered summon (Phase 2) | C13 (deferred) |
-| FR-6 retune loop (Phase 2) | C9 attribution |
-| §5.1 worker prompt boundary | C11 |
-| G-3 opus surgical | C7 |
-| G-6 gate doesn't re-serialize | C12, §6 |
+1. **A — schema home**: `construct-compositions` shared vs `construct-rooms-substrate` runtime schemas vs `loa-hounfour`. Leaning shared-in-`construct-compositions`, inlined until a `$ref` resolver exists.
+2. **B — receipt contract generality**: the scaffold must accept receipt contracts beyond `multimodal-review` (VC-B4). Ship the generic `{operation, receipt, min_*}` shape with `multimodal-review` as the reference op; defer additional operation kinds.
+3. ~~**B — DEGRADED taxonomy**~~ **RESOLVED (SDD B1)**: `degraded_run` verdict string at **exit 2** (retryable-deny class, sibling of `compiled_run`) + a `degraded: true` flag; never folded into `valid_run`. Exit semantics stay 0/2/3. See §3.4.
+5. **B — attestation key management (new, from SDD B2/B3)**: the gatekeeper Ed25519 key the MODELINV writer signs with must be provisioned + isolated from stage sandboxes; reuse legba's existing key handling (`audit_emit_signed`). Open: per-run vs per-host key, and rotation.
+4. **A/B convergence**: whether Epic A's `bridge-findings` and the Bridgebuilder TS app's findings schema should unify (out of scope this cycle; noted).
 
----
-
-## 11. Flatline integration log (SDD, 2026-06-13)
-
-3-model pass (85% agreement, 12 blockers / 8 high-consensus). All 12 integrated:
-
-| # | Blocker | Where |
-|---|---------|-------|
-| B1 | C10 dead code (exit w/o trigger) | C10 ships minimal watchdog atomic with exit (Phase 1) |
-| B2 | gate back-compat `["*"]` suppresses opus | C5 default = room domain only, never `*` |
-| B3 | command injection via detector argv (CRIT) | C11 detector via stdin |
-| B4 | LLM JSON parse failure unhandled | C2 fence-strip + schema-validate → serial fallback |
-| B5 | fallback conflates degrade vs refuse | C1 typed {dag\|serial\|refusal} |
-| B6 | roster never defined | §4.1 roster contract + exit 6 |
-| B7 | LLM self-confidence trusted as gate | C2/C3 validator-confidence gates; model-confidence = telemetry |
-| B8 | C2 no failure modes/exit/retry | C2 exit 5 + 1-retry-2s-backoff + empty→serial |
-| B9 | sanitizer over-trusted (CRIT) | C11 advisory + structural containment primary |
-| B10 | sentinel delimiter unspecified (CRIT) | C11 per-call UUID `<goal id=uuid>` + collision check |
-| B11 | wave cancellation on stall unstated | C10 cooperative sibling cancel + drain |
-| B12 | hard exit-3 on hallucinated role brittle | C8 bounded retry-with-feedback (max 2) then fail |
-
-Disputed: D1 (zero-item path explicitness) → C8 0-items→refusal; D2 (define "finn" shorthand) → noted as parked sibling in header.
+> **Next**: `/sprint-plan` — Epic A first.

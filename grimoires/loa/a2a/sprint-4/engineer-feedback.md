@@ -1,53 +1,30 @@
-# Sprint 4 — Senior Lead Review — All good
+All good (with noted concerns)
 
-**Verdict**: APPROVED (cycle 2) · **Reviewer**: senior-lead (adversarial) · **Documentation
-verification**: PASS (no manual CHANGELOG convention this cycle — post-merge automation owns it,
-consistent with S1–S3; code comments adequate; no new commands/skills needing CLAUDE.md).
+# Senior Tech Lead Review — Sprint-4 (Check 6 proof-of-operation verifier + battery)
 
-Cycle-1 returned CHANGES_REQUIRED on two real defects; both are now fixed and re-verified.
+Approved. The gate is LIVE, fail-closed, default-off; all 10 ACs proven by the
+negative battery + 3 e2e wiring tests; existing `compose-verify-run.bats`
+unregressed (25). Binding req #2 (reuse canonicalizer) discharged. Concerns below
+are non-blocking; two ride with the documented executor seam.
 
-## Previous Feedback Status (cycle 1 → cycle 2)
-
-| Finding | Status | Verification |
-|---|---|---|
-| **C1** dead `__wave_stalled` branch (`wave-cancel.mjs:113`) | ✓ Resolved | branch removed; `grep -E 'if \(r && r\.__wave_stalled\)'` → none; name survives only in an explanatory comment |
-| **C2** `stall_s` not forwarded by `/compose` driver | ✓ Resolved | `skills/compose/SKILL.md` now sets `args.stall_s`; `compose-resolve.mjs:4` doc updated; **regression test** `compose-driver.test.mjs` (casual→90, competitive→45) pins it |
-
-Re-verified: **87/87 laplas · 95/95 bats · emitter `node --check` clean · dispatch determinism guard passes (exit 3)**.
-
-## AC Verification — confirmed against code (not just report)
-
-All six ACs (S4.1–S4.4 + folded B7 + `node --test` green) walked in `reviewer.md` with verbatim
-quotes + file:line evidence + tests. Spot-checked the code: schema `minLength:1` floor (named-gap),
-own-event-reset (`stall-watch.mjs:36`), automated fail-loud nonzero (`stall-exit.mjs:47-49`),
-cooperative-skip + drain-abandon (`wave-cancel.mjs`), and B7 stranding (`runDag` + bats 94). Met.
+## ACs — all met (see reviewer.md table; tests in compose-proof-check.bats + compose-verify-proof-wiring.bats)
+Verdict ordering verified: Check 6 precedes the final valid/compiled emit, so proof failure dominates. Sig-verify-first per SDD §3.3.
 
 ## Adversarial Analysis
 
-### Concerns Identified
-1. **Per-wave false-positive stalls** (`segment-emitter.py makeWaveCancel`) — a legitimately slow
-   leaf > `stall_s` is abandoned. Non-blocking: documented P1-minimal (reviewer.md KL§2); `stall_s`
-   is now rel-derived end-to-end (C2 fix), so `competitive` correctly tightens to 45s.
-2. **C1 reorder safety** (`wave-cancel.mjs`) — the fix moved `__drain_timeout` above
-   `__wave_cancelled`. Verified harmless: a result carries exactly one sentinel (mutually exclusive),
-   so order does not change classification. 95/95 bats confirms no behavioral change.
-3. **`setTimeout` availability in the Workflow sandbox is unverified** — the entire live cancel/drain
-   path rides on it. Non-blocking by design: graceful degradation to B7-stranding-only; flagged loud
-   in KL§1; requires a live dispatch to confirm in production.
+### Concerns
+1. **Declaration-list integrity** (`compose-proof-capture.py` cmd_check): the "what must be proven" list (`proof-declared.json`) is read from the run dir. Mitigated this sprint with a **tamper guard** — list-absent-but-artifacts-present → `broken_run` (test "tamper: proof-declared.json deleted but artifacts present"). The FULL fix (derive the declared set from the verified manifest/composition provenance, so a clean delete of list+artifacts also can't bypass) is **binding on the executor seam** — same isolation boundary (dispatcher-owned `0700` run dir) that protects the gatekeeper key.
+2. **Pubkey trust is env-configured** (`--pubkey-dir` = `LOA_AUDIT_KEY_DIR`): the verifier trusts the configured pubkey dir, not the pinned `grimoires/loa/trust-store.yaml`. Consistent with the rest of the audit chain's key model, but pinning to the trust-store would be stronger. Non-blocking hardening follow-up.
+3. **`degraded:true` JSON flag not added** to `_verdict` (consumers branch on `.verdict == "degraded_run"`). Deliberate — avoids editing the shared emitter. Non-blocking.
 
 ### Assumption Challenged
-- **Assumption**: a per-*wave* stall proxy is an acceptable Phase-1 stand-in for per-*leaf*
-  progress detection. **Risk if wrong**: false-positive cancels on real slow work. **Recommendation**:
-  accepted — SDD scopes per-leaf intra-progress to Phase 1.5; `stall-watch.mjs` (the per-leaf
-  progress-reset watchdog) is already built + tested for that handoff.
+- **Assumption**: the verifier only needs the PUBLIC key (private key never on the verify path).
+- **Risk if wrong**: none found — `check` shells `audit-signing-helper verify` (pubkey-dir only); private key isolation is the executor's job (sprint-3 binding #1).
+- **Verdict**: correct separation; the verifier is safe to run anywhere with the public key.
 
 ### Alternative Not Considered
-- **Alternative**: driver-orchestrated per-leaf stall detection (chunk waves into smaller Workflow
-  calls so the driver's clock + `stall-watch` drive cancellation). **Tradeoff**: real per-leaf
-  detection vs more round-trips. **Verdict**: current per-wave proxy justified for P1; the alternative
-  is the natural 1.5 path. Noted, not blocking.
+- **Alternative**: put Check 6 logic directly in `compose-verify-run.sh` (bash).
+- **Tradeoff**: a single language but duplicate canonicalization (drift risk vs the capture) + harder to unit-test.
+- **Verdict**: delegating to `compose-proof-capture.py check` (shared `_canonical`) is correct — honors binding req #2, testable in isolation. Justified.
 
-## Approval
-
-All good — Sprint 4 (the keystone, with folded S3.4/x7l) approved. Proceed to security audit.
-The integration-only residual risk (KL§1, `setTimeout`) is honestly disclosed, not overclaimed.
+Documentation: PASS (`docs/runtime/construct-adapters.md` updated to sprint-4-complete + the executor seam).

@@ -1,71 +1,32 @@
-# Sprint 3 — Senior Tech Lead Review
-
 All good (with noted concerns)
 
-Reviewed the actual code for S3.1–S3.3 + the S3.4 config touch (not just the report). One real
-correctness gap found and fixed in-cycle; S3.4's stranding correctly scoped out with a matching
-beads task + NOTES entry. The live-emitter change (S3.4 config touch) is backward-compatible by
-construction and the emitter bats suite stays 94/94.
+# Senior Tech Lead Review — Sprint-3 (Epic B receipt declaration + attested capture)
 
-## Found & fixed this cycle
+Approved for sprint-3's delivered scope (the isolated proof-of-operation machinery).
+Crypto reuses the established audit Ed25519 infra; 9/9 tests; no System Zone or
+dispatcher drift. Concerns are non-blocking for this scope but one is a **binding
+requirement on sprint-4's wiring** (isolation).
 
-### D9 id-set canonicalization (`laplas/bin/decompose.mjs:67`)
-The retry "same id-set" guard canonicalized with a separator (``) join. Sound for any
-realistic id, but not airtight: a pathological id containing `` could concat-collide and
-slip a structurally-different DAG past D9. **Hardened** to `JSON.stringify(ids.sort())` —
-unconditionally unambiguous for arbitrary id strings. Verified: `["a","b"]` ≠ `["ab"]`; suite
-67/67. (Initial probe mis-tested a separator-less join; verify-before-assert caught the false
-alarm — the original was not broken for realistic input, the fix removes even the pathological
-case.)
-**Follow-up:** a regression test (`{a,b}` vs `{ab}` retry → P602) was authored but its write was
-gated this session; add it when edits are open — `node --test` is green without it, the fix is
-verified by the existing D9 test + the canonicalization probe.
-
-## AC Verification (cross-check vs reviewer.md)
-- AC-S3.1 ✓ (split-goal 5 cases) · AC-S3.2 ✓ (G-1 binary fan-out) · AC-S3.2b ✓ (role-retry, B4,
-  D9) · §0.2 exit matrix ✓ · AC-S3.3 ✓ (driver bypass/fanout/tier-map/single/refuse) · AC-S3.4
-  ⚠ Partial: config-touch Met (gate_batch_max wired, bats 94/94), stranding [ACCEPTED-DEFERRED]
-  (beads `construct-rooms-substrate-x7l` + NOTES Decision Log). The Partial is paired with a
-  follow-up task, so it does not block.
+## ACs verified against code + tests
+- AC1 (marker + signed correlated receipt + declaration gating) — machinery + decision logic met (`compose-proof-capture.py`; tests). Dispatch call-sites are the documented seam (honest scope).
+- [B5] (sig verifies; tamper/wrong-key fail) — met; forgery + wrong-key negative tests green.
+- [B7] (opus+sonnet → 1 family; unmapped fail-closed) — met.
 
 ## Adversarial Analysis
 
-### Concerns Identified
-1. **D9 canonicalization** (`decompose.mjs:67`) — found + fixed (above).
-2. **`claude-provider.mjs` has zero test coverage** — the real LLM path is runtime-only by D8
-   design, but if the `claude -p --model sonnet` invocation is wrong, the binary fails only at
-   runtime. Isolated behind the provider boundary; verify against the real CLI before relying on
-   the binary end-to-end (already a stated Limitation).
-3. **S3.4 gate_batch_max is type-fragile** (`segment-emitter.py` gateBatchMax) — `Number.isInteger`
-   means a value arriving as a *string* (args can be JSON-stringified) silently falls back to
-   `RATE_BOUND` (8), so competitive's intended 4 would not apply. Graceful, but the tightening
-   would silently no-op. The driver passes a number (`compose-items.mjs` reads `rel_policy.gate_batch_max`),
-   so this only bites if a caller stringifies — non-blocking, flagged.
+### Concerns
+1. **Isolation is an OPERATIONAL property of the (deferred) wiring** (`compose-proof-capture.py` `_sign` reads key via `--key-id/--key-dir`). The whole gate's integrity rests on the stage-under-verification NOT having gatekeeper-key access while the dispatcher does. The machinery is correct, but if sprint-4 wires `capture` such that the stage subagent inherits `LOA_AUDIT_KEY_DIR`/key access, the gate becomes theater. **Binding on sprint-4**: the stage subagent env MUST NOT carry the gatekeeper key; capture runs only in the dispatcher context. Flagged for the auditor.
+2. **Canonicalization is internally-consistent but not RFC-8785 JCS** (`_canonical`, json.dumps sorted/compact). Safe ONLY because sign and verify call the same `_canonical`. **Binding on sprint-4**: Check 6 MUST call `compose-proof-capture.py verify-receipt` (or import `_canonical`), never re-implement canonicalization — else signatures spuriously fail. Documented in the module.
+3. **Marker is unsigned** (`cmd_mark`). A stage could forge a marker — but forged-marker + no-valid-receipt → `degraded_run`, forged-marker + forged-receipt → sig fail → `broken_run`. A forged marker can only downgrade broken→degraded (both denies), never reach `valid_run`. Acceptable; noted.
 
-### Assumptions Challenged
-- **Assumption**: the `/compose` executor threads `args.gate_batch_max` + `args.items` from the
-  driver output (SKILL.md step 2.5). **Risk if wrong**: if the executor omits `gate_batch_max`,
-  the fan-out silently defaults to `RATE_BOUND` (8) — correct for casual, too loose for competitive.
-  **Recommendation**: acceptable for Phase 1 (graceful default); a future hardening could have the
-  driver emit a complete args object so the executor can't forget. Validated as non-blocking.
+### Assumption Challenged
+- **Assumption**: MODELINV (`.run/model-invoke.jsonl`) is trustworthy evidence (cheval-emitted, `final_model_id` is provider-returned).
+- **Risk if wrong**: if the stage could write the MODELINV log, it could fabricate cross-vendor invocations.
+- **Recommendation**: holds under the SDD's isolated-writer model (cheval emits MODELINV); same isolation boundary as concern #1. Made explicit in the report.
 
-### Alternatives Not Considered
-- **Alternative**: `stripFences` (`split-goal.mjs:27`) slices from the first bracket to end rather
-  than balancing — a valid JSON array followed by model prose fails to parse. **Tradeoff**: a true
-  balanced-bracket scan would salvage more outputs, but adds complexity; the current behavior
-  **safe-degrades** (parse fail → retry → serial INDIVISIBLE), never mis-parses. **Verdict**:
-  current approach justified — safe-degrade beats clever-parse for an untrusted LLM boundary.
+### Alternative Not Considered
+- **Alternative**: legba hash-chain the receipt tree (SDD B4) instead of per-receipt signatures.
+- **Tradeoff**: chaining detects reordering/deletion; per-receipt Ed25519 detects content forgery directly and is simpler. The signature subsumes the anti-rewrite goal for a single receipt.
+- **Verdict**: per-receipt signing is the right primary control; chaining is optional belt-and-suspenders, not landed. Justified.
 
-## Complexity Analysis
-- `splitGoal` (split-goal.mjs:67) and `decompose` (decompose.mjs:37) are the only non-trivial
-  functions: decompose is ~40 lines with one bounded loop (nesting 2), no function >50 lines, no
-  duplication, no circular deps. OK.
-
-## Documentation Verification: PASS
-- New code carries provenance comments tracing each control to its Flatline finding (D8/D9/D10/B4).
-  `/compose` SKILL.md step 2.5 documents the driver wiring. NOTES Decision Log updated (S3 batching
-  + gate_batch_max). No new top-level command (internal laplas bins), CLAUDE.md N/A.
-
-## Decision
-Approved. All in-scope ACs met (S3.4 stranding properly deferred), D9 hardened, suite 67/67,
-emitter bats 94/94. Proceed to security audit.
+Documentation: PASS (canonical schema + integration contract in `docs/runtime/construct-adapters.md`).
