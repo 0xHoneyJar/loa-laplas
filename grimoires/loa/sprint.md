@@ -61,9 +61,9 @@
 5. **Isolation controls [SDD B4]** — `receipts/` + `attempted/` created `0700`/cheval-owned; atomic temp-then-rename writes; append-only / legba-chained.
 
 **Acceptance Criteria**
-- [ ] A declaring stage produces an attempted-marker + a signed, correlated `receipts/<idx>.json`; a non-declaring stage produces neither (no-op). *(test)*
-- [ ] **[B5]** the receipt `sig` verifies under the gatekeeper public key; a receipt written without the key fails verification. *(test)*
-- [ ] **[B7]** the `id → family` map resolves `opus`+`sonnet` to ONE family. *(test)*
+- [x] A declaring stage produces an attempted-marker + a signed, correlated `receipts/<idx>.json`; a non-declaring stage produces neither (no-op). *(test)*
+- [x] **[B5]** the receipt `sig` verifies under the gatekeeper public key; a receipt written without the key fails verification. *(test)*
+- [x] **[B7]** the `id → family` map resolves `opus`+`sonnet` to ONE family. *(test)*
 
 ### sprint-4: Check 6 proof-of-operation verifier (fail-closed) + negative-test battery
 

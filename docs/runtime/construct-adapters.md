@@ -180,3 +180,76 @@ Verification: `bash .claude/scripts/migrate-subagents-verify.sh`. Rollback: `git
 - Sprint close summaries: `.run/sprint-2-close.md`, `.run/sprint-3-close.md`
 - Bridge iter 1 review: `.run/bridge-reviews/bridge-20260509-b49286-iter1-full.md`
 - Source brief: `grimoires/loa/context/private/construct-native-subagent-invocation-boundaries-2026-05-09.md`
+
+## Proof-of-operation: the `verify` capability (verifiable-compose Epic B, RFC #57)
+
+A construct/stage that performs a **verifiable multi-model operation** declares it
+in `construct.yaml` capabilities. To earn a `valid_run`, the operation must leave a
+**gatekeeper-signed, correlated receipt** proving it actually ran across
+≥ `min_model_families` distinct **vendor families** (sprint-4 Check 6 enforces this).
+
+```yaml
+# construct.yaml — the FAGAN reference declaration
+capabilities:
+  verify:
+    operation: multimodal-review        # the verifiable op this construct performs
+    receipt: model-invoke.jsonl         # evidence source (cheval MODELINV log)
+    min_model_families: 2               # FAMILIES (vendors), not final_model_ids
+```
+
+**FAMILY = vendor, not tier.** `claude-opus` and `claude-sonnet` are BOTH the
+`anthropic` family — a 2-family declaration is NOT satisfied by opus+sonnet
+(Flatline B6/B7). Genuine cross-vendor diversity (e.g. anthropic + openai) is
+required. The pinned `final_model_id → family` table is
+`scripts/data/model-family-map.json`; its **source of truth** is
+`.claude/defaults/model-config.yaml` provider sections, and it is **drift-guarded**
+by `tests/integration/compose-proof.bats` (`[B7]`). An id absent from the map
+resolves to `null` and **cannot** satisfy a family slot (sprint-4 SB6 fail-closed).
+
+### Receipt schema (normalized, Flatline B7)
+
+`compose-proof-capture.py capture` writes `.run/compose/<run>/receipts/<idx>.json`:
+
+```json
+{
+  "payload": {
+    "compose_run_id": "...", "stage_index": 4, "stage_id": "synthesize",
+    "operation": "multimodal-review", "envelope_hash": "sha256:...",
+    "invocations": [ {"final_model_id","model_family","provider","invocation_id","provider_response_hash","timestamp"} ],
+    "families": ["anthropic","openai"], "family_count": 2
+  },
+  "signing_key_id": "<gatekeeper key id>",
+  "sig": "<base64 Ed25519 over canonical(payload)>"
+}
+```
+
+The signature is produced by the **isolated writer** (the dispatcher/cheval process
+that holds the gatekeeper key — the stage under verification cannot access it),
+reusing `.claude/scripts/lib/audit-signing-helper.py` — **no new primitive**
+(SDD B2/B3). Canonicalization is centralized in `compose-proof-capture.py`
+`_canonical()` so capture (sign) and sprint-4 Check 6 (verify) use byte-identical
+input. A forged receipt can copy field *values* but cannot produce a signature that
+verifies under the gatekeeper public key.
+
+### Dispatch integration contract (the sprint-3 → sprint-4 seam)
+
+The proof-of-operation machinery is delivered as standalone, hermetically-tested
+subcommands; the runtime wires them at two points:
+
+1. **Before invocation** — for a stage where `compose-proof-capture.py should-verify
+   --spec <construct.yaml|composition.yaml> [--stage-index N]` exits 0, the dispatcher
+   writes the **attempted-marker**:
+   `compose-proof-capture.py mark --run-dir .run/compose/<run> --stage-index <N>`.
+2. **After invocation** — the isolated MODELINV writer folds the receipt:
+   `compose-proof-capture.py capture --run-dir … --run-id … --stage-index … --stage-id …
+   --operation … --envelope-hash … --modelinv .run/model-invoke.jsonl --key-id … --key-dir …`.
+
+`mark`/`capture` create `attempted/` + `receipts/` `0700` and write atomically
+(temp+rename) — SDD B4 isolation. **Status:** the capture/verify/family/marker
+machinery + the declaration-gating decision (`should-verify`) are implemented and
+tested (`tests/integration/compose-proof.bats`, 9 tests). The call-sites inside
+`compose-dispatch.sh` (Form B/C) and the binding to the **live** cheval MODELINV
+field names (currently read liberally: `final_model_id`→`model_invoked`→`model`) are
+the integration step landed alongside sprint-4's Check 6 verifier — they are the
+named seam, not a silent omission. Sprint-4's `compose-verify-run.sh` Check 6
+consumes these receipts.
