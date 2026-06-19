@@ -137,3 +137,16 @@ YML
     run jq -e '.payload | (.compose_run_id=="r1" and .stage_index==4 and .stage_id=="synthesize" and .operation=="multimodal-review" and .envelope_hash=="sha256:abc" and .family_count==2)' "$TMP/run/receipts/4.json"
     [[ "$status" -eq 0 ]] || fail "correlation fields not bound: $(cat "$TMP/run/receipts/4.json")"
 }
+
+@test "[BB#2]: provider-prefix spoof (anthropic:gpt-5.5) does NOT count as anthropic" {
+    _modelinv "$TMP/mi.jsonl" "anthropic:claude-opus-4-8" "anthropic:gpt-5.5"
+    run python3 "$CAP" families --modelinv "$TMP/mi.jsonl"
+    # gpt-5.5 under an anthropic prefix is a mismatch -> unmapped -> only 1 real family
+    echo "$output" | jq -e '.family_count == 1 and (.unmapped | index("anthropic:gpt-5.5"))' >/dev/null || fail "prefix spoof must not satisfy a slot: $output"
+}
+
+@test "[BB#2]: a legit provider:model still resolves; openai:claude-* is rejected" {
+    _modelinv "$TMP/mi.jsonl" "anthropic:claude-opus-4-8" "openai:claude-opus-4-8"
+    run python3 "$CAP" families --modelinv "$TMP/mi.jsonl"
+    echo "$output" | jq -e '.family_count == 1 and .families == ["anthropic"] and (.unmapped | index("openai:claude-opus-4-8"))' >/dev/null || fail "model-name authority broken: $output"
+}

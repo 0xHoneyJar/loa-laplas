@@ -158,3 +158,21 @@ J
     [[ "$status" -eq 3 ]] || fail "deleted declaration + present artifacts must be broken, got $status: $output"
     echo "$output" | grep -q "tamper" || fail "reason should flag tamper: $output"
 }
+
+@test "[BB#1]: a corrupt receipt makes Check 6 fail CLOSED (broken_run 3, never valid)" {
+    _declare "$RUN" 4 synthesize multimodal-review 2
+    python3 "$CAP" mark --run-dir "$RUN" --stage-index 4 >/dev/null
+    mkdir -p "$RUN/receipts"
+    printf '{ this is not valid json ]' > "$RUN/receipts/4.json"
+    run _check "$RUN" r1
+    [[ "$status" -eq 3 ]] || fail "corrupt receipt must be broken_run 3 (fail closed), got $status: $output"
+    echo "$output" | grep -qi "corrupt" || fail "reason should cite corrupt receipt: $output"
+}
+
+@test "[BB#3]: a non-integer stage_index is rejected (broken_run 3, no path-join)" {
+    mkdir -p "$RUN"
+    printf '[{"stage_index":"../../../etc/passwd","stage_id":"x","operation":"op","min_model_families":1}]\n' > "$RUN/proof-declared.json"
+    run _check "$RUN" r1
+    [[ "$status" -eq 3 ]] || fail "path-traversal stage_index must be broken, got $status: $output"
+    echo "$output" | grep -qi "invalid stage_index" || fail "reason should flag invalid index: $output"
+}

@@ -559,10 +559,13 @@ if [[ "$PROOF_OF_OP" == "1" ]]; then
     fi
     _p6_out="$(python3 "$_proof_cap" check --run-dir "$RUN_DIR" --run-id "$RUN_ID" --pubkey-dir "$_pubkey_dir" 2>&1)"
     _p6_rc=$?
-    if [[ "$_p6_rc" -eq 3 ]]; then
-        _verdict "broken_run" 3 "proof-of-operation Check 6 FAILED: $_p6_out"
-    elif [[ "$_p6_rc" -eq 2 ]]; then
+    # Default-DENY (Bridgebuilder #1): rc 0 = pass-through; rc 2 = degraded; ANY
+    # other non-zero (3, or a crash/usage exit like 1 or argparse's 2-on-stderr)
+    # is broken_run — NEVER fall through to valid_run. The verifier fails closed.
+    if [[ "$_p6_rc" -eq 2 ]]; then
         _verdict "degraded_run" 2 "proof-of-operation Check 6 DEGRADED (attempted, capture failed — retryable deny): $_p6_out"
+    elif [[ "$_p6_rc" -ne 0 ]]; then
+        _verdict "broken_run" 3 "proof-of-operation Check 6 FAILED (verifier exit $_p6_rc, fail-closed): $_p6_out"
     fi
 fi
 

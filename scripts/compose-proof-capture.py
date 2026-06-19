@@ -33,6 +33,7 @@ and sprint-4 Check 6 (verify) share byte-identical input — no drift.
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -56,21 +57,27 @@ def resolve_family(model_id, fmap=None):
     if not model_id:
         return None
     mid = str(model_id).strip()
-    # 1. explicit provider prefix ("anthropic:claude-opus-4-8")
+    # The MODEL NAME is the authority (Bridgebuilder #2). A provider prefix is only
+    # a cross-check, never an override: `anthropic:gpt-5.5` must NOT resolve to
+    # anthropic (diversity spoof). Resolve on the model name; if a known-provider
+    # prefix disagrees with the model-derived family, fail closed (None).
+    claimed = None
     if ":" in mid:
         provider, rest = mid.split(":", 1)
         if provider in fmap.get("providers", []):
-            return provider
-        mid = rest  # gateway form without a known provider — fall through on the model part
-    # 2. exact pinned id
-    if mid in fmap.get("known_ids", {}):
-        return fmap["known_ids"][mid]
-    # 3. model-name prefix rule
-    for prefix, fam in fmap.get("model_prefix_family", {}).items():
-        if mid.startswith(prefix):
-            return fam
-    # 4. unmapped — never satisfies a family slot
-    return None
+            claimed = provider
+        mid = rest  # always resolve on the model name, prefix or not
+    fam = fmap.get("known_ids", {}).get(mid)
+    if fam is None:
+        for prefix, f in fmap.get("model_prefix_family", {}).items():
+            if mid.startswith(prefix):
+                fam = f
+                break
+    if fam is None:
+        return None  # unmapped model name never satisfies a slot (even under a prefix)
+    if claimed is not None and claimed != fam:
+        return None  # prefix/model-name mismatch -> spoof -> fail closed
+    return fam
 
 
 # ---------------------------------------------------------------------------
@@ -316,7 +323,12 @@ def cmd_check(a):
             return 3
         print(json.dumps({"check6": "no-op", "reason": "no proof-declared.json (back-compat: no declared verify ops)"}))
         return 0
-    declared = json.loads(declared_path.read_text())
+    try:
+        declared = json.loads(declared_path.read_text())
+    except (json.JSONDecodeError, OSError) as exc:
+        _atomic_append(run_dir / "verify-fail.jsonl", json.dumps({"check6": "broken_run", "reasons": [f"proof-declared.json unreadable/corrupt: {exc}"]}) + "\n")
+        print(json.dumps({"check6": "broken_run", "reason": f"proof-declared.json corrupt (fail closed): {exc}"}), file=sys.stderr)
+        return 3
     if not declared:
         print(json.dumps({"check6": "no-op", "reason": "no declared verify ops"}))
         return 0
@@ -328,6 +340,11 @@ def cmd_check(a):
         sid, op = st.get("stage_id"), st.get("operation")
         minf = int(st.get("min_model_families", 1))
         exp_hash = st.get("envelope_hash")
+        # Bridgebuilder #3: stage_index is interpolated into a path — confine it to
+        # a plain non-negative integer token, else it is a read oracle / tamper.
+        if not re.fullmatch(r"[0-9]+", str(idx)):
+            worst = max(worst, 3); reasons.append(f"stage {idx!r}: invalid stage_index (not a non-negative integer) -> broken")
+            continue
         marker = run_dir / "attempted" / str(idx)
         receipt = run_dir / "receipts" / f"{idx}.json"
         if not receipt.exists():
@@ -336,7 +353,11 @@ def cmd_check(a):
             else:
                 worst = max(worst, 3); reasons.append(f"stage {idx} {op}: operation never ran (no marker, no receipt) -> broken")
             continue
-        rj = json.loads(receipt.read_text())
+        try:
+            rj = json.loads(receipt.read_text())
+        except (json.JSONDecodeError, OSError) as exc:
+            worst = max(worst, 3); reasons.append(f"stage {idx} {op}: receipt unreadable/corrupt ({exc}) -> broken")
+            continue
         payload = rj.get("payload") or {}
         sig, kid = rj.get("sig"), rj.get("signing_key_id")
         # 1. signature FIRST (cheapest-fail-first) — the load-bearing check (B5/SB1)
