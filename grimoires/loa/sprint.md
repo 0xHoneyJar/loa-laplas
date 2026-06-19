@@ -77,16 +77,16 @@
 5. **Negative-test battery** (`tests/integration/compose-verify-run.bats`).
 
 **Acceptance Criteria**
-- [ ] **VC-B1**: declared op, no marker + no receipt → `broken_run` exit 3. *(test)*
-- [ ] **VC-B2** **[B6]**: two *same-family* ids on `min_model_families:2` → exit 3. *(test)*
-- [ ] **VC-B3**: ≥2 distinct *families*, correlated + sig-valid → `valid_run` exit 0. *(test)*
-- [ ] **VC-B4**: a non-FAGAN construct declaring a receipt contract is gate-checked identically. *(test)*
-- [ ] **[B5/SB1] Forgery**: a receipt with two invented ids but **no valid gatekeeper signature** → exit 3. *(test)*
-- [ ] **[B4] Replay**: a valid signed receipt from another run/stage copied in → exit 3 (correlation mismatch). *(test)*
-- [ ] **[SB5] Marker bypass**: signed marker present + invocation aborted (no real call) → `degraded_run` / deny, NEVER `valid_run`. *(test)*
-- [ ] **[SB6] Unmapped id**: a `final_model_id` not in the map cannot satisfy a family slot → exit 3 + audit signal. *(test)*
-- [ ] **[B3] DEGRADED**: signed marker present, receipt absent → `degraded_run` exit 2 (deny under autonomous). *(test)*
-- [ ] Back-compat: a composition declaring no verify op → Check 6 no-op; verdict unchanged. *(test)*
+- [x] **VC-B1**: declared op, no marker + no receipt → `broken_run` exit 3. *(test)*
+- [x] **VC-B2** **[B6]**: two *same-family* ids on `min_model_families:2` → exit 3. *(test)*
+- [x] **VC-B3**: ≥2 distinct *families*, correlated + sig-valid → `valid_run` exit 0. *(test)*
+- [x] **VC-B4**: a non-FAGAN construct declaring a receipt contract is gate-checked identically. *(test)*
+- [x] **[B5/SB1] Forgery**: a receipt with two invented ids but **no valid gatekeeper signature** → exit 3. *(test)*
+- [x] **[B4] Replay**: a valid signed receipt from another run/stage copied in → exit 3 (correlation mismatch). *(test)*
+- [x] **[SB5] Marker bypass**: signed marker present + invocation aborted (no real call) → `degraded_run` / deny, NEVER `valid_run`. *(test)*
+- [x] **[SB6] Unmapped id**: a `final_model_id` not in the map cannot satisfy a family slot → exit 3 + audit signal. *(test)*
+- [x] **[B3] DEGRADED**: signed marker present, receipt absent → `degraded_run` exit 2 (deny under autonomous). *(test)*
+- [x] Back-compat: a composition declaring no verify op → Check 6 no-op; verdict unchanged. *(test)*
 
 ---
 

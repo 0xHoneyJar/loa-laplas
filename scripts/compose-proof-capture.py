@@ -263,6 +263,113 @@ def cmd_should_verify(a):
     return 1
 
 
+def _atomic_append(path, line):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with open(path, "a") as fh:
+        fh.write(line)
+
+
+def cmd_declare(a):
+    """Dispatcher: record the stages that declare verify.operation for this run,
+    BEFORE any invocation. Check 6 reads this to know what MUST be proven (so a
+    missing marker+receipt for a declared stage is a FAIL, not an unknown)."""
+    import yaml
+    doc = yaml.safe_load(Path(a.composition).read_text()) or {}
+    out = []
+    cap_default = (doc.get("capabilities") or {}).get("verify")
+    for st in doc.get("chain", []):
+        decl = ((st.get("capabilities") or {}).get("verify")) or cap_default
+        if decl and decl.get("operation"):
+            out.append({
+                "stage_index": _as_index(st.get("stage")),
+                "stage_id": st.get("stage_id") or st.get("construct") or st.get("persona"),
+                "operation": decl.get("operation"),
+                "min_model_families": int(decl.get("min_model_families", 1)),
+            })
+    dest = Path(a.run_dir) / "proof-declared.json"
+    _atomic_write(dest, json.dumps(out, indent=2, sort_keys=True) + "\n")
+    print(str(dest))
+    return 0
+
+
+def cmd_check(a):
+    """Check 6 — proof-of-operation verifier (fail-closed). Returns exit
+    0=valid/no-op, 2=degraded_run, 3=broken_run. Worst verdict over all declared
+    stages wins (broken dominates degraded). Reuses verify-receipt sig check +
+    recomputes families from the SIGNED invocations via the pinned map (the
+    verifier's authority, SB6). On any non-pass, queues to verify-fail.jsonl so
+    DEGRADED is a deny, never silently green (SB5)."""
+    run_dir = Path(a.run_dir)
+    declared_path = run_dir / "proof-declared.json"
+    if not declared_path.exists():
+        # Tamper guard: a missing declaration list with proof artifacts PRESENT means
+        # the "what must be proven" list was removed to skip the gate. Fail closed.
+        # (Full fix — derive declarations from the verified manifest — is the executor
+        # seam; this closes the delete-the-list-but-leave-artifacts bypass now.)
+        attempted = run_dir / "attempted"
+        receipts = run_dir / "receipts"
+        has_artifacts = (attempted.is_dir() and any(attempted.iterdir())) or (receipts.is_dir() and any(receipts.iterdir()))
+        if has_artifacts:
+            _atomic_append(run_dir / "verify-fail.jsonl", json.dumps({"check6": "broken_run", "reasons": ["proof-declared.json absent but proof artifacts present (declaration list removed — tamper)"]}) + "\n")
+            print(json.dumps({"check6": "broken_run", "reason": "proof-declared.json absent but proof artifacts present (tamper)"}), file=sys.stderr)
+            return 3
+        print(json.dumps({"check6": "no-op", "reason": "no proof-declared.json (back-compat: no declared verify ops)"}))
+        return 0
+    declared = json.loads(declared_path.read_text())
+    if not declared:
+        print(json.dumps({"check6": "no-op", "reason": "no declared verify ops"}))
+        return 0
+    fmap = _load_family_map()
+    worst = 0
+    reasons = []
+    for st in declared:
+        idx = st["stage_index"]
+        sid, op = st.get("stage_id"), st.get("operation")
+        minf = int(st.get("min_model_families", 1))
+        exp_hash = st.get("envelope_hash")
+        marker = run_dir / "attempted" / str(idx)
+        receipt = run_dir / "receipts" / f"{idx}.json"
+        if not receipt.exists():
+            if marker.exists():
+                worst = max(worst, 2); reasons.append(f"stage {idx} {op}: attempted, capture failed (marker present, receipt absent) -> degraded")
+            else:
+                worst = max(worst, 3); reasons.append(f"stage {idx} {op}: operation never ran (no marker, no receipt) -> broken")
+            continue
+        rj = json.loads(receipt.read_text())
+        payload = rj.get("payload") or {}
+        sig, kid = rj.get("sig"), rj.get("signing_key_id")
+        # 1. signature FIRST (cheapest-fail-first) — the load-bearing check (B5/SB1)
+        if not (sig and kid and _verify(_canonical(payload), sig, kid, a.pubkey_dir)):
+            worst = max(worst, 3); reasons.append(f"stage {idx} {op}: receipt signature invalid (forged/unsigned) -> broken")
+            continue
+        # 2. correlation (defeats cross-run / cross-stage replay, B4)
+        corr = (payload.get("compose_run_id") == a.run_id
+                and str(payload.get("stage_index")) == str(idx)
+                and (sid is None or payload.get("stage_id") == sid)
+                and (op is None or payload.get("operation") == op)
+                and (exp_hash is None or payload.get("envelope_hash") == exp_hash))
+        if not corr:
+            worst = max(worst, 3); reasons.append(f"stage {idx} {op}: correlation mismatch (replay/cross-run/cross-stage) -> broken")
+            continue
+        # 3. families — recompute from SIGNED invocations via the pinned map (SB6)
+        invs = payload.get("invocations") or []
+        fams = sorted({resolve_family(i.get("final_model_id"), fmap) for i in invs if resolve_family(i.get("final_model_id"), fmap)})
+        unmapped = sorted({i.get("final_model_id") for i in invs if not resolve_family(i.get("final_model_id"), fmap)})
+        if len(fams) < minf:
+            extra = f" [SB6 unmapped ids ignored: {unmapped}]" if unmapped else ""
+            worst = max(worst, 3); reasons.append(f"stage {idx} {op}: {len(fams)} family/families < required {minf}{extra} -> broken")
+            continue
+    verdict = "valid" if worst == 0 else ("degraded_run" if worst == 2 else "broken_run")
+    result = {"check6": verdict, "reasons": reasons}
+    if worst != 0:
+        _atomic_append(run_dir / "verify-fail.jsonl", json.dumps(result) + "\n")  # SB5: deny is recorded
+        print(json.dumps(result), file=sys.stderr)
+    else:
+        print(json.dumps(result))
+    return worst
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="compose-proof-capture")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -286,6 +393,15 @@ def main(argv=None):
     sv.add_argument("--spec", required=True)
     sv.add_argument("--stage-index", default=None)
     sv.set_defaults(func=cmd_should_verify)
+
+    dc = sub.add_parser("declare")
+    dc.add_argument("--composition", required=True); dc.add_argument("--run-dir", required=True)
+    dc.set_defaults(func=cmd_declare)
+
+    ck = sub.add_parser("check")
+    ck.add_argument("--run-dir", required=True); ck.add_argument("--run-id", required=True)
+    ck.add_argument("--pubkey-dir", required=True)
+    ck.set_defaults(func=cmd_check)
 
     a = p.parse_args(argv)
     return a.func(a)

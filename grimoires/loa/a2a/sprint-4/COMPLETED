@@ -1,0 +1,2 @@
+sprint-4 COMPLETED 2026-06-19T03:48:29Z
+Epic B Check 6 proof-of-operation verifier (fail-closed) + negative battery (RFC #57). Audit APPROVED. 10 battery + 3 e2e wiring tests; compose-verify-run unregressed. Executor-seam reqs (key-isolation, declaration provenance, run-dir isolation) recorded as binding on the live-run integration.

@@ -245,11 +245,27 @@ subcommands; the runtime wires them at two points:
    --operation … --envelope-hash … --modelinv .run/model-invoke.jsonl --key-id … --key-dir …`.
 
 `mark`/`capture` create `attempted/` + `receipts/` `0700` and write atomically
-(temp+rename) — SDD B4 isolation. **Status:** the capture/verify/family/marker
-machinery + the declaration-gating decision (`should-verify`) are implemented and
-tested (`tests/integration/compose-proof.bats`, 9 tests). The call-sites inside
-`compose-dispatch.sh` (Form B/C) and the binding to the **live** cheval MODELINV
-field names (currently read liberally: `final_model_id`→`model_invoked`→`model`) are
-the integration step landed alongside sprint-4's Check 6 verifier — they are the
-named seam, not a silent omission. Sprint-4's `compose-verify-run.sh` Check 6
-consumes these receipts.
+(temp+rename) — SDD B4 isolation.
+
+**Status (sprint-4 complete):** Check 6 is **LIVE** — `compose-verify-run.sh
+--proof-of-operation` runs `compose-proof-capture.py check` (same canonicalizer +
+sig verify; the verifier independently recomputes families from the SIGNED
+invocations via the pinned map). Verdict mapping: forged/uncorrelated/under-family/
+never-ran → `broken_run` (3); attempted-but-no-receipt → `degraded_run` (2, a
+retryable deny queued to `verify-fail.jsonl`, never green); no declaration →
+no-op (back-compat). Default-off (opt-in `--proof-of-operation`), mirroring
+`--legba`'s default-off→default-on rollout. Proven by `compose-proof-check.bats`
+(9, the negative battery: VC-B1..B4 + forgery/replay/marker-bypass/unmapped/
+degraded/back-compat) + `compose-verify-proof-wiring.bats` (3, end-to-end through
+`compose-verify-run.sh`).
+
+**The remaining coherent seam — the Form C executor.** `declare` (run start),
+`mark` (before each declaring stage's invocation), and `capture` (after, by the
+isolated cheval/MODELINV writer) must land TOGETHER in the Form C executor (the
+main loop that runs segments via the Workflow tool — NOT `compose-dispatch.sh`,
+which only compiles + hands off) plus the cheval MODELINV `final_model_id`
+tagging. They are deliberately not split: a `declare`-only hook would make a
+`--proof-of-operation` run with a declaring stage fail closed (no marker/receipt
+→ `broken_run`) before the executor can produce the evidence. Until the executor
+is wired, the gate enforces whenever the artifacts are present (proven e2e) and is
+a safe no-op otherwise.
