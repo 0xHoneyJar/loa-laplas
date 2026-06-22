@@ -272,6 +272,26 @@ test('ATK-1: manifest gatekeeper_pubkey_pem is redundant metadata and must match
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('BB#59 F-002: env-supplied trust anchors are refused in strict mode', () => {
+  const { dir } = freshRun();
+  const prev = process.env.LOA_PINNED_ROOT_PUBKEY_PATH;
+  process.env.LOA_PINNED_ROOT_PUBKEY_PATH = join(dir, 'evil.pub');
+  const v = verifyRun(dir, { strict: true });
+  if (prev === undefined) delete process.env.LOA_PINNED_ROOT_PUBKEY_PATH; else process.env.LOA_PINNED_ROOT_PUBKEY_PATH = prev;
+  assert.equal(v.ok, false, 'env-supplied anchor must fail strict verification');
+  assert.equal(v.trust_store.status, 'env_override_in_strict');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('BB#59 F-001: an in-repo trust anchor is refused in strict mode (out-of-band required)', () => {
+  const { dir } = freshRun();
+  const inRepo = new URL('./legba-core.mjs', import.meta.url).pathname; // a path inside the repo tree
+  const v = verifyRun(dir, { strict: true, pinnedRootPubkeyPath: inRepo });
+  assert.equal(v.ok, false, 'in-repo anchor must fail strict verification');
+  assert.equal(v.trust_store.status, 'anchor_in_repo');
+  rmSync(dir, { recursive: true, force: true });
+});
+
 // ── LR-4 external anchoring ───────────────────────────────────────────────────
 import { rmSync as rmr } from 'node:fs';
 

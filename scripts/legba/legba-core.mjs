@@ -29,7 +29,7 @@ import {
   mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync,
   appendFileSync, chmodSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 
 export const CONTRACT_VERSION = '8.8.0'; // tracks hounfour PR #118 (provisional)
@@ -114,8 +114,18 @@ const readManifest = (dir) => JSON.parse(readFileSync(join(dir, 'manifest.json')
 function repoRoot() {
   return new URL('../..', import.meta.url).pathname;
 }
-const defaultTrustStorePath = () => process.env.LOA_TRUST_STORE_FILE || join(repoRoot(), 'grimoires', 'loa', 'trust-store.yaml');
-const defaultPinnedRootPath = () => process.env.LOA_PINNED_ROOT_PUBKEY_PATH || join(repoRoot(), '.claude', 'data', 'maintainer-root-pubkey.txt');
+// BB #59 F-001: the trust anchor MUST live outside the attacker's write path.
+// Strict defaults resolve to the operator's out-of-band ~/.config/loa, NOT the
+// repo tree; in strict mode an anchor resolving inside the repo is rejected.
+// (Env overrides remain for non-strict/bootstrap only — see resolveGatekeeperPubkey.)
+const operatorRootDir = () => join(homedir(), '.config', 'loa');
+const defaultTrustStorePath = () => join(operatorRootDir(), 'trust-store.yaml');
+const defaultPinnedRootPath = () => join(operatorRootDir(), 'maintainer-root-pubkey.txt');
+function isInsideRepo(p) {
+  const root = resolve(repoRoot());
+  const rp = resolve(p);
+  return rp === root || rp.startsWith(root + sep);
+}
 function stripInlineComment(s) {
   let quote = null;
   for (let i = 0; i < s.length; i++) {
@@ -251,9 +261,25 @@ function verifyTrustStore(doc, pinnedRootPubkeyPath) {
 }
 function resolveGatekeeperPubkey(man, {
   strict = true,
-  trustStorePath = defaultTrustStorePath(),
-  pinnedRootPubkeyPath = defaultPinnedRootPath(),
+  trustStorePath,
+  pinnedRootPubkeyPath,
 } = {}) {
+  // BB #59 F-002: in strict mode the anchor must not be set by ambient env.
+  // Env overrides are honored only in non-strict/bootstrap mode AND only when the
+  // caller did not pass explicit trusted paths; their presence in strict fails closed.
+  const envTs = process.env.LOA_TRUST_STORE_FILE;
+  const envPk = process.env.LOA_PINNED_ROOT_PUBKEY_PATH;
+  if (strict && trustStorePath === undefined && pinnedRootPubkeyPath === undefined && (envTs || envPk)) {
+    return { ok: false, status: 'env_override_in_strict',
+      error: 'strict verify refuses env-supplied trust anchors (LOA_TRUST_STORE_FILE / LOA_PINNED_ROOT_PUBKEY_PATH); pass an explicit trusted path' };
+  }
+  trustStorePath = trustStorePath ?? (strict ? defaultTrustStorePath() : (envTs || defaultTrustStorePath()));
+  pinnedRootPubkeyPath = pinnedRootPubkeyPath ?? (strict ? defaultPinnedRootPath() : (envPk || defaultPinnedRootPath()));
+  // BB #59 F-001: in strict/merge mode the anchor must be out-of-band, never the repo tree.
+  if (strict && (isInsideRepo(trustStorePath) || isInsideRepo(pinnedRootPubkeyPath))) {
+    return { ok: false, status: 'anchor_in_repo',
+      error: 'strict verify refuses a trust anchor inside the repo working tree; provision the root key out-of-band' };
+  }
   if (!existsSync(trustStorePath)) {
     if (!strict) return { ok: true, pubkeyPem: man.gatekeeper_pubkey_pem, rooted: false, status: 'bootstrap_pending', reason: 'trust-store missing' };
     return { ok: false, status: 'missing', error: `trust-store not found: ${trustStorePath}` };
@@ -264,6 +290,12 @@ function resolveGatekeeperPubkey(man, {
   if (trustStoreBootstrap(doc)) {
     if (!strict) return { ok: true, pubkeyPem: man.gatekeeper_pubkey_pem, rooted: false, status: 'bootstrap_pending', reason: 'trust-store BOOTSTRAP-PENDING' };
     return { ok: false, status: 'bootstrap_pending', error: 'trust-store BOOTSTRAP-PENDING is not valid for strict verify' };
+  }
+  // BB #59 F-003: a store claiming to be rooted must be structurally valid; fail closed
+  // loudly rather than letting the narrow YAML parser silently reshape it past verification.
+  if (typeof doc.schema_version !== 'string' || !Array.isArray(doc.keys) || !Array.isArray(doc.revocations)
+      || typeof doc.root_signature !== 'object' || doc.root_signature === null) {
+    return { ok: false, status: 'invalid', error: 'trust-store failed schema validation (malformed structure)' };
   }
   const root = verifyTrustStore(doc, pinnedRootPubkeyPath);
   if (!root.ok) return { ok: false, status: 'unrooted', error: root.error };
