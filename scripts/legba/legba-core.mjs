@@ -24,12 +24,12 @@
  *       (key ceremony); the PUBLIC key is also copied into the run manifest so a
  *       third party verifies with the run dir alone.
  */
-import { createHash, generateKeyPairSync, sign, verify } from 'node:crypto';
+import { createHash, createPublicKey, generateKeyPairSync, sign, verify } from 'node:crypto';
 import {
   mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync,
   appendFileSync, chmodSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 
 export const CONTRACT_VERSION = '8.8.0'; // tracks hounfour PR #118 (provisional)
@@ -55,7 +55,7 @@ export function runDir(runId, base) {
   return base || join(homedir(), '.loa', 'runs', runId);
 }
 function keyDir() {
-  const d = join(homedir(), '.config', 'loa', 'audit-keys');
+  const d = process.env.LEGBA_AUDIT_KEY_DIR || process.env.LOA_AUDIT_KEY_DIR || join(homedir(), '.config', 'loa', 'audit-keys');
   mkdirSync(d, { recursive: true });
   return d;
 }
@@ -109,6 +109,205 @@ export function provisionRun(runId, gk, base) {
   return manifest;
 }
 const readManifest = (dir) => JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+
+// ── rooted trust-store (merge verify path) ───────────────────────────────────
+function repoRoot() {
+  return new URL('../..', import.meta.url).pathname;
+}
+// BB #59 F-001: the trust anchor MUST live outside the attacker's write path.
+// Strict defaults resolve to the operator's out-of-band ~/.config/loa, NOT the
+// repo tree; in strict mode an anchor resolving inside the repo is rejected.
+// (Env overrides remain for non-strict/bootstrap only — see resolveGatekeeperPubkey.)
+const operatorRootDir = () => join(homedir(), '.config', 'loa');
+const defaultTrustStorePath = () => join(operatorRootDir(), 'trust-store.yaml');
+const defaultPinnedRootPath = () => join(operatorRootDir(), 'maintainer-root-pubkey.txt');
+function isInsideRepo(p) {
+  const root = resolve(repoRoot());
+  const rp = resolve(p);
+  return rp === root || rp.startsWith(root + sep);
+}
+function stripInlineComment(s) {
+  let quote = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if ((c === '"' || c === "'") && s[i - 1] !== '\\') quote = quote === c ? null : (quote || c);
+    if (c === '#' && !quote && (i === 0 || /\s/.test(s[i - 1]))) return s.slice(0, i).trimEnd();
+  }
+  return s.trimEnd();
+}
+function scalar(s) {
+  const v = stripInlineComment(s).trim();
+  if (v === '[]') return [];
+  if (v === 'null') return null;
+  if (v === '""' || v === "''") return '';
+  const q = v.match(/^["'](.*)["']$/);
+  return q ? q[1] : v;
+}
+function readBlock(lines, i, indent) {
+  const out = [];
+  const pad = ' '.repeat(indent);
+  while (i < lines.length && (lines[i].startsWith(pad) || lines[i].trim() === '')) {
+    if (lines[i].trim() !== '') out.push(lines[i].slice(indent));
+    i++;
+  }
+  return { value: out.join('\n') + (out.length ? '\n' : ''), next: i };
+}
+function parseMap(lines, i, indent) {
+  const obj = {};
+  const pad = ' '.repeat(indent);
+  while (i < lines.length) {
+    const raw = lines[i];
+    if (!raw.startsWith(pad) || raw.startsWith(pad + '  ') || raw.trim().startsWith('- ')) break;
+    const line = stripInlineComment(raw.slice(indent));
+    if (!line || !line.includes(':')) { i++; continue; }
+    const [k, ...rest] = line.split(':');
+    const val = rest.join(':').trim();
+    if (val === '|') {
+      const block = readBlock(lines, i + 1, indent + 2);
+      obj[k.trim()] = block.value;
+      i = block.next;
+    } else {
+      obj[k.trim()] = scalar(val);
+      i++;
+    }
+  }
+  return { value: obj, next: i };
+}
+function parseList(lines, i, indent) {
+  const arr = [];
+  const itemPad = ' '.repeat(indent) + '- ';
+  while (i < lines.length) {
+    const raw = lines[i];
+    if (!raw.startsWith(itemPad)) break;
+    const obj = {};
+    const first = stripInlineComment(raw.slice(itemPad.length));
+    i++;
+    if (first && first.includes(':')) {
+      const [k, ...rest] = first.split(':');
+      obj[k.trim()] = scalar(rest.join(':').trim());
+    }
+    const props = parseMap(lines, i, indent + 2);
+    Object.assign(obj, props.value);
+    i = props.next;
+    arr.push(obj);
+  }
+  return { value: arr, next: i };
+}
+function parseTrustStoreYaml(raw) {
+  const lines = raw.split('\n').filter((l) => {
+    const t = l.trim();
+    return t && t !== '---' && !t.startsWith('#');
+  });
+  const doc = {};
+  for (let i = 0; i < lines.length;) {
+    if (/^\s/.test(lines[i])) { i++; continue; }
+    const line = stripInlineComment(lines[i]);
+    const [k, ...rest] = line.split(':');
+    const key = k.trim();
+    const val = rest.join(':').trim();
+    i++;
+    if (val) {
+      doc[key] = scalar(val);
+    } else if (key === 'keys' || key === 'revocations') {
+      const list = parseList(lines, i, 2);
+      doc[key] = list.value;
+      i = list.next;
+    } else {
+      const map = parseMap(lines, i, 2);
+      doc[key] = map.value;
+      i = map.next;
+    }
+  }
+  if (!Array.isArray(doc.keys)) doc.keys = [];
+  if (!Array.isArray(doc.revocations)) doc.revocations = [];
+  return doc;
+}
+function pemDer(pem) {
+  return createPublicKey(pem).export({ type: 'spki', format: 'der' });
+}
+function samePem(a, b) {
+  try { return pemDer(a).equals(pemDer(b)); } catch { return false; }
+}
+function keyIdOf(k) {
+  return k.key_id || k.gatekeeper_key_id || k.writer_id || k.id;
+}
+function keyMatches(k, man) {
+  return keyIdOf(k) === man.gatekeeper_key_id || keyIdOf(k) === man.gatekeeper_id
+    || k.gatekeeper_id === man.gatekeeper_id || k.writer_id === man.gatekeeper_id;
+}
+function trustStoreBootstrap(doc) {
+  const rs = doc?.root_signature || {};
+  return (!doc || ((doc.keys || []).length === 0 && (doc.revocations || []).length === 0
+    && !(rs.signature || '').trim()));
+}
+function verifyTrustStore(doc, pinnedRootPubkeyPath) {
+  const rs = doc.root_signature;
+  if (!doc.schema_version) return { ok: false, error: 'trust-store missing schema_version' };
+  if (!rs || rs.algorithm !== 'ed25519') return { ok: false, error: 'trust-store missing ed25519 root_signature' };
+  if (!rs.signer_pubkey || !rs.signature) return { ok: false, error: 'trust-store missing root signer/signature' };
+  if (!existsSync(pinnedRootPubkeyPath)) return { ok: false, error: `pinned root pubkey not found: ${pinnedRootPubkeyPath}` };
+  const pinned = readFileSync(pinnedRootPubkeyPath, 'utf8');
+  if (!samePem(rs.signer_pubkey, pinned)) return { ok: false, error: 'trust-store signer_pubkey diverges from pinned root pubkey' };
+  const core = {
+    schema_version: doc.schema_version,
+    keys: doc.keys || [],
+    revocations: doc.revocations || [],
+    trust_cutoff: doc.trust_cutoff || {},
+  };
+  let ok = false;
+  try { ok = verify(null, Buffer.from(jcs(core)), pinned, Buffer.from(rs.signature, 'base64')); }
+  catch { ok = false; }
+  return ok ? { ok: true } : { ok: false, error: 'trust-store root_signature does NOT verify' };
+}
+function resolveGatekeeperPubkey(man, {
+  strict = true,
+  trustStorePath,
+  pinnedRootPubkeyPath,
+} = {}) {
+  // BB #59 F-002: in strict mode the anchor must not be set by ambient env.
+  // Env overrides are honored only in non-strict/bootstrap mode AND only when the
+  // caller did not pass explicit trusted paths; their presence in strict fails closed.
+  const envTs = process.env.LOA_TRUST_STORE_FILE;
+  const envPk = process.env.LOA_PINNED_ROOT_PUBKEY_PATH;
+  if (strict && trustStorePath === undefined && pinnedRootPubkeyPath === undefined && (envTs || envPk)) {
+    return { ok: false, status: 'env_override_in_strict',
+      error: 'strict verify refuses env-supplied trust anchors (LOA_TRUST_STORE_FILE / LOA_PINNED_ROOT_PUBKEY_PATH); pass an explicit trusted path' };
+  }
+  trustStorePath = trustStorePath ?? (strict ? defaultTrustStorePath() : (envTs || defaultTrustStorePath()));
+  pinnedRootPubkeyPath = pinnedRootPubkeyPath ?? (strict ? defaultPinnedRootPath() : (envPk || defaultPinnedRootPath()));
+  // BB #59 F-001: in strict/merge mode the anchor must be out-of-band, never the repo tree.
+  if (strict && (isInsideRepo(trustStorePath) || isInsideRepo(pinnedRootPubkeyPath))) {
+    return { ok: false, status: 'anchor_in_repo',
+      error: 'strict verify refuses a trust anchor inside the repo working tree; provision the root key out-of-band' };
+  }
+  if (!existsSync(trustStorePath)) {
+    if (!strict) return { ok: true, pubkeyPem: man.gatekeeper_pubkey_pem, rooted: false, status: 'bootstrap_pending', reason: 'trust-store missing' };
+    return { ok: false, status: 'missing', error: `trust-store not found: ${trustStorePath}` };
+  }
+  let doc;
+  try { doc = parseTrustStoreYaml(readFileSync(trustStorePath, 'utf8')); }
+  catch (e) { return { ok: false, status: 'invalid', error: `trust-store parse failed: ${e.message}` }; }
+  if (trustStoreBootstrap(doc)) {
+    if (!strict) return { ok: true, pubkeyPem: man.gatekeeper_pubkey_pem, rooted: false, status: 'bootstrap_pending', reason: 'trust-store BOOTSTRAP-PENDING' };
+    return { ok: false, status: 'bootstrap_pending', error: 'trust-store BOOTSTRAP-PENDING is not valid for strict verify' };
+  }
+  // BB #59 F-003: a store claiming to be rooted must be structurally valid; fail closed
+  // loudly rather than letting the narrow YAML parser silently reshape it past verification.
+  if (typeof doc.schema_version !== 'string' || !Array.isArray(doc.keys) || !Array.isArray(doc.revocations)
+      || typeof doc.root_signature !== 'object' || doc.root_signature === null) {
+    return { ok: false, status: 'invalid', error: 'trust-store failed schema validation (malformed structure)' };
+  }
+  const root = verifyTrustStore(doc, pinnedRootPubkeyPath);
+  if (!root.ok) return { ok: false, status: 'unrooted', error: root.error };
+  const rooted = (doc.keys || []).find((k) => keyMatches(k, man) && k.pubkey_pem);
+  if (!rooted) return { ok: false, status: 'key_not_rooted', error: `gatekeeper key not rooted: ${man.gatekeeper_id}/${man.gatekeeper_key_id}` };
+  const revoked = (doc.revocations || []).some((r) => keyMatches(r, man) && (!r.pubkey_pem || samePem(r.pubkey_pem, rooted.pubkey_pem)));
+  if (revoked) return { ok: false, status: 'revoked', error: `gatekeeper key revoked: ${man.gatekeeper_id}/${man.gatekeeper_key_id}` };
+  if (!samePem(rooted.pubkey_pem, man.gatekeeper_pubkey_pem)) {
+    return { ok: false, status: 'manifest_divergence', error: 'manifest gatekeeper_pubkey_pem diverges from rooted trust-store key' };
+  }
+  return { ok: true, pubkeyPem: rooted.pubkey_pem, rooted: true, status: 'rooted' };
+}
 
 // ── CAS (file-backed) ────────────────────────────────────────────────────────
 function casPut(dir, value) {
@@ -252,14 +451,22 @@ export function openSpan(dir, { runId, spanIndex }) {
 }
 
 // ── whole-run verification (LG: third party, run dir + public key only) ──────
-export function verifyRun(dir) {
+export function verifyRun(dir, options = {}) {
   const man = readManifest(dir);
-  const pub = man.gatekeeper_pubkey_pem;
+  const resolved = resolveGatekeeperPubkey(man, options);
   const tokenFiles = existsSync(join(dir, 'tokens'))
     ? readdirSync(join(dir, 'tokens')).filter((f) => f.endsWith('.json'))
         .sort((a, b) => parseInt(a.match(/\d+/)) - parseInt(b.match(/\d+/)))
     : [];
-  const report = { run_id: man.run_id, ok: true, gates: [] };
+  const report = { run_id: man.run_id, ok: resolved.ok, trust_store: resolved.ok
+    ? { status: resolved.status, rooted: !!resolved.rooted }
+    : { status: resolved.status, error: resolved.error }, gates: [] };
+  if (!resolved.ok) {
+    report.run_receipt_hash = hashObj([]);
+    report.gate_count = tokenFiles.length;
+    return report;
+  }
+  const pub = resolved.pubkeyPem;
   let prevHash = GENESIS;
   const tokenHashes = [];
   for (const tf of tokenFiles) {
