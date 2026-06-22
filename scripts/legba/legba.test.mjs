@@ -16,6 +16,7 @@ import {
   initKeys, loadOrInitKeys, provisionRun, record, gate, openSpan, verifyRun, challenge, jcs,
 } from './legba-core.mjs';
 import { REGISTRY } from './tools.mjs';
+import { startSignerDaemon } from './legba-signer-daemon-test-helper.mjs';
 
 process.env.LEGBA_AUDIT_KEY_DIR = mkdtempSync(join(tmpdir(), 'legba-keys-'));
 
@@ -241,6 +242,72 @@ function rootedFixture(dir, man) {
   }]);
   return { trustStore, pinnedRoot };
 }
+
+test('daemon custody: in-memory signer gates legitimate evidence and refuses evidence-free work', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'legba-daemon-legit-'));
+  const empty = mkdtempSync(join(tmpdir(), 'legba-daemon-empty-'));
+  const daemonDir = mkdtempSync(join(tmpdir(), 'legba-daemon-'));
+  const auditKeys = mkdtempSync(join(tmpdir(), 'legba-daemon-audited-keys-'));
+  const signerKeys = mkdtempSync(join(tmpdir(), 'legba-daemon-signer-keys-'));
+  const socketPath = join(daemonDir, 'signer.sock');
+  let daemon;
+  try {
+    daemon = await startSignerDaemon(socketPath, { LEGBA_SIGNER_KEY_DIR: signerKeys, LEGBA_AUDIT_KEY_DIR: auditKeys });
+  } catch (e) {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(empty, { recursive: true, force: true });
+    rmSync(daemonDir, { recursive: true, force: true });
+    rmSync(auditKeys, { recursive: true, force: true });
+    rmSync(signerKeys, { recursive: true, force: true });
+    if (/\bEPERM\b/.test(e.message)) {
+      t.skip('Unix-domain sockets are unavailable in this sandbox');
+      return;
+    }
+    throw e;
+  }
+  try {
+    withEnv({
+      LEGBA_SIGNER: undefined,
+      LEGBA_SIGNER_SOCKET: socketPath,
+      LEGBA_SIGNER_KEY_DIR: signerKeys,
+      LEGBA_AUDIT_KEY_DIR: auditKeys,
+    }, () => {
+      const gkId = 'legba:daemon:legit';
+      const gk = initKeys(gkId);
+      assert.equal(gk._privateKeyPem, undefined, 'daemon init must expose only public key material');
+      assert.equal(existsSync(join(auditKeys, `${safeKeyName(gkId)}.priv`)), false, 'audited key dir must not receive a private key');
+      assert.equal(existsSync(join(signerKeys, `${safeKeyName(gkId)}.priv`)), false, 'daemon mode must not persist a signer private key');
+
+      const man = provisionRun('daemon-legit', gk, dir);
+      record(dir, { runId: 'daemon-legit', spanIndex: 0, kind: 'tool', determinism: 're_executable', tool: 'arith', input: { expr: '8 * 7' }, output: { result: 56 } });
+      const sealed = gate(dir, { runId: 'daemon-legit', gateIndex: 0, registry: REGISTRY, artifacts: [{ result: 56 }] });
+      assert.equal(sealed.token.verdict, 'pass');
+
+      const roots = rootedFixture(dir, man);
+      const v = verifyRun(dir, { strict: true, trustStorePath: roots.trustStore, pinnedRootPubkeyPath: roots.pinnedRoot });
+      assert.equal(v.ok, true, 'daemon-gated legitimate run must verify strict + rooted');
+      assert.equal(v.trust_store.status, 'rooted');
+
+      const badGk = initKeys('legba:daemon:evidence-free');
+      provisionRun('daemon-empty', badGk, empty);
+      record(empty, { runId: 'daemon-empty', spanIndex: 0, kind: 'emission', determinism: 'attestable', label: 'claim', content: { fabricated: true } });
+      assert.throws(
+        () => gate(empty, { runId: 'daemon-empty', gateIndex: 0, registry: REGISTRY }),
+        /no_verifiable_evidence/,
+        'daemon must refuse evidence-free work',
+      );
+      assert.equal(existsSync(join(empty, 'tokens', 'token-0.json')), false, 'daemon refusal must not emit a token');
+      assert.equal(existsSync(join(signerKeys, `${safeKeyName('legba:daemon:evidence-free')}.priv`)), false, 'daemon must not persist evidence-free signer private key either');
+    });
+  } finally {
+    await daemon.stop();
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(empty, { recursive: true, force: true });
+    rmSync(daemonDir, { recursive: true, force: true });
+    rmSync(auditKeys, { recursive: true, force: true });
+    rmSync(signerKeys, { recursive: true, force: true });
+  }
+});
 
 test('custody forge_cannot_self_sign: gate has no local-key fallback in custody mode', () => {
   const dir = mkdtempSync(join(tmpdir(), 'legba-custody-self-'));

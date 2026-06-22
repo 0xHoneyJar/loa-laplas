@@ -66,7 +66,32 @@ function custodySignerPath() {
   if (v === '1' || v === 'true') return new URL('./legba-signer.mjs', import.meta.url).pathname;
   return v;
 }
+function custodySignerSocket() {
+  return process.env.LEGBA_SIGNER_SOCKET || null;
+}
+function custodyRelayPath() {
+  return new URL('./legba-signer-relay.mjs', import.meta.url).pathname;
+}
 function callSigner(cmd, payload) {
+  const socketPath = custodySignerSocket();
+  if (socketPath) {
+    try {
+      const stdout = execFileSync(process.execPath, [custodyRelayPath(), cmd], {
+        input: JSON.stringify(payload ?? {}),
+        encoding: 'utf8',
+        maxBuffer: 1024 * 1024,
+        env: { ...process.env, LEGBA_SIGNER_SOCKET: socketPath, LEGBA_AUDIT_KEY_DIR: '', LOA_AUDIT_KEY_DIR: '' },
+      });
+      return JSON.parse(stdout);
+    } catch (e) {
+      let msg = e.message;
+      try {
+        const parsed = JSON.parse(e.stdout || '');
+        msg = parsed.error || parsed.status || msg;
+      } catch { /* keep child_process error */ }
+      throw new Error(`LEGBA_SIGNER_REFUSED: ${msg}`);
+    }
+  }
   const signerPath = custodySignerPath();
   if (!signerPath) throw new Error('LEGBA_CUSTODY_DISABLED: no LEGBA_SIGNER configured');
   try {
@@ -89,7 +114,7 @@ function callSigner(cmd, payload) {
 }
 /** Key ceremony: generate a per-room ed25519 keypair, persist it, publish nothing yet. */
 export function initKeys(gatekeeperId = 'legba:default', keyVersion = 1) {
-  if (custodySignerPath()) return callSigner('init-keys', { gatekeeperId, keyVersion });
+  if (custodySignerSocket() || custodySignerPath()) return callSigner('init-keys', { gatekeeperId, keyVersion });
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
   const priv = privateKey.export({ type: 'pkcs8', format: 'pem' });
   const pub = publicKey.export({ type: 'spki', format: 'pem' });
@@ -113,7 +138,7 @@ function loadPriv(gatekeeperId) {
  * fresh key on purpose. (Codex P2.)
  */
 export function loadOrInitKeys(gatekeeperId = 'legba:default', keyVersion = 1, { rotate = false } = {}) {
-  if (custodySignerPath()) return callSigner('init-keys', { gatekeeperId, keyVersion, rotate });
+  if (custodySignerSocket() || custodySignerPath()) return callSigner('init-keys', { gatekeeperId, keyVersion, rotate });
   const safe = gatekeeperId.replace(/[^A-Za-z0-9._-]/g, '_');
   const privPath = join(keyDir(), `${safe}.priv`);
   const pubPath = join(keyDir(), `${safe}.pub`);
@@ -410,7 +435,7 @@ export function replayChain(log) {
 
 // ── token sign/verify ────────────────────────────────────────────────────────
 function signToken(token, gatekeeperId) {
-  if (custodySignerPath()) throw new Error('LEGBA_CUSTODY_REFUSED_LOCAL_SIGN: custody mode requires signer-mediated gate signing');
+  if (custodySignerSocket() || custodySignerPath()) throw new Error('LEGBA_CUSTODY_REFUSED_LOCAL_SIGN: custody mode requires signer-mediated gate signing');
   const signature = sign(null, Buffer.from(jcs(token)), loadPriv(gatekeeperId)).toString('base64');
   return { token, signature, token_hash: hashObj(token) };
 }
@@ -463,7 +488,7 @@ export function buildGateToken(dir, { runId, gateIndex, registry = {}, artifacts
 }
 
 export function gate(dir, { runId, gateIndex, registry = {}, artifacts = [], sampleRate = 0.5 }) {
-  if (custodySignerPath()) {
+  if (custodySignerSocket() || custodySignerPath()) {
     const sealed = callSigner('sign-gate', { dir, runId, gateIndex, artifacts, sampleRate });
     writeFileSync(join(dir, 'tokens', `token-${gateIndex}.json`), JSON.stringify(sealed, null, 2));
     return sealed;
