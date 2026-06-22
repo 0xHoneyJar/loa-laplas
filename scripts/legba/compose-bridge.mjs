@@ -15,7 +15,9 @@
  * integrity-over-time").
  *
  *   compose-bridge.mjs build  <compose-run-dir>   build the chain; print receipt
- *   compose-bridge.mjs verify <compose-run-dir>   build (if absent) + verify; exit 0/1
+ *   compose-bridge.mjs verify <compose-run-dir>   verify existing chain; exit 0/1
+ *   compose-bridge.mjs verify <compose-run-dir> --repair --bootstrap
+ *                                                 non-merge repair/bootstrap path
  *
  * The Legba run lives at <compose-run-dir>/legba/ so it travels with the run and
  * verifies self-contained.
@@ -167,11 +169,11 @@ function checkBinding(composeRunDir, legbaDir) {
  * states: anchored_match (good) · anchored_mismatch (TAMPERED) · unanchored (no
  * anchor present — falls back to chain+binding only, cannot detect a rebuild).
  */
-function checkAnchor(composeRunDir, runId, expect) {
+function checkAnchor(composeRunDir, runId, expect, { strict = true } = {}) {
   const current = contentReceipt(composeRunDir);
   const orchAnchor = readAnchor(composeRunDir, runId);
   const anchor = expect || orchAnchor;
-  if (!anchor) return { state: 'unanchored', ok: true, current, source: expect ? 'expect' : 'orchestrator' };
+  if (!anchor) return { state: 'unanchored', ok: !strict, current, source: expect ? 'expect' : 'orchestrator' };
   const match = anchor === current;
   return { state: match ? 'anchored_match' : 'anchored_mismatch', ok: match, current, anchored: anchor, source: expect ? 'expect' : 'orchestrator' };
 }
@@ -181,24 +183,30 @@ const cmd = argv[0];
 const composeRunDir = argv.find((a, i) => i > 0 && !a.startsWith('--'));
 const expectIdx = argv.indexOf('--expect');
 const expect = expectIdx >= 0 ? argv[expectIdx + 1] : null;
+const repair = argv.includes('--repair');
+const bootstrap = argv.includes('--bootstrap') || argv.includes('--non-strict');
+const strict = !bootstrap;
 if (!cmd || !composeRunDir) {
-  console.error('usage: compose-bridge.mjs <build|verify> <compose-run-dir> [--expect <content_receipt>]');
+  console.error('usage: compose-bridge.mjs <build|verify> <compose-run-dir> [--expect <content_receipt>] [--repair] [--bootstrap]');
   process.exit(2);
 }
 try {
   if (cmd === 'build') {
     const { legbaDir, runId, envelope_count, content_receipt, anchor } = build(composeRunDir);
-    const report = verifyRun(legbaDir);
+    const report = verifyRun(legbaDir, { strict: false });
     console.log(JSON.stringify({ ok: report.ok, run_id: runId, envelope_count, legba_dir: legbaDir, run_receipt_hash: report.run_receipt_hash, content_receipt, anchor }, null, 2));
     process.exit(report.ok ? 0 : 1);
   } else if (cmd === 'verify') {
     const legbaDir = join(composeRunDir, 'legba');
     const runId = JSON.parse(readFileSync(join(composeRunDir, 'form-c-manifest.json'), 'utf8')).composition_run_id
       || JSON.parse(readFileSync(join(composeRunDir, 'form-c-manifest.json'), 'utf8')).run_id || 'compose-run';
-    if (!existsSync(join(legbaDir, 'manifest.json'))) build(composeRunDir);
-    const chain = verifyRun(legbaDir);                       // chain internally consistent + signed
+    if (!existsSync(join(legbaDir, 'manifest.json'))) {
+      if (!repair) throw new Error('missing legba/manifest.json; strict verify will not auto-build (use --repair outside merge gates)');
+      build(composeRunDir);
+    }
+    const chain = verifyRun(legbaDir, { strict });            // chain internally consistent + signed
     const binding = checkBinding(composeRunDir, legbaDir);    // chain still describes live envelopes
-    const anchor = checkAnchor(composeRunDir, runId, expect); // recomputed receipt vs external anchor
+    const anchor = checkAnchor(composeRunDir, runId, expect, { strict }); // recomputed receipt vs external anchor
     const ok = chain.ok && binding.ok && anchor.ok;
     console.log(JSON.stringify({ ...chain, ok, binding, anchor }, null, 2));
     process.exit(ok ? 0 : 1);

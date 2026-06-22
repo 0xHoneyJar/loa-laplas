@@ -11,10 +11,13 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { generateKeyPairSync, sign } from 'node:crypto';
 import {
-  initKeys, loadOrInitKeys, provisionRun, record, gate, openSpan, verifyRun, challenge,
+  initKeys, loadOrInitKeys, provisionRun, record, gate, openSpan, verifyRun, challenge, jcs,
 } from './legba-core.mjs';
 import { REGISTRY } from './tools.mjs';
+
+process.env.LEGBA_AUDIT_KEY_DIR = mkdtempSync(join(tmpdir(), 'legba-keys-'));
 
 function freshRun() {
   const dir = mkdtempSync(join(tmpdir(), 'legba-test-'));
@@ -30,7 +33,7 @@ function freshRun() {
 test('LG: honest run gate passes and verifies (third-party, pubkey only)', () => {
   const { dir, sealed } = freshRun();
   assert.equal(sealed.token.verdict, 'pass');
-  const v = verifyRun(dir);
+  const v = verifyRun(dir, { strict: false });
   assert.equal(v.ok, true, 'honest run must verify');
   rmSync(dir, { recursive: true, force: true });
 });
@@ -41,7 +44,7 @@ test('LG-2: tampering a recorded move is caught (chain break)', () => {
   const lines = readFileSync(p, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   lines[0].output_hash = 'deadbeef'.repeat(8);
   writeFileSync(p, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
-  assert.equal(verifyRun(dir).ok, false, 'tampered run must NOT verify');
+  assert.equal(verifyRun(dir, { strict: false }).ok, false, 'tampered run must NOT verify');
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -51,7 +54,7 @@ test('LG-6: a forged gate token (no private key) is caught (signature invalid)',
   const forged = JSON.parse(readFileSync(p, 'utf8'));
   forged.signature = Buffer.from('forged').toString('base64');
   writeFileSync(p, JSON.stringify(forged));
-  assert.equal(verifyRun(dir).ok, false, 'forged token must NOT verify');
+  assert.equal(verifyRun(dir, { strict: false }).ok, false, 'forged token must NOT verify');
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -122,10 +125,18 @@ const runBridge = (cmd, dir, ...extra) => {
 
 test('bridge: derives a verifying custody chain over executed envelopes', () => {
   const dir = fakeComposeRun();
-  const r = runBridge('verify', dir);
+  const r = runBridge('verify', dir, '--repair', '--bootstrap');
   assert.equal(r.code, 0, 'honest compose run must verify');
   assert.equal(r.out.ok, true);
   assert.equal(r.out.binding.ok, true);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('ATK-2: strict compose verify fails instead of auto-building when legba manifest is absent', () => {
+  const dir = fakeComposeRun();
+  const r = runBridge('verify', dir);
+  assert.equal(r.code, 1, 'strict verify must not auto-build a missing legba manifest');
+  assert.equal(existsSync(join(dir, 'legba', 'manifest.json')), false);
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -135,7 +146,7 @@ test('bridge: an envelope edited after gating fails the binding check', () => {
   const p = join(dir, 'envelopes', '01.alpha.handoff.json');
   const env = JSON.parse(readFileSync(p, 'utf8'));
   env.verdict.injected = 'tamper'; writeFileSync(p, JSON.stringify(env));
-  const r = runBridge('verify', dir);
+  const r = runBridge('verify', dir, '--bootstrap');
   assert.equal(r.code, 1, 'tampered run must NOT verify');
   assert.equal(r.out.binding.ok, false);
   assert.equal(r.out.binding.mismatches.length, 1);
@@ -152,7 +163,7 @@ test('P1: a CAS blob edited in place (same filename) is rejected — content-add
   const before = readdirSync(casDir);
   // tamper EVERY cas blob's content; verify must now fail (cas_complete / artifacts)
   for (const f of before) writeFileSync(join(casDir, f), JSON.stringify({ tampered: true }));
-  assert.equal(verifyRun(dir).ok, false, 'in-place CAS edit must break verification');
+  assert.equal(verifyRun(dir, { strict: false }).ok, false, 'in-place CAS edit must break verification');
   // and a challenge against a tampered input must not silently pass
   const r = challenge(dir, 0, 0, REGISTRY);
   assert.equal(r.ok, false, 'challenge must not replay against a tampered input blob');
@@ -171,8 +182,94 @@ test('P2: provisioning a second run with the same gatekeeper reuses the key (ear
   const k2 = loadOrInitKeys(gkId);
   provisionRun('run-b', k2, b);
   assert.equal(k1.publicKeyPem, k2.publicKeyPem, 'same gatekeeper must reuse the keypair');
-  assert.equal(verifyRun(a).ok, true, 'earlier run still verifies after the second provision');
+  assert.equal(verifyRun(a, { strict: false }).ok, true, 'earlier run still verifies after the second provision');
   rmSync(a, { recursive: true, force: true }); rmSync(b, { recursive: true, force: true });
+});
+
+function pemBlock(pem, indent) {
+  const pad = ' '.repeat(indent);
+  return pem.trim().split('\n').map((l) => pad + l).join('\n');
+}
+
+function writeRootedTrustStore(path, rootPriv, rootPubPem, keys) {
+  const core = {
+    schema_version: '1.0',
+    keys,
+    revocations: [],
+    trust_cutoff: { default_strict_after: '2026-05-03T00:00:00Z' },
+  };
+  const rootSig = sign(null, Buffer.from(jcs(core)), rootPriv).toString('base64');
+  const keysYaml = keys.length ? '\n' + keys.map((k) => (
+    `  - key_id: "${k.key_id}"\n`
+    + `    gatekeeper_id: "${k.gatekeeper_id}"\n`
+    + `    pubkey_pem: |\n${pemBlock(k.pubkey_pem, 6)}`
+  )).join('\n') : '[]';
+  writeFileSync(path, `---\nschema_version: "1.0"\nroot_signature:\n  algorithm: ed25519\n  signer_pubkey: |\n${pemBlock(rootPubPem, 4)}\n  signed_at: "2026-05-03T00:00:00Z"\n  signature: "${rootSig}"\nkeys: ${keysYaml}\nrevocations: []\ntrust_cutoff:\n  default_strict_after: "2026-05-03T00:00:00Z"\n`);
+}
+
+test('ATK-1: strict verify rejects a self-minted manifest key absent from the rooted trust-store', () => {
+  const { dir } = freshRun();
+  const root = generateKeyPairSync('ed25519');
+  const rootPubPem = root.publicKey.export({ type: 'spki', format: 'pem' });
+  const trustStore = join(dir, 'trust-store.yaml');
+  const pinnedRoot = join(dir, 'root.pub');
+  writeFileSync(pinnedRoot, rootPubPem);
+  writeRootedTrustStore(trustStore, root.privateKey, rootPubPem, []);
+
+  const v = verifyRun(dir, { strict: true, trustStorePath: trustStore, pinnedRootPubkeyPath: pinnedRoot });
+  assert.equal(v.ok, false, 'self-minted, unrooted manifest key must fail strict verification');
+  assert.equal(v.trust_store.status, 'key_not_rooted');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('ATK-1 regression: a rooted key verifies in strict mode; bootstrap mode still verifies install-time runs', () => {
+  const { dir } = freshRun();
+  const man = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+  const root = generateKeyPairSync('ed25519');
+  const rootPubPem = root.publicKey.export({ type: 'spki', format: 'pem' });
+  const trustStore = join(dir, 'trust-store.yaml');
+  const pinnedRoot = join(dir, 'root.pub');
+  writeFileSync(pinnedRoot, rootPubPem);
+  writeRootedTrustStore(trustStore, root.privateKey, rootPubPem, [{
+    key_id: man.gatekeeper_key_id,
+    gatekeeper_id: man.gatekeeper_id,
+    pubkey_pem: man.gatekeeper_pubkey_pem,
+  }]);
+
+  const strict = verifyRun(dir, { strict: true, trustStorePath: trustStore, pinnedRootPubkeyPath: pinnedRoot });
+  assert.equal(strict.ok, true, 'rooted gatekeeper key must verify in strict mode');
+  assert.equal(strict.trust_store.status, 'rooted');
+
+  const bootstrap = join(dir, 'bootstrap-trust-store.yaml');
+  writeFileSync(bootstrap, '---\nschema_version: "1.0"\nroot_signature:\n  algorithm: ed25519\n  signer_pubkey: ""\n  signed_at: ""\n  signature: ""\nkeys: []\nrevocations: []\ntrust_cutoff:\n  default_strict_after: "2099-01-01T00:00:00Z"\n');
+  const nonStrict = verifyRun(dir, { strict: false, trustStorePath: bootstrap, pinnedRootPubkeyPath: pinnedRoot });
+  assert.equal(nonStrict.ok, true, 'explicit bootstrap mode must still support install-time runs');
+  assert.equal(nonStrict.trust_store.status, 'bootstrap_pending');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('ATK-1: manifest gatekeeper_pubkey_pem is redundant metadata and must match the rooted key', () => {
+  const { dir } = freshRun();
+  const manifestPath = join(dir, 'manifest.json');
+  const man = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  const root = generateKeyPairSync('ed25519');
+  const rootPubPem = root.publicKey.export({ type: 'spki', format: 'pem' });
+  const trustStore = join(dir, 'trust-store.yaml');
+  const pinnedRoot = join(dir, 'root.pub');
+  writeFileSync(pinnedRoot, rootPubPem);
+  writeRootedTrustStore(trustStore, root.privateKey, rootPubPem, [{
+    key_id: man.gatekeeper_key_id,
+    gatekeeper_id: man.gatekeeper_id,
+    pubkey_pem: man.gatekeeper_pubkey_pem,
+  }]);
+
+  const imposter = generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' });
+  man.gatekeeper_pubkey_pem = imposter;
+  writeFileSync(manifestPath, JSON.stringify(man, null, 2));
+  const v = verifyRun(dir, { strict: true, trustStorePath: trustStore, pinnedRootPubkeyPath: pinnedRoot });
+  assert.equal(v.ok, false, 'manifest pubkey divergence must fail strict verification');
+  assert.equal(v.trust_store.status, 'manifest_divergence');
+  rmSync(dir, { recursive: true, force: true });
 });
 
 // ── LR-4 external anchoring ───────────────────────────────────────────────────
@@ -181,12 +278,12 @@ import { rmSync as rmr } from 'node:fs';
 test('LR-4: tamper + wholesale legba/ rebuild is caught by the external anchor', () => {
   const dir = fakeComposeRun();
   runBridge('build', dir);                              // anchors content_receipt in orchestrator
-  assert.equal(runBridge('verify', dir).out.anchor.state, 'anchored_match');
+  assert.equal(runBridge('verify', dir, '--bootstrap').out.anchor.state, 'anchored_match');
   // attacker: tamper an envelope AND wipe legba/ to rebuild it clean over the tamper
   const p = join(dir, 'envelopes', '01.alpha.handoff.json');
   const env = JSON.parse(readFileSync(p, 'utf8')); env.verdict.n = 999; writeFileSync(p, JSON.stringify(env));
   rmr(join(dir, 'legba'), { recursive: true, force: true });
-  const r = runBridge('verify', dir);
+  const r = runBridge('verify', dir, '--repair', '--bootstrap');
   assert.equal(r.code, 1, 'rebuilt-over-tamper must NOT verify');
   assert.equal(r.out.binding.ok, true, 'binding passes (rebuilt chain matches tampered envelopes)');
   assert.equal(r.out.anchor.state, 'anchored_mismatch', 'the anchor is what catches it');
@@ -197,10 +294,10 @@ test('LR-4: --expect an externally-held content_receipt detects any drift', () =
   const dir = fakeComposeRun();
   const built = runBridge('build', dir);
   const receipt = built.out.content_receipt;           // operator records this out of band
-  assert.equal(runBridge('verify', dir, '--expect', receipt).out.anchor.state, 'anchored_match');
+  assert.equal(runBridge('verify', dir, '--expect', receipt, '--bootstrap').out.anchor.state, 'anchored_match');
   // wrong expected receipt → mismatch
   const bad = 'sha256:' + '0'.repeat(64);
-  assert.equal(runBridge('verify', dir, '--expect', bad).code, 1);
+  assert.equal(runBridge('verify', dir, '--expect', bad, '--bootstrap').code, 1);
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -211,7 +308,7 @@ test('LR-4: an unanchored run still verifies on chain+binding (honest fallback)'
   const orch = join(dir, 'orchestrator.jsonl');
   const kept = readFileSync(orch, 'utf8').split('\n').filter((l) => l && !l.includes('legba.anchor'));
   writeFileSync(orch, kept.join('\n') + '\n');
-  const r = runBridge('verify', dir);
+  const r = runBridge('verify', dir, '--bootstrap');
   assert.equal(r.out.anchor.state, 'unanchored');
   assert.equal(r.out.ok, true, 'unanchored honest run still verifies on chain+binding');
   rmSync(dir, { recursive: true, force: true });
@@ -224,7 +321,7 @@ test('LR-4 P2: tampering a NON-verdict field (construct_slug) is caught', () => 
   const env = JSON.parse(readFileSync(p, 'utf8'));
   env.construct_slug = 'IMPERSONATOR'; // a non-verdict field
   writeFileSync(p, JSON.stringify(env));
-  const r = runBridge('verify', dir);
+  const r = runBridge('verify', dir, '--bootstrap');
   assert.equal(r.code, 1, 'non-verdict tampering must NOT verify');
   assert.ok(r.out.binding.ok === false || r.out.anchor.state === 'anchored_mismatch', 'caught by binding or anchor');
   rmSync(dir, { recursive: true, force: true });
