@@ -1,0 +1,79 @@
+# auto-merge-allowlist.yml — the ONLY PR classes the AFK routine may merge UNATTENDED.
+#
+# The Cloud Routine runs with no human prompts, so this file is the ENTIRE blast radius
+# of auto-merge. Anything not matching an ENABLED `allow` rule (and satisfying every
+# `require`) STAGES for the operator's one-click. Conservative by design.
+#
+# loa-laplas IS the brakes runtime — the enforcement lattice (Laplas exit-2 deny · Poteau ·
+# Legba ed25519 trust-root · Observatory). A bad merge here doesn't break a feature; it
+# blinds the substrate that gates everything else. So this allowlist is STRICTER than a
+# product repo's: nothing touching the enforcement core, trust root, or signing may
+# auto-merge — ever. Only docs and clean dependency bumps. Everything else stages.
+version: 1
+
+# ALL of these must hold for ANY auto-merge, regardless of which allow rule matched:
+require:
+  ci_green: true             # every required check passes (poteau, observatory, post-merge gates)
+  reviews_resolved: true     # no unresolved review thread; no CRITICAL or HIGH Bridgebuilder/Fagan finding
+  gates_pass: true           # the repo's own enforcement gates (poteau.yml / observatory.yml) green
+  no_excluded_paths: true    # the diff touches none of `exclude_paths`
+
+# A PR auto-merges only if it matches one ENABLED rule below AND satisfies every `require`.
+allow:
+  - id: dependabot-bumps
+    enabled: true
+    actor: "dependabot[bot]"
+    paths_only: ["package.json", "**/package.json", "pnpm-lock.yaml", "package-lock.json", "go.mod", "go.sum", "Cargo.toml", "Cargo.lock"]
+    note: dependency version bumps with a clean lockfile + green CI
+
+  - id: docs-typos
+    enabled: true
+    paths_only: ["**/*.md", "docs/**"]
+    max_changed_lines: 40
+    note: docs/typo-only, small, no code — never the enforcement-core .md specs (excluded below)
+
+  - id: framework-update-churn
+    enabled: false   # <-- OPERATOR DECISION REQUIRED
+    title_pattern: '^chore\([^)]*\): update Loa framework'
+    paths_glob: [".claude/loa/**", ".loa.config.yaml", "**/*.checksum"]
+    note: >
+      /update-loa churn (the framework updating its own managed subtree). DISABLED because it
+      touches .claude/** — which `exclude_paths` blocks (System Zone). On the brakes repo the
+      bias is even stronger toward STAGE: a framework bump can shift the gates themselves. To
+      enable, flip enabled:true AND carve only ".claude/loa/**" out of exclude_paths. Until you
+      decide, framework-churn STAGES for one-click (still saves the prep work).
+
+# NEVER auto-merge if the diff touches ANY of these — always stage. On the brakes repo the
+# enforcement core, trust root, signing, and gate workflows are all hands-off for unattended merges.
+exclude_paths:
+  - ".claude/**"             # System Zone — hooks, skills, schemas, settings, framework
+  - "CLAUDE.md"              # agent governance (root); AGENTS.md symlinks to it
+  - "AGENTS.md"
+  - "**/CLAUDE.md"
+  - "**/AGENTS.md"
+  # --- the enforcement lattice itself (the teeth) ---
+  - "laplas/**"              # exit-2 deny engine
+  - "poteau/**"              # gate runtime
+  - "observatory/**"         # observability/verification surface
+  - "modules/**"             # sealed enforcement modules
+  - "hooks/**"               # gate hooks
+  - "scripts/**"             # operational + gate scripts
+  - "templates/**"           # contract templates
+  - "skills/**"              # construct skills
+  # --- trust root / signing / keys (forgeable surface) ---
+  - "**/*trust*"
+  - "**/*legba*"
+  - "**/*sign*"
+  - "**/*.key"
+  - "**/*.pub"
+  - "**/keyring/**"
+  # --- contracts & generated truth ---
+  - "**/*.schema.json"
+  - "**/ground-truth/**"
+  - "**/*.checksum"
+  - ".github/workflows/**"   # the gate definitions themselves
+
+# Default posture: with only dependabot-bumps + docs-typos enabled, the routine auto-merges
+# nothing that touches the enforcement core, trust root, signing, gate workflows, or System
+# Zone. Everything else — including every /bug fix PR against laplas/poteau/observatory —
+# STAGES with its review posted, for your one-click.
