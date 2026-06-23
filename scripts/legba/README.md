@@ -64,6 +64,26 @@ node scripts/legba/legba.mjs verify /tmp/my-run
 Keys live in `~/.config/loa/audit-keys/<gatekeeper>.{priv,pub}` (mode 0600); the
 public key is copied into the run manifest so the run dir verifies on its own.
 
+### Custody signer modes
+
+Legacy/dev custody can run through `LEGBA_SIGNER` / `LEGBA_SIGNER_KEY_DIR`,
+which keeps the audited process away from its normal audit-key directory but
+still persists the signer private key on disk.
+
+Hardened single-host custody runs `legba-signer-daemon.mjs` with
+`LEGBA_SIGNER_SOCKET=<unix-socket>`. In this mode the daemon generates the
+gatekeeper Ed25519 key on start, keeps the private key in daemon memory only,
+exposes the public key to `initKeys`, and signs a gate only after independently
+replaying `re_executable` evidence. `legba-core` talks to the daemon through a
+small synchronous relay, so `gate()` remains synchronous and there is no local
+key fallback.
+
+**Security note:** with an in-memory key, the residual shrinks to cross-process
+memory inspection (`ptrace` / `task_for_pid`), which the OS restricts for
+same-UID non-root processes. A full guarantee on a shared host still wants a
+separate UID. Production persistence of a stable key is an encrypted-at-rest +
+operator-passphrase deployment concern, out of scope here.
+
 ## Re-executable tools (the replay registry)
 
 `tools.mjs` holds the first re_executable tools: a restricted arithmetic

@@ -16,6 +16,7 @@ import {
   initKeys, loadOrInitKeys, provisionRun, record, gate, openSpan, verifyRun, challenge, jcs,
 } from './legba-core.mjs';
 import { REGISTRY } from './tools.mjs';
+import { startSignerDaemon } from './legba-signer-daemon-test-helper.mjs';
 
 process.env.LEGBA_AUDIT_KEY_DIR = mkdtempSync(join(tmpdir(), 'legba-keys-'));
 
@@ -206,6 +207,178 @@ function writeRootedTrustStore(path, rootPriv, rootPubPem, keys) {
   )).join('\n') : '[]';
   writeFileSync(path, `---\nschema_version: "1.0"\nroot_signature:\n  algorithm: ed25519\n  signer_pubkey: |\n${pemBlock(rootPubPem, 4)}\n  signed_at: "2026-05-03T00:00:00Z"\n  signature: "${rootSig}"\nkeys: ${keysYaml}\nrevocations: []\ntrust_cutoff:\n  default_strict_after: "2026-05-03T00:00:00Z"\n`);
 }
+
+const SIGNER = new URL('./legba-signer.mjs', import.meta.url).pathname;
+
+function withEnv(env, fn) {
+  const prev = {};
+  for (const k of Object.keys(env)) prev[k] = process.env[k];
+  try {
+    for (const [k, v] of Object.entries(env)) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+    return fn();
+  } finally {
+    for (const [k, v] of Object.entries(prev)) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  }
+}
+
+function safeKeyName(gatekeeperId) {
+  return gatekeeperId.replace(/[^A-Za-z0-9._-]/g, '_');
+}
+
+function rootedFixture(dir, man) {
+  const root = generateKeyPairSync('ed25519');
+  const rootPubPem = root.publicKey.export({ type: 'spki', format: 'pem' });
+  const trustStore = join(dir, 'trust-store.yaml');
+  const pinnedRoot = join(dir, 'root.pub');
+  writeFileSync(pinnedRoot, rootPubPem);
+  writeRootedTrustStore(trustStore, root.privateKey, rootPubPem, [{
+    key_id: man.gatekeeper_key_id,
+    gatekeeper_id: man.gatekeeper_id,
+    pubkey_pem: man.gatekeeper_pubkey_pem,
+  }]);
+  return { trustStore, pinnedRoot };
+}
+
+test('daemon custody: in-memory signer gates legitimate evidence and refuses evidence-free work', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'legba-daemon-legit-'));
+  const empty = mkdtempSync(join(tmpdir(), 'legba-daemon-empty-'));
+  const daemonDir = mkdtempSync(join(tmpdir(), 'legba-daemon-'));
+  const auditKeys = mkdtempSync(join(tmpdir(), 'legba-daemon-audited-keys-'));
+  const signerKeys = mkdtempSync(join(tmpdir(), 'legba-daemon-signer-keys-'));
+  const socketPath = join(daemonDir, 'signer.sock');
+  let daemon;
+  try {
+    daemon = await startSignerDaemon(socketPath, { LEGBA_SIGNER_KEY_DIR: signerKeys, LEGBA_AUDIT_KEY_DIR: auditKeys });
+  } catch (e) {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(empty, { recursive: true, force: true });
+    rmSync(daemonDir, { recursive: true, force: true });
+    rmSync(auditKeys, { recursive: true, force: true });
+    rmSync(signerKeys, { recursive: true, force: true });
+    if (/\bEPERM\b/.test(e.message)) {
+      t.skip('Unix-domain sockets are unavailable in this sandbox');
+      return;
+    }
+    throw e;
+  }
+  try {
+    withEnv({
+      LEGBA_SIGNER: undefined,
+      LEGBA_SIGNER_SOCKET: socketPath,
+      LEGBA_SIGNER_KEY_DIR: signerKeys,
+      LEGBA_AUDIT_KEY_DIR: auditKeys,
+    }, () => {
+      const gkId = 'legba:daemon:legit';
+      const gk = initKeys(gkId);
+      assert.equal(gk._privateKeyPem, undefined, 'daemon init must expose only public key material');
+      assert.equal(existsSync(join(auditKeys, `${safeKeyName(gkId)}.priv`)), false, 'audited key dir must not receive a private key');
+      assert.equal(existsSync(join(signerKeys, `${safeKeyName(gkId)}.priv`)), false, 'daemon mode must not persist a signer private key');
+
+      const man = provisionRun('daemon-legit', gk, dir);
+      record(dir, { runId: 'daemon-legit', spanIndex: 0, kind: 'tool', determinism: 're_executable', tool: 'arith', input: { expr: '8 * 7' }, output: { result: 56 } });
+      const sealed = gate(dir, { runId: 'daemon-legit', gateIndex: 0, registry: REGISTRY, artifacts: [{ result: 56 }] });
+      assert.equal(sealed.token.verdict, 'pass');
+
+      const roots = rootedFixture(dir, man);
+      const v = verifyRun(dir, { strict: true, trustStorePath: roots.trustStore, pinnedRootPubkeyPath: roots.pinnedRoot });
+      assert.equal(v.ok, true, 'daemon-gated legitimate run must verify strict + rooted');
+      assert.equal(v.trust_store.status, 'rooted');
+
+      const badGk = initKeys('legba:daemon:evidence-free');
+      provisionRun('daemon-empty', badGk, empty);
+      record(empty, { runId: 'daemon-empty', spanIndex: 0, kind: 'emission', determinism: 'attestable', label: 'claim', content: { fabricated: true } });
+      assert.throws(
+        () => gate(empty, { runId: 'daemon-empty', gateIndex: 0, registry: REGISTRY }),
+        /no_verifiable_evidence/,
+        'daemon must refuse evidence-free work',
+      );
+      assert.equal(existsSync(join(empty, 'tokens', 'token-0.json')), false, 'daemon refusal must not emit a token');
+      assert.equal(existsSync(join(signerKeys, `${safeKeyName('legba:daemon:evidence-free')}.priv`)), false, 'daemon must not persist evidence-free signer private key either');
+    });
+  } finally {
+    await daemon.stop();
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(empty, { recursive: true, force: true });
+    rmSync(daemonDir, { recursive: true, force: true });
+    rmSync(auditKeys, { recursive: true, force: true });
+    rmSync(signerKeys, { recursive: true, force: true });
+  }
+});
+
+test('custody forge_cannot_self_sign: gate has no local-key fallback in custody mode', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'legba-custody-self-'));
+  const auditKeys = mkdtempSync(join(tmpdir(), 'legba-audited-keys-'));
+  const signerKeys = mkdtempSync(join(tmpdir(), 'legba-signer-keys-'));
+  const gkId = 'legba:custody:self';
+  withEnv({ LEGBA_SIGNER: SIGNER, LEGBA_SIGNER_KEY_DIR: signerKeys, LEGBA_AUDIT_KEY_DIR: auditKeys }, () => {
+    const gk = initKeys(gkId);
+    assert.equal(gk._privateKeyPem, undefined, 'custody init must expose only the signer public key');
+    assert.equal(existsSync(join(auditKeys, `${safeKeyName(gkId)}.priv`)), false, 'audited key dir must not receive the signer private key');
+    provisionRun('custody-self', gk, dir);
+    record(dir, { runId: 'custody-self', spanIndex: 0, kind: 'tool', determinism: 're_executable', tool: 'arith', input: { expr: '1 + 1' }, output: { result: 2 } });
+  });
+  const refusingSigner = join(dir, 'refusing-signer.mjs');
+  writeFileSync(refusingSigner, 'process.stdout.write(JSON.stringify({ ok: false, status: "unreachable", error: "signer unavailable" })); process.exit(1);\n');
+  withEnv({ LEGBA_SIGNER: refusingSigner, LEGBA_SIGNER_KEY_DIR: signerKeys, LEGBA_AUDIT_KEY_DIR: auditKeys }, () => {
+    assert.throws(
+      () => gate(dir, { runId: 'custody-self', gateIndex: 0, registry: REGISTRY }),
+      /LEGBA_SIGNER_REFUSED/,
+      'custody mode must fail closed when the signer is unreachable, not sign locally',
+    );
+  });
+  assert.equal(existsSync(join(dir, 'tokens', 'token-0.json')), false, 'unreachable signer must not leave a token');
+  rmSync(dir, { recursive: true, force: true });
+  rmSync(auditKeys, { recursive: true, force: true });
+  rmSync(signerKeys, { recursive: true, force: true });
+});
+
+test('custody forge_signer_refuses_evidence_free: attestable-only work receives no gate signature', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'legba-custody-empty-'));
+  const auditKeys = mkdtempSync(join(tmpdir(), 'legba-audited-keys-'));
+  const signerKeys = mkdtempSync(join(tmpdir(), 'legba-signer-keys-'));
+  withEnv({ LEGBA_SIGNER: SIGNER, LEGBA_SIGNER_KEY_DIR: signerKeys, LEGBA_AUDIT_KEY_DIR: auditKeys }, () => {
+    const gk = initKeys('legba:custody:evidence-free');
+    const man = provisionRun('custody-empty', gk, dir);
+    record(dir, { runId: 'custody-empty', spanIndex: 0, kind: 'emission', determinism: 'attestable', label: 'claim', content: { fabricated: true } });
+    assert.throws(
+      () => gate(dir, { runId: 'custody-empty', gateIndex: 0, registry: REGISTRY }),
+      /no_verifiable_evidence/,
+      'signer must refuse a run with no independently replayable evidence',
+    );
+    assert.equal(existsSync(join(dir, 'tokens', 'token-0.json')), false, 'refusal must not emit a token');
+    const roots = rootedFixture(dir, man);
+    const v = verifyRun(dir, { strict: true, trustStorePath: roots.trustStore, pinnedRootPubkeyPath: roots.pinnedRoot });
+    assert.equal(v.ok, false, 'evidence-free refused run must not become a valid_run');
+    assert.equal(v.gate_count, 0);
+  });
+  rmSync(dir, { recursive: true, force: true });
+  rmSync(auditKeys, { recursive: true, force: true });
+  rmSync(signerKeys, { recursive: true, force: true });
+});
+
+test('custody legit_run_passes: replayable evidence is signed by signer and strict verify roots it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'legba-custody-legit-'));
+  const auditKeys = mkdtempSync(join(tmpdir(), 'legba-audited-keys-'));
+  const signerKeys = mkdtempSync(join(tmpdir(), 'legba-signer-keys-'));
+  withEnv({ LEGBA_SIGNER: SIGNER, LEGBA_SIGNER_KEY_DIR: signerKeys, LEGBA_AUDIT_KEY_DIR: auditKeys }, () => {
+    const gk = initKeys('legba:custody:legit');
+    const man = provisionRun('custody-legit', gk, dir);
+    record(dir, { runId: 'custody-legit', spanIndex: 0, kind: 'tool', determinism: 're_executable', tool: 'arith', input: { expr: '(4 + 5) * 3' }, output: { result: 27 } });
+    const sealed = gate(dir, { runId: 'custody-legit', gateIndex: 0, registry: REGISTRY, artifacts: [{ result: 27 }] });
+    assert.equal(sealed.token.verdict, 'pass');
+    const roots = rootedFixture(dir, man);
+    const v = verifyRun(dir, { strict: true, trustStorePath: roots.trustStore, pinnedRootPubkeyPath: roots.pinnedRoot });
+    assert.equal(v.ok, true, 'legitimate custody run must verify strictly against rooted signer public key');
+    assert.equal(v.trust_store.status, 'rooted');
+  });
+  rmSync(dir, { recursive: true, force: true });
+  rmSync(auditKeys, { recursive: true, force: true });
+  rmSync(signerKeys, { recursive: true, force: true });
+});
 
 test('ATK-1: strict verify rejects a self-minted manifest key absent from the rooted trust-store', () => {
   const { dir } = freshRun();

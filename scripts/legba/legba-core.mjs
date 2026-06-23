@@ -24,7 +24,8 @@
  *       (key ceremony); the PUBLIC key is also copied into the run manifest so a
  *       third party verifies with the run dir alone.
  */
-import { createHash, createPublicKey, generateKeyPairSync, sign, verify } from 'node:crypto';
+import { createHash, createPublicKey, generateKeyPairSync, sign as _sign, verify as _verify } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import {
   mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync,
   appendFileSync, chmodSync,
@@ -59,8 +60,64 @@ function keyDir() {
   mkdirSync(d, { recursive: true });
   return d;
 }
+function custodySignerPath() {
+  const v = process.env.LEGBA_SIGNER;
+  if (!v) return null;
+  if (v === '1' || v === 'true') return new URL('./legba-signer.mjs', import.meta.url).pathname;
+  return v;
+}
+function custodySignerSocket() {
+  return process.env.LEGBA_SIGNER_SOCKET || null;
+}
+function custodyRelayPath() {
+  return new URL('./legba-signer-relay.mjs', import.meta.url).pathname;
+}
+function callSigner(cmd, payload) {
+  const socketPath = custodySignerSocket();
+  if (socketPath) {
+    try {
+      const stdout = execFileSync(process.execPath, [custodyRelayPath(), cmd], {
+        input: JSON.stringify(payload ?? {}),
+        encoding: 'utf8',
+        maxBuffer: 1024 * 1024,
+        timeout: 10_000, // a hung signer must not wedge gate() indefinitely (F-001)
+        env: { ...process.env, LEGBA_SIGNER_SOCKET: socketPath, LEGBA_SIGNER: '', LEGBA_AUDIT_KEY_DIR: '', LOA_AUDIT_KEY_DIR: '' },
+      });
+      return JSON.parse(stdout);
+    } catch (e) {
+      let msg = e.message;
+      try {
+        const parsed = JSON.parse(e.stdout || '');
+        msg = parsed.error || parsed.status || msg;
+      } catch { /* keep child_process error */ }
+      throw new Error(`LEGBA_SIGNER_REFUSED: ${msg}`);
+    }
+  }
+  const signerPath = custodySignerPath();
+  if (!signerPath) throw new Error('LEGBA_CUSTODY_DISABLED: no LEGBA_SIGNER configured');
+  try {
+    const stdout = execFileSync(process.execPath, [signerPath, cmd], {
+      input: JSON.stringify(payload ?? {}),
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024,
+      timeout: 10_000, // a hung signer must not wedge gate() indefinitely (F-001)
+      // Custody mode must not let the signer resolve the audited process key dir,
+      // and must not re-enter custody itself (F-005 latent-loop guard).
+      env: { ...process.env, LEGBA_SIGNER: '', LEGBA_SIGNER_SOCKET: '', LEGBA_AUDIT_KEY_DIR: '', LOA_AUDIT_KEY_DIR: '' },
+    });
+    return JSON.parse(stdout);
+  } catch (e) {
+    let msg = e.message;
+    try {
+      const parsed = JSON.parse(e.stdout || '');
+      msg = parsed.error || parsed.status || msg;
+    } catch { /* keep child_process error */ }
+    throw new Error(`LEGBA_SIGNER_REFUSED: ${msg}`);
+  }
+}
 /** Key ceremony: generate a per-room ed25519 keypair, persist it, publish nothing yet. */
 export function initKeys(gatekeeperId = 'legba:default', keyVersion = 1) {
+  if (custodySignerSocket() || custodySignerPath()) return callSigner('init-keys', { gatekeeperId, keyVersion });
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
   const priv = privateKey.export({ type: 'pkcs8', format: 'pem' });
   const pub = publicKey.export({ type: 'spki', format: 'pem' });
@@ -84,6 +141,7 @@ function loadPriv(gatekeeperId) {
  * fresh key on purpose. (Codex P2.)
  */
 export function loadOrInitKeys(gatekeeperId = 'legba:default', keyVersion = 1, { rotate = false } = {}) {
+  if (custodySignerSocket() || custodySignerPath()) return callSigner('init-keys', { gatekeeperId, keyVersion, rotate });
   const safe = gatekeeperId.replace(/[^A-Za-z0-9._-]/g, '_');
   const privPath = join(keyDir(), `${safe}.priv`);
   const pubPath = join(keyDir(), `${safe}.pub`);
@@ -255,7 +313,7 @@ function verifyTrustStore(doc, pinnedRootPubkeyPath) {
     trust_cutoff: doc.trust_cutoff || {},
   };
   let ok = false;
-  try { ok = verify(null, Buffer.from(jcs(core)), pinned, Buffer.from(rs.signature, 'base64')); }
+  try { ok = _verify(null, Buffer.from(jcs(core)), pinned, Buffer.from(rs.signature, 'base64')); }
   catch { ok = false; }
   return ok ? { ok: true } : { ok: false, error: 'trust-store root_signature does NOT verify' };
 }
@@ -380,15 +438,16 @@ export function replayChain(log) {
 
 // ── token sign/verify ────────────────────────────────────────────────────────
 function signToken(token, gatekeeperId) {
-  const signature = sign(null, Buffer.from(jcs(token)), loadPriv(gatekeeperId)).toString('base64');
+  if (custodySignerSocket() || custodySignerPath()) throw new Error('LEGBA_CUSTODY_REFUSED_LOCAL_SIGN: custody mode requires signer-mediated gate signing');
+  const signature = _sign(null, Buffer.from(jcs(token)), loadPriv(gatekeeperId)).toString('base64');
   return { token, signature, token_hash: hashObj(token) };
 }
 export function verifyTokenSignature(sealed, pubkeyPem) {
-  return verify(null, Buffer.from(jcs(sealed.token)), pubkeyPem, Buffer.from(sealed.signature, 'base64'));
+  return _verify(null, Buffer.from(jcs(sealed.token)), pubkeyPem, Buffer.from(sealed.signature, 'base64'));
 }
 
 // ── gatekeeper (LG-3/4/6): close span, check, mint token ─────────────────────
-export function gate(dir, { runId, gateIndex, registry = {}, artifacts = [], sampleRate = 0.5 }) {
+export function buildGateToken(dir, { runId, gateIndex, registry = {}, artifacts = [], sampleRate = 0.5 }) {
   const log = readSpanLog(dir, gateIndex);
   const checks = {};
   let head = null;
@@ -428,7 +487,17 @@ export function gate(dir, { runId, gateIndex, registry = {}, artifacts = [], sam
     gatekeeper_key_id: man.gatekeeper_key_id, key_version: man.key_version,
     ts: new Date().toISOString().replace('Z', '000Z'),
   };
-  const sealed = signToken(token, man.gatekeeper_id);
+  return { token, checks, pass, reexec_count: reexec.length, replay_sample_count: sampled.length, gatekeeper_id: man.gatekeeper_id };
+}
+
+export function gate(dir, { runId, gateIndex, registry = {}, artifacts = [], sampleRate = 0.5 }) {
+  if (custodySignerSocket() || custodySignerPath()) {
+    const sealed = callSigner('sign-gate', { dir, runId, gateIndex, artifacts, sampleRate });
+    writeFileSync(join(dir, 'tokens', `token-${gateIndex}.json`), JSON.stringify(sealed, null, 2));
+    return sealed;
+  }
+  const built = buildGateToken(dir, { runId, gateIndex, registry, artifacts, sampleRate });
+  const sealed = signToken(built.token, built.gatekeeper_id);
   writeFileSync(join(dir, 'tokens', `token-${gateIndex}.json`), JSON.stringify(sealed, null, 2));
   return sealed;
 }
@@ -464,6 +533,13 @@ export function verifyRun(dir, options = {}) {
   if (!resolved.ok) {
     report.run_receipt_hash = hashObj([]);
     report.gate_count = tokenFiles.length;
+    return report;
+  }
+  if (tokenFiles.length === 0) {
+    report.ok = false;
+    report.empty = true;
+    report.run_receipt_hash = hashObj([]);
+    report.gate_count = 0;
     return report;
   }
   const pub = resolved.pubkeyPem;
@@ -507,3 +583,27 @@ export function challenge(dir, spanIndex, seq, registry = {}) {
 }
 
 export { casGet, casHas, readSpanLog, readManifest };
+
+// ── ed25519 primitives for consumers (settle borrows legba's key custody) ────
+/** Sign `data` with an ed25519 private key. Returns a Buffer. */
+export const sign = (data, privKey) =>
+  _sign(null, Buffer.isBuffer(data) ? data : Buffer.from(data), privKey);
+
+/** Verify an ed25519 signature. `sig` may be a Buffer or base64 string. Returns boolean. */
+export const verify = (data, sig, pubKey) =>
+  _verify(
+    null,
+    Buffer.isBuffer(data) ? data : Buffer.from(data),
+    pubKey,
+    Buffer.isBuffer(sig) ? sig : Buffer.from(sig, 'base64'),
+  );
+
+/** Generate an ephemeral ed25519 keypair. Used by settle verifier / tests — keeps
+ *  generateKeyPairSync out of settle.mjs (Gate 1: single signer). */
+export function generateVerifierKeypair() {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  return {
+    privateKey,
+    publicKeyBase64: publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
+  };
+}

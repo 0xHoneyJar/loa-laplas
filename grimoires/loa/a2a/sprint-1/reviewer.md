@@ -1,65 +1,70 @@
-# Implementation Report — verifiable-compose sprint-1 (Epic A)
-
-**Cycle**: verifiable-compose · **Sprint**: sprint-1 · **Branch**: cycle/verifiable-compose
-**Source**: PRD/SDD/sprint hardened over 2 Flatline rounds (PRD §9)
+# Implementation Report — Sprint-1: The Descent, Phase 1 (settle → laplas)
 
 ## Executive Summary
 
-Authored the `rigorous-review` composition whose BEAUVOIR synthesis stage carries an inline
-`bridge-findings` `output_schema` — REQUIRED per-finding `{dimension, severity, anchor, issue,
-recommendation}` + a REQUIRED `claims_ledger` tagging each claim `observed|claimed`. The schema
-makes an ungrounded finding mechanically unemittable. **Task 0 (Flatline SB3) is verified: "no
-emitter change" HOLDS** — the full nested schema flows to the `agent({schema})` StructuredOutput
-layer untouched. 5 new tests pass; the existing `form-c-dispatch.bats` suite stays **114/0**.
+settle has descended from the application layer into loa-laplas as `scripts/settle/settle.mjs`
+— a single ESM file that **composes legba** for all crypto (ed25519 sign/verify, JCS, sha256)
+and ships **zero inline crypto**. The counter-example "teeth" are ported to `node:test` as
+`scripts/settle/settle.test.mjs`: 40 tests / **116 assertions**, including the
+deliberately-broken-gate **negative control** which proves the brake fires closed. The layer-law
+verifier reports **`VIOLATION=0`** (no inversion introduced). Cross-repo cleanup (remove
+freeside `packages/settle`, close PR #298, open laplas draft PR) is **T-11**, deferred to after
+review + audit per cross-repo discipline.
+
+Branch: `feat/spiral-spiral-20260623-34f85e-cycle-1`
 
 ## AC Verification
 
-> ACs quoted from `grimoires/loa/sprint.md` sprint-1.
-
-1. **Task 0 pre-check** ("validator recurses into array-item `required`, or emitter fix scoped in") — ✓ **Met (premise holds, no fix needed)**
-   - Evidence: `scripts/lib/segment-emitter.py:948` `_validated_output_schema` returns the FULL inline `output_schema` and is shared by `_emit_stage_schema` (the `agent({schema})` arg — PRIMARY enforcement; the Workflow StructuredOutput tool validates the full JSON Schema incl. nested `required` and retries on miss) and `_emit_stage_required` (the `conforms()` backstop at `:756`, top-level-only by design). The nested schema reaches the StructuredOutput validator intact → no emitter change.
-   - Test: `tests/integration/rigorous-review.bats` "Task 0 [SB3]" asserts `findings[].required` (`dimension`/`recommendation`), `claims_ledger[].required` (`claim`/`grounding`), and the `observed`/`claimed` + `critical` enums all reach the emitted `agent({schema})`.
-
-2. **VC-A1** ("the emitted synthesis stage carries the bridge-findings `output_schema`; a synthesis payload missing `anchor`/`severity`/`recommendation` triggers … validation rejects") — ✓ **Met (structural, per SB2)**
-   - Evidence: `compositions/experimentation/rigorous-review.yaml` stage 4 `output_schema.properties.findings.items.required: [dimension, severity, anchor, issue, recommendation]`; reaches `agent({schema})` (test "Task 0"). **Honest scoping (Task 0 + SB2):** the *runtime rejection* of a finding missing `anchor` is the Workflow StructuredOutput tool's full-schema validation, NOT the emitter's `conforms()` (which is top-level-only). Sprint-1 proves the schema is *handed to* that validator (structural); it does not re-implement the validator.
-
-3. **VC-A2** ("`claims_ledger` is a REQUIRED top-level field; a ledger item missing `grounding`/`tag` fails validation") — ✓ **Met (structural)**
-   - Evidence: `rigorous-review.yaml` `output_schema.required: [summary, findings, claims_ledger]` and `claims_ledger.items.required: [claim, grounding, tag]` (`tag` enum `[observed, claimed]`). Test "Task 0" asserts `claim`/`grounding`/`observed`/`claimed` reach the emitted schema.
-
-4. **[SB2]** ("sprint-1 proves *structural* enforcement only … grounding is sprint-2's job") — ✓ **Met**
-   - Anchor *resolution* (proving an anchor is real, not just present) is NOT implemented here — it is sprint-2 (SDD §2.6). `rigorous-review.yaml`'s synthesis notes instruct observed-vs-claimed tagging; the *resolve step* is deferred. No over-claim.
-
-5. **"No emitter source change IF Task 0 passes; `workflow-syntax-check.js` green; existing `form-c-dispatch.bats` unregressed"** — ✓ **Met**
-   - `tests/integration/rigorous-review.bats` "no emitter change" asserts `git diff segment-emitter.py` is empty. Syntax check green (test "emit"). `form-c-dispatch.bats`: **114/0** (re-run this session).
+| AC | Status | Evidence |
+|----|--------|----------|
+| **AC-1 (location)** | ⚠ Partial | `scripts/settle/settle.mjs` exists ✓. freeside `packages/settle` removal is **T-11** (post-review). |
+| **AC-2 (single signer)** | ✓ Met (by intent) | `scripts/settle/settle.mjs` has **zero** `generateKeyPairSync(` calls and no signing logic — `grep -E 'generateKeyPairSync\s*\(' scripts/settle/` → empty. All crypto delegates to legba (settle.mjs:4,162-163,171-181). **Finding:** the AC's *literal* command `grep -r 'generateKeyPairSync\|ed25519' scripts/ -l` now returns >1 file because legba's own custody system was split into `legba-signer.mjs` + `legba-signer-daemon.mjs` (commits 45d728a, 92d2313) and settle's comments mention the words — the command is stale; the **single-new-signer invariant holds**. Flagged for reviewer. |
+| **AC-3 (compose not duplicate)** | ✓ Met | `import { jcs, sha256, hashObj, sign as legbaSign, verify as legbaVerify } from '../legba/legba-core.mjs'` (settle.mjs:4). No local JCS/sha re-implementation. |
+| **AC-4 (counter-examples pass)** | ✓ Met | `node --test scripts/settle/settle.test.mjs` → exit 0, 40 tests / 116 assertions. Covers unbypassable gate (deny-paths), fail-closed classifier (SKP-006), independent verifier (a), confused-deputy claim_id, G-7 degradation (e). ≥113 satisfied. |
+| **AC-5 (negative control bites)** | ✓ Met | `(g) NEGATIVE CONTROL` (settle.test.mjs) — constructs a broken proceed-on-claimed gate, asserts the real gate returns `proceed:false` (fails closed) and the broken one differs; via `makeGatedFacade` the broken gate leaks, the real one does not. Name contains "negative control". |
+| **AC-6 (VIOLATION=0)** | ✓ Met | `node grimoires/loa/context/check-layer-law.mjs` → `STATUS=DRIFT \| VIOLATION=0 \| GAP=1`. (GAP=1 acceptable — enforcement_from_below is Phase 2.) |
+| **AC-7 (freeside cleanup)** | ⏸ Deferred → T-11 | Close freeside PR #298 + open laplas draft PR — cross-repo, post review+audit. |
+| **AC-8 (no runtime deps)** | ✓ Met | settle.mjs imports: `../legba/legba-core.mjs`, `node:crypto`, `node:fs` only — 0 npm-registry imports. |
+| **AC-9 (laplas-first ESM)** | ✓ Met | top-level `import`/`export`, `.mjs`, no `require()`/`exports =`. |
+| **AC-10 (cross-repo discipline)** | ⏸ Deferred → T-11 | Both PRs draft, scoped, never auto-merged. |
 
 ## Tasks Completed
 
-| Task | File | Lines | Approach |
-|------|------|-------|----------|
-| Author composition | `compositions/experimentation/rigorous-review.yaml` | +150 | Sibling of `tiered-code-review.yaml`; chain gecko→gygax→kranz lenses → BEAUVOIR synthesis (`role: primary` work stage — a `craft-gate` would emit the fixed `GATE_SCHEMA`, so the synthesis is a work stage to carry its own `output_schema`) |
-| Tests | `tests/integration/rigorous-review.bats` | +110 | 5 hermetic tests mirroring `form-c-dispatch.bats` setup |
+- **T-1** — legba export audit. `legba-core.mjs` extended (+28/-4) with `sign`, `verify`, and
+  `generateVerifierKeypair` exports (internal `sign`/`verify` renamed `_sign`/`_verify` to avoid
+  collision). Keeps `generateKeyPairSync` in legba — single signer preserved.
+- **T-2…T-7** — settle.mjs port (pre-existing from prior cycle, verified this pass): tier domain,
+  verdict mapping (PENDING≠INSUFFICIENT), posture, classifier (SKP-003 sha-pin, SKP-006
+  unmatched→FAIL_CLOSED), `checkSync` gate (fail-closed init, confused-deputy, bar_sha, TTL, G-7),
+  independent `verify`, `makeTrailWriter` (atomic append, SKP-004 oversize reject), `makeGatedFacade`.
+- **T-8/T-9** — `scripts/settle/settle.test.mjs` authored: 40 tests / 116 assertions, the 7 named
+  counter-examples (a)–(g) + breadth unit coverage. (g) is the negative control.
+- **T-10** — Gates 1–3 run and pass (see AC-2/AC-4/AC-6). Gate 4 (freeside package gone) is T-11.
 
-## Technical Highlights
-
-- **The `craft-gate` trap (caught at author time):** a synthesis stage tagged `craft-gate` would emit with the hardcoded `GATE_SCHEMA` (verdict/findings), silently dropping the bridge-findings schema. The synthesis is therefore a `role: primary` work stage; its `output_schema` flows through `_emit_stage_schema`. Documented inline in the YAML.
-- **Task 0 honesty:** the emitter's `conforms()` is a top-level backstop; nested-required enforcement is the StructuredOutput tool's full-schema validation. The composition proves the schema reaches that layer — which is exactly the structural guarantee sprint-1 claims (SB2).
-- **Schema-key safety:** `_assert_safe_schema_keys` accepts the schema (the emit does not `sys.exit`); test "schema-keys" asserts no `OUTPUT-SCHEMA-INVALID` leak.
+### Bug fixed this pass
+`checkSync` G-7 path clobbered the deny reason: when a degraded chain capped `settled→pinned`
+AND that failed the tier check, the reason was overwritten with the generic `< required` message,
+losing the "degraded chain" cause the trail must record. Fixed to preserve the G-7 cause in both
+proceed and deny cases (settle.mjs:247-264). Counter-example (e) asserts `/degraded chain/`.
 
 ## Testing Summary
 
-- `bats tests/integration/rigorous-review.bats` → **5/5**.
-- `bats tests/integration/form-c-dispatch.bats` → **114/0** (no regression).
-- Run: `bats tests/integration/rigorous-review.bats`
+- `node --test scripts/settle/settle.test.mjs` → **exit 0, 40 pass / 0 fail, 116 assertions**.
+- Negative control verified in isolation: `node --test --test-name-pattern='NEGATIVE CONTROL'` → pass.
 
-## Known Limitations
+## Known Limitations / Deferred
 
-- **Renderer + anchor resolution are sprint-2** (SDD §2.4/§2.6) — sprint-1 is the schema-carrying composition only.
-- The lens constructs (gecko/gygax/kranz) + `the-weaver`/BEAUVOIR synthesis are the SDD's *default* lenses; the composition is opt-in and the lenses are configurable. Their adapters must be installed for a live `/compose` run (the tests emit without `--validate-constructs`).
-- `// loa:shortcut: lens roster is the SDD default; swap per review domain` — the composition hardcodes one roster; a per-domain roster is a future enhancement, not needed for the contract.
+- **T-11 (AC-1/AC-7/AC-10)** — cross-repo actions (remove freeside `packages/settle`, close PR #298
+  with pointer, open laplas draft PR) deferred to after review + audit. Draft-only, never auto-merged.
+- **AC-2 literal command is stale** — recommend the reviewer update the gate to the call-precise
+  form `grep -E 'generateKeyPairSync\s*\(' scripts/settle/` (the invariant the AC actually protects).
 
-## Verification Steps (for reviewer/auditor)
+## Verification Steps (for reviewer)
 
-1. `git diff compositions/experimentation/rigorous-review.yaml tests/integration/rigorous-review.bats`
-2. Confirm `segment-emitter.py` is UNCHANGED (`git diff HEAD -- scripts/lib/segment-emitter.py` empty) — the SB3 premise.
-3. `bats tests/integration/rigorous-review.bats` → 5/5; `bats tests/integration/form-c-dispatch.bats` → 114/0.
-4. Confirm the synthesis stage is `role: primary` (not `craft-gate`) so its `output_schema` is emitted, not `GATE_SCHEMA`.
+```bash
+cd loa-laplas
+node --test scripts/settle/settle.test.mjs                       # exit 0, 116 assertions
+grep -E 'generateKeyPairSync\s*\(' scripts/settle/ -r            # empty (settle composes legba)
+grep -E '^import ' scripts/settle/settle.mjs                     # only node:* + ../legba
+node grimoires/loa/context/check-layer-law.mjs | tail -1         # VIOLATION=0
+```
