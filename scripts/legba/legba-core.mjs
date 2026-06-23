@@ -24,7 +24,7 @@
  *       (key ceremony); the PUBLIC key is also copied into the run manifest so a
  *       third party verifies with the run dir alone.
  */
-import { createHash, createPublicKey, generateKeyPairSync, sign, verify } from 'node:crypto';
+import { createHash, createPublicKey, generateKeyPairSync, sign as _sign, verify as _verify } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import {
   mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync,
@@ -310,7 +310,7 @@ function verifyTrustStore(doc, pinnedRootPubkeyPath) {
     trust_cutoff: doc.trust_cutoff || {},
   };
   let ok = false;
-  try { ok = verify(null, Buffer.from(jcs(core)), pinned, Buffer.from(rs.signature, 'base64')); }
+  try { ok = _verify(null, Buffer.from(jcs(core)), pinned, Buffer.from(rs.signature, 'base64')); }
   catch { ok = false; }
   return ok ? { ok: true } : { ok: false, error: 'trust-store root_signature does NOT verify' };
 }
@@ -436,11 +436,11 @@ export function replayChain(log) {
 // ── token sign/verify ────────────────────────────────────────────────────────
 function signToken(token, gatekeeperId) {
   if (custodySignerSocket() || custodySignerPath()) throw new Error('LEGBA_CUSTODY_REFUSED_LOCAL_SIGN: custody mode requires signer-mediated gate signing');
-  const signature = sign(null, Buffer.from(jcs(token)), loadPriv(gatekeeperId)).toString('base64');
+  const signature = _sign(null, Buffer.from(jcs(token)), loadPriv(gatekeeperId)).toString('base64');
   return { token, signature, token_hash: hashObj(token) };
 }
 export function verifyTokenSignature(sealed, pubkeyPem) {
-  return verify(null, Buffer.from(jcs(sealed.token)), pubkeyPem, Buffer.from(sealed.signature, 'base64'));
+  return _verify(null, Buffer.from(jcs(sealed.token)), pubkeyPem, Buffer.from(sealed.signature, 'base64'));
 }
 
 // ── gatekeeper (LG-3/4/6): close span, check, mint token ─────────────────────
@@ -580,3 +580,27 @@ export function challenge(dir, spanIndex, seq, registry = {}) {
 }
 
 export { casGet, casHas, readSpanLog, readManifest };
+
+// ── ed25519 primitives for consumers (settle borrows legba's key custody) ────
+/** Sign `data` with an ed25519 private key. Returns a Buffer. */
+export const sign = (data, privKey) =>
+  _sign(null, Buffer.isBuffer(data) ? data : Buffer.from(data), privKey);
+
+/** Verify an ed25519 signature. `sig` may be a Buffer or base64 string. Returns boolean. */
+export const verify = (data, sig, pubKey) =>
+  _verify(
+    null,
+    Buffer.isBuffer(data) ? data : Buffer.from(data),
+    pubKey,
+    Buffer.isBuffer(sig) ? sig : Buffer.from(sig, 'base64'),
+  );
+
+/** Generate an ephemeral ed25519 keypair. Used by settle verifier / tests — keeps
+ *  generateKeyPairSync out of settle.mjs (Gate 1: single signer). */
+export function generateVerifierKeypair() {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  return {
+    privateKey,
+    publicKeyBase64: publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
+  };
+}
