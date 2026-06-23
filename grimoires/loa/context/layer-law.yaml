@@ -1,0 +1,69 @@
+# The Loa Stack — layer law (machine-readable companion to ecosystem-composition-brief.md)
+# STATUS: candidate. The diagram is not the contract; THIS is the contract; the
+# verifier (check-layer-law.mjs) is what makes it true. Coherence-monitor shape:
+# agreement = silence, gaps = honest drift.
+version: 1
+
+# Layers, deepest first. `depth` 0 = kernel (the floor). Higher = closer to the user.
+layers:
+  - id: kernel
+    depth: 0
+    role: "core primitives every layer mounts"
+    repos: [loa]
+  - id: brakes
+    depth: 1
+    role: "master of ceremonies — compiles compositions into gated workflows; enforces from below"
+    repos: [loa-laplas]
+  - id: application
+    depth: 2
+    role: "the factory — buildings, worlds, products; agents run + produce here"
+    repos: [loa-freeside]
+
+# Cross-cutting (not a layer — runs through all of them).
+crosscut:
+  constructs:
+    role: "userland tools — bounded, composable, piped; available at every layer"
+    marker: ".claude/constructs/packs"      # presence = installed at that layer
+  acvp:
+    role: "agents reason · substrate verifies · hashes prove · events trace · tests bind"
+
+# Where the named repos live on disk (probed by the verifier; first hit wins).
+repos:
+  loa:        ["~/Documents/GitHub/loa", "~/bonfire/loa"]
+  loa-laplas: ["~/Documents/GitHub/loa-laplas", "~/bonfire/loa-laplas"]
+  loa-freeside: ["~/Documents/GitHub/loa-freeside"]
+
+# THE LAW.
+laws:
+  # 1. Every layer mounts the kernel (the floor is real everywhere).
+  kernel_mount:
+    assert: "each repo contains .claude/loa"
+  # 2. Dependency direction is downward-only: an upper layer may depend on a lower;
+  #    a lower layer must NOT have a CODE dependency on an upper one. (A MoC naming
+  #    its orchestration TARGETS is config, not a code dependency — excluded.)
+  downward_only:
+    assert: "no lower-depth repo imports/requires a higher-depth repo in code"
+  # 3. Enforcement-from-below: a principle agents must honor lives BENEATH them.
+  #    Checked as: is the brakes layer wired beneath the application (installed as a
+  #    construct / invoked)? Absence = GAP (the under-consumption gap), not a violation.
+  enforcement_from_below:
+    assert: "loa-laplas is installed/wired in loa-freeside so its brakes gate freeside agents"
+
+# Edges we already know about (the honest map; the verifier confirms/contradicts).
+edges:
+  observed:
+    - "loa-freeside mounts loa"
+    - "loa-laplas mounts loa"
+    - "loa-laplas orchestrates freeside builds (compositions/discovery + delivery)"
+  gap:
+    - "loa-freeside core does NOT run under poteau/legba (laplas not installed in freeside)"
+  nascent:
+    - "@freeside/asson ships check-legba-drift.mjs (first building aligning to legba canon)"
+
+# The substrate currently walking the gradient (app -> brakes -> kernel).
+graduations:
+  - substrate: settle
+    born: loa-freeside        # packages/settle (draft PR #298)
+    descending_to: loa-laplas # composes legba(ed25519)+poteau(halt)+observatory(tile)
+    eventual: loa
+    status: "step 1 approved (Fold + compose Legba)"

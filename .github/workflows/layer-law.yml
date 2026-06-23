@@ -1,0 +1,34 @@
+name: layer-law
+
+# The Descent Law as an ENFORCED gate (Phase 3). The coherence monitor
+# (grimoires/loa/context/check-layer-law.mjs) stops being a candidate script and bites in CI:
+# every push/PR fails if loa-laplas (the brakes layer) depends in code on a higher layer
+# (VIOLATION>0 — an inversion). The full cross-repo check runs locally where the sibling repos
+# are present; in CI we check what's present (laplas's own downward-only invariant) + prove the
+# gate's teeth with the inverted-fixture negative control.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  layer-law:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # The verifier resolves loa-laplas at ~/Documents/GitHub/loa-laplas (layer-law.yaml).
+      # Map the CI checkout there so the downward-only check on laplas is real, not trivial.
+      - name: Map checkout to the verifier's expected path
+        run: |
+          mkdir -p "$HOME/Documents/GitHub"
+          ln -sfn "$GITHUB_WORKSPACE" "$HOME/Documents/GitHub/loa-laplas"
+      - name: Layer-law gate — downward-only (fail on an inversion)
+        # --law downward_only: the inversion check a single-repo CI CAN make. kernel_mount
+        # (needs the mounted kernel) + enforcement_from_below (needs the sibling repos) are
+        # enforced by the LOCAL full gate, not in CI.
+        run: bash scripts/layer-law-gate.sh --law downward_only
+      - name: Layer-law gate teeth — inverted-fixture negative control
+        run: node --test scripts/layer-law-gate.test.mjs
