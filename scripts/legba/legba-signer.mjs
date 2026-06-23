@@ -102,7 +102,8 @@ function readStdinJson() {
     process.stdin.on('error', reject);
     process.stdin.on('end', () => {
       const raw = chunks.join('').trim();
-      resolve(raw ? JSON.parse(raw) : {});
+      try { resolve(raw ? JSON.parse(raw) : {}); }
+      catch (e) { reject(e); } // malformed stdin → structured reject, not uncaughtException (F-002)
     });
   });
 }

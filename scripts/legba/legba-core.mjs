@@ -80,7 +80,8 @@ function callSigner(cmd, payload) {
         input: JSON.stringify(payload ?? {}),
         encoding: 'utf8',
         maxBuffer: 1024 * 1024,
-        env: { ...process.env, LEGBA_SIGNER_SOCKET: socketPath, LEGBA_AUDIT_KEY_DIR: '', LOA_AUDIT_KEY_DIR: '' },
+        timeout: 10_000, // a hung signer must not wedge gate() indefinitely (F-001)
+        env: { ...process.env, LEGBA_SIGNER_SOCKET: socketPath, LEGBA_SIGNER: '', LEGBA_AUDIT_KEY_DIR: '', LOA_AUDIT_KEY_DIR: '' },
       });
       return JSON.parse(stdout);
     } catch (e) {
@@ -99,8 +100,10 @@ function callSigner(cmd, payload) {
       input: JSON.stringify(payload ?? {}),
       encoding: 'utf8',
       maxBuffer: 1024 * 1024,
-      // Custody mode must not let the signer resolve the audited process key dir.
-      env: { ...process.env, LEGBA_AUDIT_KEY_DIR: '', LOA_AUDIT_KEY_DIR: '' },
+      timeout: 10_000, // a hung signer must not wedge gate() indefinitely (F-001)
+      // Custody mode must not let the signer resolve the audited process key dir,
+      // and must not re-enter custody itself (F-005 latent-loop guard).
+      env: { ...process.env, LEGBA_SIGNER: '', LEGBA_SIGNER_SOCKET: '', LEGBA_AUDIT_KEY_DIR: '', LOA_AUDIT_KEY_DIR: '' },
     });
     return JSON.parse(stdout);
   } catch (e) {

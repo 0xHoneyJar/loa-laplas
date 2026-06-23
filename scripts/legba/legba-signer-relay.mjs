@@ -16,7 +16,8 @@ function readStdinJson() {
     process.stdin.on('error', reject);
     process.stdin.on('end', () => {
       const raw = chunks.join('').trim();
-      resolve(raw ? JSON.parse(raw) : {});
+      try { resolve(raw ? JSON.parse(raw) : {}); }
+      catch (e) { reject(e); } // malformed stdin → structured reject, not uncaughtException (F-002)
     });
   });
 }
@@ -26,6 +27,8 @@ function request(socketPath, payload) {
     const conn = net.createConnection(socketPath);
     let buf = '';
     conn.setEncoding('utf8');
+    conn.setTimeout(8000); // a hung daemon must not block the relay (F-001)
+    conn.on('timeout', () => conn.destroy(new Error('LEGBA_SIGNER_TIMEOUT: signer socket idle')));
     conn.on('connect', () => {
       conn.end(JSON.stringify(payload));
     });
