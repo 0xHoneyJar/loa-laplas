@@ -10,7 +10,7 @@
  * permissions that the audited process cannot read.
  */
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { buildGateToken, hashObj, jcs } from './legba-core.mjs';
@@ -51,6 +51,7 @@ function loadOrInitSignerKeys(gatekeeperId = 'legba:default', keyVersion = 1, { 
   const priv = privateKey.export({ type: 'pkcs8', format: 'pem' });
   const pub = publicKey.export({ type: 'spki', format: 'pem' });
   writeFileSync(p.priv, priv, { mode: 0o600 });
+  chmodSync(p.priv, 0o600); // mode arg only applies on create; enforce on rewrite/rotation too (FAGAN major)
   writeFileSync(p.pub, pub);
   return { gatekeeperId, keyVersion, key_id: keyId(gatekeeperId, keyVersion), publicKeyPem: pub };
 }

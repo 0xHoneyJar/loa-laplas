@@ -9,7 +9,7 @@
  * replayable evidence.
  */
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
-import { existsSync, lstatSync, unlinkSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, unlinkSync } from 'node:fs';
 import net from 'node:net';
 import { buildGateToken, hashObj, jcs } from './legba-core.mjs';
 import { REGISTRY } from './tools.mjs';
@@ -122,6 +122,7 @@ server.on('error', (e) => {
 });
 
 server.listen(socketPath, () => {
+  chmodSync(socketPath, 0o600); // restrict the custody socket to owner (FAGAN major) — preserve single-host custody boundary
   process.stdout.write(JSON.stringify({ ok: true, socket: socketPath }) + '\n');
 });
 

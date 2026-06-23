@@ -237,9 +237,14 @@ export function checkSync(signed, config) {
   const sigResult = verifySnapshotSig(signed);
   if (!sigResult.ok) return deny(`signature invalid: ${sigResult.reason}`);
 
-  // TTL check (SKP-005a): snapshot must not be expired.
-  const prepared_at = snap.prepared_at ?? 0;
-  const ttl = snap.ttl ?? 0;
+  // TTL check (SKP-005a): snapshot must not be expired. Validate the clock and
+  // snapshot times are non-negative safe integers FIRST — a NaN/string/missing
+  // value slips past `now > prepared_at + ttl` (NaN comparisons are false),
+  // failing OPEN on a malformed snapshot (FAGAN major). Fail closed instead.
+  const { prepared_at, ttl } = snap;
+  if (!Number.isSafeInteger(now) || now < 0) return deny(`invalid gate clock: now must be a non-negative safe integer, got ${now}`);
+  if (!Number.isSafeInteger(prepared_at) || prepared_at < 0) return deny(`invalid snapshot prepared_at: must be a non-negative safe integer, got ${prepared_at}`);
+  if (!Number.isSafeInteger(ttl) || ttl < 0) return deny(`invalid snapshot ttl: must be a non-negative safe integer, got ${ttl}`);
   if (now > prepared_at + ttl) {
     return deny(`snapshot expired (now ${now} > prepared_at ${prepared_at} + ttl ${ttl})`);
   }
