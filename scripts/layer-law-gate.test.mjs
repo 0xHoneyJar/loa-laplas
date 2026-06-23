@@ -23,9 +23,12 @@ const REPO = join(HERE, '..');
 const FIXTURE_DIR = join(REPO, 'scripts', '__layerlaw_inverted_fixture__');
 const FIXTURE = join(FIXTURE_DIR, 'inverted.mjs');
 
+// Use --law downward_only: the test cares about the INVERSION check, and this also runs in
+// single-repo CI where kernel_mount/enforcement_from_below can't pass (no mounted kernel /
+// no sibling repos). The full-law gate is exercised locally where the whole layout is present.
 function runGate() {
   try {
-    execFileSync('bash', [GATE], { cwd: REPO, encoding: 'utf8', stdio: 'pipe' });
+    execFileSync('bash', [GATE, '--law', 'downward_only'], { cwd: REPO, encoding: 'utf8', stdio: 'pipe' });
     return 0;
   } catch (e) {
     return e.status ?? 1;

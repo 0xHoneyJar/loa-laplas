@@ -25,7 +25,10 @@ jobs:
         run: |
           mkdir -p "$HOME/Documents/GitHub"
           ln -sfn "$GITHUB_WORKSPACE" "$HOME/Documents/GitHub/loa-laplas"
-      - name: Layer-law gate — downward-only (fail on VIOLATION>0)
-        run: bash scripts/layer-law-gate.sh
+      - name: Layer-law gate — downward-only (fail on an inversion)
+        # --law downward_only: the inversion check a single-repo CI CAN make. kernel_mount
+        # (needs the mounted kernel) + enforcement_from_below (needs the sibling repos) are
+        # enforced by the LOCAL full gate, not in CI.
+        run: bash scripts/layer-law-gate.sh --law downward_only
       - name: Layer-law gate teeth — inverted-fixture negative control
         run: node --test scripts/layer-law-gate.test.mjs
