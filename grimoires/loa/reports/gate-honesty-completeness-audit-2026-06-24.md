@@ -34,14 +34,17 @@ different flavor than asserted. Propagating the unverified claim would have been
 ## Frontier — candidate axes, named not canonized (pending repo grounding)
 - **Faithful** (Euler — Goodhart/proxy integrity): the gate's *measure* must track the good it
   guards. poteau's G3 honestly reports "H1 echoed," which is not "grounded." (3/3 cross-support.)
+  *→ Subsequently **GRADUATED** to a canonical 5th axis — see the Update below. Listed here as the
+  panel's original disposition; no longer frontier.*
 - **Auditable** (Vitalik): a true verdict must be cheaply, portably, independently re-checkable by a
   third party. (3/3.)
 - **Fresh-and-Bound** (Satoshi — temporal): honest at decision time, a lie after revocation / expiry
   / replay; a verdict must bind its own validity window. (2/3 — weakest; may refine unforgeable.)
 
-These are real candidates but not yet reproduced in a repo gate the way GROUNDED is. Named so the
-next instance is recognized; *not* canonized, so the doctrine does not over-claim its own
-completeness — which would itself be a GROUNDED failure.
+Auditable and Fresh-and-Bound are real candidates but not yet reproduced in a repo gate the way
+GROUNDED is. Named so the next instance is recognized; *not* canonized, so the doctrine does not
+over-claim its own completeness — which would itself be a GROUNDED failure. (Faithful was here too,
+until G3 reproduced it — see the Update.)
 
 ## Update — Faithful graduated (the frontier process worked)
 Shortly after, **Faithful** was promoted from the frontier to a canonical 5th axis — *by evidence*,

@@ -81,6 +81,15 @@ the sole holder of both the real session id and the run_id, is the only writer. 
 READS a link the dispatcher wrote. A recon session that never dispatches is never armed, never
 deadlocks.)*
 
+> **What follows is a different *kind* of axis (BB #75, GH-001).** Axes 1–3 are *first-order* — each
+> is a way the gate's verdict itself diverges from the truth. The next two (Grounded, Faithful) are
+> better read as **operators on the first three** than as peers beside them: GROUNDED asks whether
+> *any* of the gate's checks were reproduced (an unforgeable check is worthless if its verifier was
+> vouched, not built); FAITHFUL asks whether *any* of the gate's measures track the good (a reproduced
+> check can still measure a proxy). They are numbered for reference, not because the set is orthogonal
+> — the companion essay's receipt makes the same concession. Read the table below the same way: the
+> last two rows apply *to* the first three, they do not sit beside them.
+
 ## 4. Grounded — the gate's own checks are *reproduced, not vouched* *(check-provenance integrity)* — added after a *completeness* audit
 
 The triad reckons with *who can forge a pass* (unforgeable), *who gets deadlocked* (exitable), and
@@ -108,9 +117,10 @@ Grounded in this repo (verified, not asserted):
 - **The floor is a file.** legba's praised "pinned maintainer root" resolves by default (via
   `operatorRootDir()`, `legba-core.mjs:179-181`) to a path *under the agent's own `~/.config/loa/`* —
   a *same-uid-writable* location, not a compiled-in constant; `isInsideRepo` forbids only the repo
-  tree. The regress bottoms out at a file the agent owns, never at a reproduced root. (As of writing
-  the file does not even exist — the rooted verify is *unprovisioned*, the audits' other finding — so
-  the floor is not just agent-writable, it is *absent*: strict verify fails closed, never certifies.)
+  tree. The regress bottoms out at a file the agent owns, never at a reproduced root. (As of
+  **2026-06-24** the file does not even exist — the rooted verify is *unprovisioned*, the audits'
+  other finding — so the floor is not just agent-writable, it is *absent*: strict verify fails closed,
+  never certifies. *Dated observation — stale once a maintainer root is provisioned; re-verify then.*)
 - *(One panel sub-claim corrected on verification — applying this very axis to the audit: legba's
   canonicalizer is an **inline RFC-8785 SUBSET**, not the npm `canonicalize` dependency the lens
   claimed. Reproduced, yes — but a non-conformant subset that drifts silently across runtimes. A

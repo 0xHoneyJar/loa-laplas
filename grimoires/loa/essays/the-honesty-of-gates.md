@@ -89,8 +89,9 @@ by which the list earned the right to exist — and the rule that governs whethe
 
 It went like this. The framework began as three axes, derived from fixing three bugs. To test
 whether three was *enough*, we did not introspect — we **convened a panel to refute it.** Four
-independent critical lenses (three cryptographers and, deliberately, one mechanism-design theorist
-so it wasn't an echo chamber) were each charged: *find a way a gate can lie that these three axes do
+independent critical lenses — three steeped in cryptographic and trusted-systems rigor (compiler-
+trust, consensus, verification economics), and, deliberately, a mechanism-design theorist so it
+wasn't an echo chamber — were each charged: *find a way a gate can lie that these three axes do
 not name, or prove them exhaustive.* Each proposed axis was then cross-examined by the others, the
 bar being that a gate must be able to *fail it while passing all the rest.*
 
