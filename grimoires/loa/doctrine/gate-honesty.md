@@ -13,6 +13,50 @@ A bad agent must not be able to produce a passing verdict it did not earn. Autho
 agent can reach or write). See `the-forgeable-gate.md`: the key off-agent, the signature
 verified, the decision read only from evidence the agent could not forge. *(poteau #67/#68.)*
 
+> **KNOWN GAP — axis 1 is NOT yet achieved in poteau (trust-lens audit, 2026-06-24).** A panel
+> (Ken Thompson / Satoshi / Vitalik) + direct reproduction found the custody mint **does not run
+> against the shipped legba daemon**: the gatekeeper sends `{sign-gate, token}` but the daemon's
+> `sign-gate` ignores `token` and does independent run-dir replay (`buildGateToken(req.dir,…)`),
+> so poteau's payload throws — `REQUIRE_CUSTODY=1` fails closed (deadlocks), and the only working
+> mint is the legacy agent-readable key = **Form A**. The #67 "custody verified" test was a *mock*
+> the builder wrote (Trusting-Trust). Also: the verify anchor is agent-substitutable (no pinned
+> maintainer root, unlike `legba-core verifyRun`). (`receipt.run_id` was likewise unbound to its run
+> dir — cross-run replay — but that is **FIXED** here, PR #71, bead `zeo` closed.) Tracked: beads
+> `kdm` (critical), `zss`. Until they land, treat
+> poteau's axis-1 claim as **aspirational** — the scaffolding fails closed (safe), but it does not
+> yet make a pass unforgeable on a single-user host. *Naming the gap is itself axis-1 honesty.*
+
+### The threat-model reckoning — what "unforgeable" actually means here *(added after the trust-lens audit)*
+
+The audit forced the question axis 1 never stated: **unforgeable against whom?** Grounding the
+answer in poteau's code, its trust is *layered*, and only one layer is cryptographic:
+
+- **The gate's INPUTS** (`run_state.task`, `mandated_reads`, reviewer **public** keys) live in the
+  agent-writable `.run/poteau/<run>/` and are defended by the **tool-gate hook** (P402) — a
+  *positional* defense. loa's own docs call hooks "a fence against routine mistakes, NOT a
+  hardened security boundary," and the gatekeeper's own comment admits it "cannot distinguish the
+  executor from a run-participant subagent (same user, same tree) — FORM, not substance." So
+  **G2 (task) and G3 (grounding) are satisfiable by a same-uid agent that writes the right
+  `run_state`** — they trust agent-assembled state, not independently re-established fact.
+- **The gatekeeper's own G5 signing key** (custody, `kdm`): currently non-functional, and even
+  working, custody of the *key* is not custody of the *decision* — the agent makes the *legitimate*
+  gatekeeper sign a forged-but-self-consistent packet. Key custody is necessary, never sufficient.
+- **The one cryptographic anchor is G4 council**: a PASS on a council surface requires Ed25519
+  signatures from reviewer **private** keys the agent cannot reach. This is sound **iff those
+  private keys are genuinely out-of-band** (a different uid / machine / the council runner) — not
+  merely hook-protected on the same box.
+
+**The honest claim, then:** poteau is unforgeable against an **external** adversary (other users,
+remote callers, accidental key leakage) across the board; against a **same-uid agent** (the agent
+*is* the user on a dev box) it is unforgeable **only on the G4-council surface, and only with
+out-of-band reviewer keys** — everything else is a positional fence. The whole `the-forgeable-gate`
+slogan ("a gate an agent can satisfy by emitting the right bytes is not a gate") indicts poteau's
+*own* G2/G3 under the same-uid model. The real cure is not more key custody — it is **independent
+verification** (the substrate re-establishes the fact itself: legba's `sign-gate` replays the run;
+settle re-derives the tier; the gatekeeper would have to read the actual files, not the echoed H1).
+That is the ACVP thesis poteau half-implements. Naming which deployment poteau is for — and that
+G2/G3 are positional under same-uid — is itself the axis-1 honesty the doctrine owed.
+
 ## 2. Exitable — the honest agent always has a truthful door *(exit integrity)*
 A good agent that is *not* completing — a recon pass, an abort, an honest no-op — must have a
 *truthful* way out. A gate whose only exit is "assert you completed in scope" forces an honest
