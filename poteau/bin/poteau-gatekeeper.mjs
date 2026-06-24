@@ -190,7 +190,10 @@ try {
   //      mint with an agent-readable on-disk key when enforcement is on.
   //   3. Else → the legacy on-disk-key path, but loudly warned as forgeable (dev only). Flip
   //      POTEAU_REQUIRE_CUSTODY once the signer daemon is wired (operator-gated, shadow→enforce).
-  const signerSocket = process.env.LEGBA_SIGNER_SOCKET ?? process.env.POTEAU_SIGNER_SOCKET;
+  // `||` (not `??`) so an EMPTY-string LEGBA_SIGNER_SOCKET falls through to POTEAU_SIGNER_SOCKET —
+  // matching the verifier (poteau-verify-receipts.mjs); `??` would keep "" and ignore the fallback,
+  // so mint + verify could resolve different anchors on an empty env (BB #78 MEDIUM).
+  const signerSocket = process.env.LEGBA_SIGNER_SOCKET || process.env.POTEAU_SIGNER_SOCKET;
   let signature;
   if (signerSocket) {
     const relay = new URL('../../scripts/legba/legba-signer-relay.mjs', import.meta.url).pathname;
