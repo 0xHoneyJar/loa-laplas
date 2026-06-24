@@ -550,24 +550,45 @@ export function verifyRun(dir, options = {}) {
   }
   const pub = resolved.pubkeyPem;
   let prevHash = GENESIS;
+  let expectedGateIndex = 0;
   const tokenHashes = [];
   for (const tf of tokenFiles) {
     const sealed = JSON.parse(readFileSync(join(dir, 'tokens', tf), 'utf8'));
     const t = sealed.token;
+    // The ed25519 signature covers jcs(token), NOT sealed.token_hash. RECOMPUTE
+    // the token hash and anchor the custody chain + run receipt on it — never on
+    // the stored field, which a run-dir writer can rewrite to splice the chain or
+    // forge the receipt while the signature still verifies (cross-model audit
+    // 2026-06-24: codex CRITICAL #1 + cursor HIGH #1, converged).
+    const computedHash = hashObj(t);
     const log = readSpanLog(dir, t.gate_index);
     const g = {
       gate_index: t.gate_index,
       signature: verifyTokenSignature(sealed, pub),
+      // stored token_hash must match the signed token (else it is a lie).
+      token_hash_matches: sealed.token_hash === computedHash,
+      // tokens are bound to THIS run — no replaying another run's signed tokens
+      // under the same gatekeeper key (codex CRITICAL #2; openSpan already checks
+      // this at the turnstile, verifyRun did not).
+      run_id_matches: t.run_id === man.run_id,
+      // gates must be a contiguous sequence from 0 — a signed token for a
+      // non-sequential gate_index means a skip/reorder/middle-delete (codex #3).
+      // (Trailing truncation needs an authenticated gate total — tracked
+      // separately; this catches skips and middle deletions.)
+      gate_index_contiguous: t.gate_index === expectedGateIndex,
       custody: t.prev_token_hash === prevHash,
       span_head: (() => { try { return replayChain(log) === t.span_log_head; } catch { return false; } })(),
       artifacts_present: t.artifact_hashes.every((h) => casHas(dir, h.replace('sha256:', ''))),
       verdict_pass: t.verdict === 'pass',
     };
-    g.ok = g.signature && g.custody && g.span_head && g.artifacts_present && g.verdict_pass;
+    g.ok = g.signature && g.token_hash_matches && g.run_id_matches
+      && g.gate_index_contiguous && g.custody && g.span_head
+      && g.artifacts_present && g.verdict_pass;
     report.gates.push(g);
     report.ok = report.ok && g.ok;
-    prevHash = sealed.token_hash;
-    tokenHashes.push(sealed.token_hash);
+    prevHash = computedHash;          // chain anchors on the recomputed hash
+    tokenHashes.push(computedHash);   // receipt over recomputed hashes
+    expectedGateIndex++;
   }
   report.run_receipt_hash = hashObj(tokenHashes);
   report.gate_count = tokenFiles.length;
