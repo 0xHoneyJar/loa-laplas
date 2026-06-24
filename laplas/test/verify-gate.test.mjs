@@ -47,8 +47,15 @@ function makeRun({ poteau = "none" } = {}) {
   return { base, runId, pot };
 }
 function verify(base, runId) {
+  // Isolate poteau key resolution to this run's temp base. The #67 authenticity check resolves
+  // POTEAU_KEY.pub (default REPO/.run/poteau/gate.key.pub) and "runs only when a pubkey is
+  // resolvable". These fixtures test LINKAGE + the governance stamp, not signatures (authenticity has
+  // its own suite: poteau/bin/poteau-verify-receipts.test.mjs). Without isolation, a leftover real
+  // gate.key.pub in a dev working tree leaks in and fails the unsigned fixtures — green on a clean CI
+  // checkout, flaky on a dev box. Pinning POTEAU_KEY to an absent temp path makes it deterministic.
+  const env = { ...process.env, POTEAU_KEY: join(base, "no-gate.key"), LEGBA_SIGNER_SOCKET: "", POTEAU_SIGNER_SOCKET: "" };
   try {
-    const out = execFileSync("bash", [VERIFY, runId, "--poteau", "--json", "--base-dir", base], { encoding: "utf8" });
+    const out = execFileSync("bash", [VERIFY, runId, "--poteau", "--json", "--base-dir", base], { encoding: "utf8", env });
     return { code: 0, ...JSON.parse(out) };
   } catch (e) { return { code: e.status, ...(JSON.parse(e.stdout || "{}")) }; }
 }

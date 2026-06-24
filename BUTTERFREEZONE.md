@@ -5,7 +5,7 @@ purpose: `loa-laplas` is the **master of ceremonies for the Loa engine**.
 key_files: [CLAUDE.md, .claude/loa/CLAUDE.loa.md, .loa.config.yaml, .claude/scripts/, .claude/skills/]
 interfaces:
 dependencies: [git, jq, yq]
-version: v0.3.0
+version: v0.4.0
 installation_mode: submodule
 trust_level: L2-verified
 -->
@@ -103,33 +103,33 @@ Directory structure:
 | Module | Files | Purpose | Documentation |
 |--------|-------|---------|---------------|
 | `app/` | 11 | Source code | \u2014 |
-| `compositions/` | 29 | Compositions | \u2014 |
+| `compositions/` | 30 | Compositions | \u2014 |
 | `data/` | 4 | Data | \u2014 |
 | `docs/` | 7 | Documentation | \u2014 |
-| `grimoires/` | 98 | Loa state and memory files | \u2014 |
+| `grimoires/` | 138 | Loa state and memory files | \u2014 |
 | `hooks/` | 3 | Lifecycle hooks | \u2014 |
 | `laplas/` | 59 | **Domain**: toolchain · **Status**: reference v0.1.0 · demo-proven (see poteau/test, | [laplas/README.md](laplas/README.md) |
 | `modules/` | 8 | Modules | \u2014 |
 | `observatory/` | 35 | Observatory | \u2014 |
-| `poteau/` | 15 | **Domain**: enforcement · **Status**: reference-drop v0.1.0 · demo-proven | [poteau/README.md](poteau/README.md) |
-| `scripts/` | 42 | Utility scripts | \u2014 |
+| `poteau/` | 21 | **Domain**: enforcement · **Status**: reference-drop v0.1.0 · demo-proven | [poteau/README.md](poteau/README.md) |
+| `scripts/` | 63 | Utility scripts | \u2014 |
 | `skills/` | 1 | Specialized agent skills | \u2014 |
 | `templates/` | 1 | Templates | \u2014 |
-| `tests/` | 52 | Test suites | \u2014 |
+| `tests/` | 57 | Test suites | \u2014 |
 
 ## Verification
 <!-- provenance: CODE-FACTUAL -->
 - Trust Level: **L2 — CI Verified**
-- 53 test files across 1 suite
-- CI/CD: GitHub Actions (3 workflows)
+- 71 test files across 1 suite
+- CI/CD: GitHub Actions (4 workflows)
 <!-- ground-truth-meta
-head_sha: d4532352b5dda63f5d93c3534ac51dfa7b553307
-generated_at: 2026-06-17T04:52:12Z
+head_sha: 7c7d8e03196aa1c7885d34d829723209c7986f13
+generated_at: 2026-06-24T17:59:47Z
 generator: butterfreezone-gen v1.0.0
 sections:
-  agent_context: 1b4bff34f168bd64147e22b4b30d7f5c18b88398078288d287e8dedd73e2e176
+  agent_context: 00f819a23c4f0cd8c79c3c44b619d957cca356b180e8843a19b3383ac7cbc95b
   capabilities: fd752934ca2df5fc869ce4f06064c02f13689f7ebcb0f1397f0d4c7dab9b9df0
   architecture: f27738ea5e7fbc7c4573456b9391b54da7d73229a281da0941ade94686ef39e1
-  module_map: 2c8ce8e18d1e55277d73f21720c4214cd17664ac38f18985ebc712881a3bbc24
-  verification: f5d6853996083a3470574fd9963b0c850999617f1f5adf00800eef012d8267ce
+  module_map: 6dab0a9073d263ed2b4874145e5c395114081e448b070ac6ba4fe372b1cb7d41
+  verification: f6526496d52b92103cc1dbd57bd222a42846313ee39a267fb986a5e9de5bfa6d
 -->
