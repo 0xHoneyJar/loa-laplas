@@ -317,7 +317,13 @@ function verifyTrustStore(doc, pinnedRootPubkeyPath) {
   catch { ok = false; }
   return ok ? { ok: true } : { ok: false, error: 'trust-store root_signature does NOT verify' };
 }
-function resolveGatekeeperPubkey(man, {
+// EXPORTED (trust-root-proof, 2026-06-24): the audit sweep found the rooted trust-store is the one
+// sound trust anchor in the brakes layer, but no consumer could REACH it — it lived private to
+// verifyRun. Exporting it is the enabling step the deferred fixes (poteau zss, settle fgl) need:
+// a consumer can now resolve its gatekeeper pubkey through the pinned maintainer root instead of an
+// agent-substitutable key. Pure + read-only (resolves files, verifies the root signature, returns
+// a verdict object) — no side effects.
+export function resolveGatekeeperPubkey(man, {
   strict = true,
   trustStorePath,
   pinnedRootPubkeyPath,
