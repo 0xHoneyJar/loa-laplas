@@ -1,11 +1,13 @@
-# Gate Honesty — the three axes of a trustworthy gate
+# Gate Honesty — the axes of a trustworthy gate
 
-> The synthesis above three fixes (poteau #67/#68 forgeable, #69 honest-exit, and the open 9x7).
-> Each looked like its own bug. They are three faces of one property: **a gate is honest only if
-> it tells the truth in every direction at once.** A gate that fails any one axis is not strict —
-> it is broken in a way that *looks* like strictness. Composes with `the-forgeable-gate.md`.
+> The synthesis above three fixes (poteau #67/#68 forgeable, #69 honest-exit, and 9x7). Each looked
+> like its own bug. They are faces of one property: **a gate is honest only if it tells the truth in
+> every direction at once.** A gate that fails any one axis is not strict — it is broken in a way
+> that *looks* like strictness. Composes with `the-forgeable-gate.md`. *(Began as a triad; a
+> completeness audit — 2026-06-24 — added a fourth, GROUNDED, the Trusting-Trust axis the original
+> doctrine named but never axiomatized. The honest framework grows when refuted.)*
 
-A gate stands between an agent and a capability. It is **honest** when all three hold:
+A gate stands between an agent and a capability. It is **honest** when all of these hold:
 
 ## 1. Unforgeable — the adversary cannot fake a pass *(input integrity)*
 A bad agent must not be able to produce a passing verdict it did not earn. Authority must be
@@ -77,19 +79,70 @@ the sole holder of both the real session id and the run_id, is the only writer. 
 READS a link the dispatcher wrote. A recon session that never dispatches is never armed, never
 deadlocks.)*
 
-## Why the triad is one thing
+## 4. Grounded — the gate's own checks are *reproduced, not vouched* *(check-provenance integrity)* — added after a *completeness* audit
+
+The triad reckons with *who can forge a pass* (unforgeable), *who gets deadlocked* (exitable), and
+*who gets falsely armed* (truthful-state). A completeness audit (a four-lens panel — Ken Thompson,
+Satoshi, Vitalik, Euler — convened to *refute* the triad, 2026-06-24) found the gap all three share:
+**none of them reckons with *what the gate trusts to decide*.** Every one assumes the gate's own
+machinery is sound — that `verify()` verifies, that the bytes it signs are the bytes it means, that
+the pinned root is pinned, that the test attesting "the gate is wired right" is *true*. That
+assumption is exactly Thompson's compiler.
+
+A gate can pass axes 1–3 perfectly and still lie, because its verdict is honest *relative to a check
+that was vouched, not reproduced.* This holds the **agent innocent** and asks whether the **check** is
+what it claims. Different liar (the builder / a dependency / the compiler — not the gated agent),
+different victim (the auditor and every substrate that *composes* this gate — the Descent's "inherit
+custody for free" is also "inherit any TCB compromise for free"), different symptom: a **silent
+false-green**, not a leak or a deadlock. The most dangerous mode, because source-reading the gate, the
+test, and the chain all look correct — it is caught **only by re-executing the check from
+independently-built tooling.**
+
+Grounded in this repo (verified, not asserted):
+- **The mock (the purest instance).** The #67 "custody verified" test was a builder-written mock; the
+  real shipped daemon ignores `req.token` and replays the run dir, so it *rejects* poteau's payload.
+  The green test certified a custody path that does not exist — `kdm`, reproduced. **The doctrine
+  itself labeled this "(Trusting-Trust)" and then gave it no axis.** This is that axis.
+- **The floor is a file.** legba's praised "pinned maintainer root" resolves by default (via
+  `operatorRootDir()`, `legba-core.mjs:179-181`) to a path *under the agent's own `~/.config/loa/`* —
+  a *same-uid-writable* location, not a compiled-in constant; `isInsideRepo` forbids only the repo
+  tree. The regress bottoms out at a file the agent owns, never at a reproduced root. (As of writing
+  the file does not even exist — the rooted verify is *unprovisioned*, the audits' other finding — so
+  the floor is not just agent-writable, it is *absent*: strict verify fails closed, never certifies.)
+- *(One panel sub-claim corrected on verification — applying this very axis to the audit: legba's
+  canonicalizer is an **inline RFC-8785 SUBSET**, not the npm `canonicalize` dependency the lens
+  claimed. Reproduced, yes — but a non-conformant subset that drifts silently across runtimes. A
+  GROUNDED concern of a different flavor, not the one asserted.)*
+
+**The cure** is `proof_class` pushed one level down: make the gate carry, in its verdict, whether its
+*own* verifier / canonicalizer / trust-root / attesting-test were **reproduced** (compiled-in or
+content-addressed, re-derivable by hand), not vouched — and never let a builder-supplied mock stand
+in for re-execution against the real thing. *(This whole session is the worked example: the gate I
+built lied to me through a mock, and only re-running against the real daemon caught it.)*
+
+> **Frontier (candidate axes the same panel raised, not yet canonized — pending grounding):**
+> **Faithful** (Goodhart — the gate's *measure* tracks the good it guards; poteau's G3 honestly
+> reports "H1 echoed," which is not "grounded"); **Auditable** (a true verdict must be cheaply,
+> portably re-checkable by a third party); **Fresh-and-Bound** (honest at decision time, a lie after
+> revocation / expiry / replay). Each got majority cross-lens support; none is yet reproduced in a
+> repo gate the way GROUNDED is. Named here so the next instance is recognized, not canonized so the
+> doctrine over-claims its own completeness — which would itself be a GROUNDED failure.
+
+## Why the axes are one thing
 
 | Axis | Lie it prevents | Victim | Failure looks like |
 |------|-----------------|--------|--------------------|
 | Unforgeable | "I passed" (when I didn't) | the system | a leak |
 | Exitable | (forced) "I completed" / silence | the honest agent | a deadlock |
 | Truthful-state | "this session is in run X" | a bystander session | a deadlock for the uninvolved |
+| **Grounded** | "the check I ran is the check I claim to run" | the auditor / the composer | **a silent false-green** |
 
-Forge and deadlock are the same disease seen from two sides — **a gap between what the gate
-*says* and what is *true*.** A forgeable gate says "pass" louder than the truth; a deadlocking
-gate says "not done" louder than the truth; a false-arming gate says "you're in this" louder
-than the truth. Close all three gaps and the gate becomes what it claims to be: a place where
-the substrate's word and the world's state are the same word.
+Forge, deadlock, and false-green are the same disease seen from different sides — **a gap between
+what the gate *says* and what is *true*.** A forgeable gate says "pass" louder than the truth; a
+deadlocking gate says "not done" louder than the truth; a false-arming gate says "you're in this"
+louder than the truth; an **ungrounded** gate says "verified" louder than its own machinery can
+prove. Close all the gaps and the gate becomes what it claims to be: a place where the substrate's
+word and the world's state are the same word.
 
 That is the whole of the ACVP thesis, stated as a property of a single gate: *agents reason,
 the substrate verifies, and the substrate never says anything it cannot prove* — about a pass,
