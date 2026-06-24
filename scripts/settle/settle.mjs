@@ -249,8 +249,24 @@ export function checkSync(signed, config) {
     return deny(`snapshot expired (now ${now} > prepared_at ${prepared_at} + ttl ${ttl})`);
   }
 
+  // Tier binding (settle trust-lens audit, "tier over-claim"): DECIDE on the tier EARNED from the
+  // verdict, never the tier CLAIMED in the signed field. verify() binds earned_tier =
+  // verdictToEarnedTier(verdict), but the gate must not TRUST that a signed snapshot came from
+  // verify() — signSnapshot will sign any {earned_tier}. So re-derive here: a snapshot with no
+  // verdict cannot be tiered (fail-closed), and ANY disagreement between the claimed and derived
+  // tier is denied — an over-claim is an attack, an under-claim is a producer bug; an inconsistent
+  // snapshot is suspicious in either direction. (verify-then-proceed means the gate re-derives, it
+  // does not trust.) The guard covers null/missing verdict (BB #72); the message is accurate both ways.
+  if (snap.verdict === undefined || snap.verdict === null) return deny('snapshot has no verdict — cannot derive an earned tier (fail-closed)');
+  let derivedTier;
+  try { derivedTier = verdictToEarnedTier(snap.verdict); }
+  catch { return deny(`snapshot verdict "${snap.verdict}" is not a recognized verdict`); }
+  if (snap.earned_tier !== undefined && snap.earned_tier !== derivedTier) {
+    return deny(`tier mismatch: snapshot claims earned_tier "${snap.earned_tier}" but verdict "${snap.verdict}" earns "${derivedTier}" (gate decides on the earned tier)`);
+  }
+
   // G-7: degraded chain capped below settled.
-  let earned_tier = snap.earned_tier;
+  let earned_tier = derivedTier;
   let degraded_capped = false;
   if (snap.chain_health === 'degraded' && earned_tier === 'settled') {
     earned_tier = 'pinned';
