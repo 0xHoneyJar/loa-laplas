@@ -13,6 +13,18 @@ A bad agent must not be able to produce a passing verdict it did not earn. Autho
 agent can reach or write). See `the-forgeable-gate.md`: the key off-agent, the signature
 verified, the decision read only from evidence the agent could not forge. *(poteau #67/#68.)*
 
+> **KNOWN GAP — axis 1 is NOT yet achieved in poteau (trust-lens audit, 2026-06-24).** A panel
+> (Ken Thompson / Satoshi / Vitalik) + direct reproduction found the custody mint **does not run
+> against the shipped legba daemon**: the gatekeeper sends `{sign-gate, token}` but the daemon's
+> `sign-gate` ignores `token` and does independent run-dir replay (`buildGateToken(req.dir,…)`),
+> so poteau's payload throws — `REQUIRE_CUSTODY=1` fails closed (deadlocks), and the only working
+> mint is the legacy agent-readable key = **Form A**. The #67 "custody verified" test was a *mock*
+> the builder wrote (Trusting-Trust). Also unbound: `receipt.run_id` to its run dir (cross-run
+> replay) and the verify anchor is agent-substitutable (no pinned maintainer root, unlike
+> `legba-core verifyRun`). Tracked: beads `kdm` (critical), `zeo`, `zss`. Until they land, treat
+> poteau's axis-1 claim as **aspirational** — the scaffolding fails closed (safe), but it does not
+> yet make a pass unforgeable on a single-user host. *Naming the gap is itself axis-1 honesty.*
+
 ## 2. Exitable — the honest agent always has a truthful door *(exit integrity)*
 A good agent that is *not* completing — a recon pass, an abort, an honest no-op — must have a
 *truthful* way out. A gate whose only exit is "assert you completed in scope" forces an honest

@@ -71,7 +71,14 @@ test('FIX: armed mint with POTEAU_REQUIRE_CUSTODY=1 and no signer REFUSES (exit 
   } finally { rmSync(cwd, { recursive: true, force: true }); }
 });
 
-test('CUSTODY: with a signer socket the gate mints via the daemon — NO on-disk key, verifies vs daemon key', async () => {
+// HONEST SCOPE (bead construct-rooms-substrate-kdm, found by the trust-lens audit 2026-06-24):
+// this proves only the gatekeeper's CLIENT-SIDE custody PROTOCOL — it sends the receipt to the
+// socket, mints from the response, and writes NO on-disk key. The in-process server below is a
+// STAND-IN that signs req.token. The REAL legba-signer-daemon does NOT honor that contract: its
+// sign-gate IGNORES req.token and runs buildGateToken(req.dir, …) (independent run-dir replay),
+// so against the shipped daemon poteau's payload throws and custody mint FAILS CLOSED. So this
+// test does NOT prove end-to-end custody works — the next test (real daemon) documents the gap.
+test('CUSTODY (client protocol, STAND-IN signer): the gate mints from a socket response — NO on-disk key', async () => {
   const cwd = tmp();
   const sockPath = join(cwd, 'signer.sock');
   const daemonKp = generateKeyPairSync('ed25519'); // the daemon holds this in-memory; the agent never sees it
@@ -99,6 +106,28 @@ test('CUSTODY: with a signer socket the gate mints via the daemon — NO on-disk
     assert.equal(verify(null, Buffer.from(jcs(sealed.receipt)), daemonKp.publicKey, Buffer.from(sealed.signature, 'base64')), true,
       'the receipt verifies against the DAEMON key — the key the work agent never held');
   } finally { server.close(); rmSync(cwd, { recursive: true, force: true }); }
+});
+
+// THE HONEST RECORD (bead construct-rooms-substrate-kdm): the custody mint against the SHIPPED
+// daemon currently fails CLOSED — the trust-lens audit's reproduced finding, captured as a test
+// so the suite stops claiming custody works. SAFE because fail-closed leaks nothing (no forged
+// receipt); the gap is that the secure posture (REQUIRE_CUSTODY=1) is non-functional, so the
+// daemon needs a real sign-token primitive and poteau must route to it. Flip this assertion the
+// moment kdm lands.
+test('CUSTODY (REAL daemon, KNOWN GAP kdm): poteau payload mismatches the daemon sign-gate contract → fails CLOSED (exit 5, NO receipt)', async () => {
+  const cwd = tmp();
+  const sockPath = join(cwd, 'real-signer.sock');
+  const DAEMON = new URL('../../scripts/legba/legba-signer-daemon.mjs', import.meta.url).pathname;
+  const RELAY = new URL('../../scripts/legba/legba-signer-relay.mjs', import.meta.url).pathname;
+  const daemon = spawn(process.execPath, [DAEMON], { env: { ...process.env, LEGBA_SIGNER_SOCKET: sockPath }, stdio: 'ignore' });
+  try {
+    for (let i = 0; i < 60 && !existsSync(sockPath); i++) await new Promise((r) => setTimeout(r, 50));
+    spawnSync(process.execPath, [RELAY, 'init-keys'], { input: JSON.stringify({ gatekeeperId: 'poteau-gate' }), env: { ...process.env, LEGBA_SIGNER_SOCKET: sockPath }, encoding: 'utf8' });
+    const r = await runGateAsync(cwd, { LEGBA_SIGNER_SOCKET: sockPath, POTEAU_REQUIRE_CUSTODY: '1' });
+    // the daemon's sign-gate runs buildGateToken(req.dir,…); req.dir is undefined for poteau → throws.
+    assert.equal(r.status, 5, 'custody mint against the REAL daemon fails closed (kdm) · ' + r.stdout + r.stderr);
+    assert.equal(existsSync(join(cwd, '.run/poteau', 'sec-test', 'receipts.jsonl')), false, 'fails closed — no forged receipt minted');
+  } finally { daemon.kill(); rmSync(cwd, { recursive: true, force: true }); }
 });
 
 test('legacy path still mints (with a forgeability WARNING) when custody is not required', () => {
