@@ -193,6 +193,31 @@ test('checkSync: bar_sha mismatch denies (A-2)', () => {
   assert.match(d.reason, /bar_sha mismatch/);
 });
 
+test('checkSync: TIER OVER-CLAIM — a signed PENDING snapshot claiming earned_tier:settled is DENIED (trust-lens audit)', () => {
+  const h = harness();
+  // verify() binds PENDING -> claimed; a forger/embedder signs PENDING with earned_tier:settled.
+  // The gate must RE-DERIVE the tier from the verdict, not trust the signed field.
+  const s = h.signedSnap({ verdict: 'PENDING', earned_tier: 'settled', bar_sha: 'sha256:x' });
+  const d = h.realCheck(s, { requiredTier: 'settled' });
+  assert.equal(d.proceed, false, 'the gate must decide on the EARNED tier (claimed), not the CLAIMED tier (settled)');
+  assert.match(d.reason, /over-claim|earns "claimed"/);
+});
+
+test('checkSync: a verdict-less snapshot cannot be tiered -> DENIED (fail-closed)', () => {
+  const h = harness();
+  const s = h.signedSnap({ earned_tier: 'settled', bar_sha: 'sha256:x' }); // no verdict
+  const d = h.realCheck(s, { requiredTier: 'settled' });
+  assert.equal(d.proceed, false);
+  assert.match(d.reason, /no verdict|cannot derive/);
+});
+
+test('checkSync: a verdict-consistent HELD->settled snapshot still proceeds (no regression)', () => {
+  const h = harness();
+  const s = h.signedSnap({ verdict: 'HELD', earned_tier: 'settled', bar_sha: 'sha256:x' });
+  const d = h.realCheck(s, { requiredTier: 'settled' });
+  assert.equal(d.proceed, true, 'a snapshot whose claimed tier matches its verdict proceeds');
+});
+
 test('checkSync: untrusted signer key denies (A-6)', () => {
   const h = harness();
   // Sign with a DIFFERENT key than the configured trusted key.
