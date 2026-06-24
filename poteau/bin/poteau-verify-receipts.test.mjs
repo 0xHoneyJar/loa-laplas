@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -91,6 +91,40 @@ test('JCS CONFORMANCE: a receipt signed over LEGBA\'s jcs (as the real daemon si
     writeFileSync(p, JSON.stringify(sealed) + '\n');
     const r = run([p, pubPath]);
     assert.equal(r.status, 0, 'helper jcs must equal legba jcs or custody-signed receipts will not verify · ' + r.stderr);
+  } finally { rmSync(cwd, { recursive: true, force: true }); }
+});
+
+test('zeo: a valid receipt replayed into a DIFFERENT run dir is rejected (cross-run replay)', () => {
+  const cwd = tmp();
+  try {
+    const { kp, pubPath } = withPub(cwd);
+    // a receipt legitimately minted + signed for runA
+    const receipt = { receipt_kind: 'poteau_gate_pass', run_id: 'runA', gate_index: 0, prev_receipt_hash: null };
+    const sealed = { receipt, signature: sign(null, Buffer.from(jcs(receipt)), kp.privateKey).toString('base64'), receipt_hash: sha(jcs(receipt)) };
+    // ...dropped into runB's chain under the standard .run/poteau/<run_id>/ layout
+    const runBdir = join(cwd, '.run', 'poteau', 'runB');
+    mkdirSync(runBdir, { recursive: true });
+    const p = join(runBdir, 'receipts.jsonl');
+    writeFileSync(p, JSON.stringify(sealed) + '\n');
+    const r = run([p, pubPath]);
+    assert.equal(r.status, 4, 'a signature-valid receipt in the wrong run dir must still be rejected · ' + r.stderr);
+    assert.match(r.stderr, /cross-run replay|run dir/);
+  } finally { rmSync(cwd, { recursive: true, force: true }); }
+});
+
+test('zeo: a chain mixing two run_ids is rejected (intra-chain consistency)', () => {
+  const cwd = tmp();
+  try {
+    const { kp, pubPath } = withPub(cwd);
+    const mk = (rid) => {
+      const rc = { receipt_kind: 'poteau_gate_pass', run_id: rid, gate_index: 0, prev_receipt_hash: null };
+      return JSON.stringify({ receipt: rc, signature: sign(null, Buffer.from(jcs(rc)), kp.privateKey).toString('base64'), receipt_hash: sha(jcs(rc)) });
+    };
+    const p = join(cwd, 'receipts.jsonl'); // tmp dir → no dir-binding, but chain-consistency catches it
+    writeFileSync(p, mk('runA') + '\n' + mk('runB') + '\n');
+    const r = run([p, pubPath]);
+    assert.equal(r.status, 4, 'a chain mixing run_ids must be rejected · ' + r.stderr);
+    assert.match(r.stderr, /mixed-run|differs from the chain/);
   } finally { rmSync(cwd, { recursive: true, force: true }); }
 });
 

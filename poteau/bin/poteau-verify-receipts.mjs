@@ -16,6 +16,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { createHash, verify, createPublicKey } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { dirname, basename } from 'node:path';
 
 const jcs = (v) => v === null || typeof v !== 'object' ? JSON.stringify(v)
   : Array.isArray(v) ? '[' + v.map(jcs).join(',') + ']'
@@ -49,8 +50,17 @@ if (socket) {
   fail('no trusted gatekeeper public key — set LEGBA_SIGNER_SOCKET (custody) or pass gate.key.pub', 2);
 }
 
+// zeo: bind the chain to its RUN so a valid receipt minted in run A cannot be replayed into run
+// B's chain. (a) every receipt in a chain must share ONE run_id; (b) when the standard
+// .run/poteau/<run_id>/receipts.jsonl layout is present, that run_id must match the dir the chain
+// lives in. (Non-standard paths — e.g. test tmp dirs — skip the dir binding and enforce only
+// intra-chain consistency, so the check is sound without being brittle.)
+const runDir = dirname(receiptsPath);
+const expectedRunId = basename(dirname(runDir)) === 'poteau' ? basename(runDir) : null;
+
 const lines = readFileSync(receiptsPath, 'utf8').trim().split('\n').filter(Boolean);
 if (!lines.length) fail('empty receipt chain', 4);
+let chainRunId = null;
 for (const [i, line] of lines.entries()) {
   let sealed;
   try { sealed = JSON.parse(line); } catch { fail(`receipt ${i}: unparseable JSON`); }
@@ -59,5 +69,10 @@ for (const [i, line] of lines.entries()) {
   let ok = false;
   try { ok = verify(null, Buffer.from(jcs(sealed.receipt)), pub, Buffer.from(sealed.signature, 'base64')); } catch { ok = false; }
   if (!ok) fail(`receipt ${i}: signature does NOT verify against the gatekeeper key (forged gate pass)`);
+  // zeo run-binding
+  const rid = sealed.receipt.run_id;
+  if (chainRunId === null) chainRunId = rid;
+  else if (rid !== chainRunId) fail(`receipt ${i}: run_id "${rid}" differs from the chain's run_id "${chainRunId}" (mixed-run chain / replay)`);
+  if (expectedRunId !== null && rid !== expectedRunId) fail(`receipt ${i}: run_id "${rid}" does not match its run dir "${expectedRunId}" (cross-run replay)`);
 }
-process.stdout.write(JSON.stringify({ ok: true, verified: lines.length, custody: !!socket }) + '\n');
+process.stdout.write(JSON.stringify({ ok: true, verified: lines.length, custody: !!socket, run_id: chainRunId }) + '\n');
