@@ -24,8 +24,9 @@ invented, not the daemon's. This is the literal Trusting-Trust hole: a green che
 clean build, produced by a stand-in the builder wrote rather than reproduction against the real thing.
 
 ## Other confirmed findings
-- **`zeo` (HIGH)** — the verifier never binds `receipt.run_id` to the run dir it lives in →
-  cross-run replay (a receipt from run A passes in run B). *Satoshi, confirmed by Vitalik.*
+- **`zeo` (HIGH) — FIXED in this PR (#71).** The verifier never bound `receipt.run_id` to the run
+  dir it lives in → cross-run replay (a receipt from run A passed in run B). *Satoshi, confirmed by
+  Vitalik.* Now bound (chain-consistency + dir-match); bead `zeo` closed.
 - **`zss` (HIGH)** — the poteau verify anchor is agent-substitutable: resolved from
   `LEGBA_SIGNER_SOCKET` (agent-set env) or `${POTEAU_KEY}.pub` (agent-writable, written next to the
   private key). None of the pinned maintainer-root trust-store `legba-core verifyRun` got in #59.
@@ -44,7 +45,7 @@ rather than waving through), and the *direction* of the whole effort. The trust 
 repo (in legba) — the poteau receipt path simply doesn't reach for it.
 
 ## Disposition
-Beads `kdm`/`zeo`/`zss` filed. The lying test was corrected (the mock now claims only the
+Beads `kdm`/`zss` filed (`zeo` FIXED + closed in this PR). The lying test was corrected (the mock now claims only the
 client protocol; a real-daemon test documents the fail-closed gap). `gate-honesty.md` axis 1
 carries a KNOWN-GAP note. **`fix/legba-custody-separation` should NOT merge to main as
 "custody closed Form A" — it has not.** The scaffolding fails closed (safe) but custody is not

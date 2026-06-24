@@ -114,19 +114,30 @@ test('CUSTODY (client protocol, STAND-IN signer): the gate mints from a socket r
 // receipt); the gap is that the secure posture (REQUIRE_CUSTODY=1) is non-functional, so the
 // daemon needs a real sign-token primitive and poteau must route to it. Flip this assertion the
 // moment kdm lands.
-test('CUSTODY (REAL daemon, KNOWN GAP kdm): poteau payload mismatches the daemon sign-gate contract → fails CLOSED (exit 5, NO receipt)', async () => {
+test('CUSTODY (REAL daemon, KNOWN GAP kdm): poteau payload mismatches the daemon sign-gate contract → fails CLOSED, WITNESSING the cause', async () => {
   const cwd = tmp();
   const sockPath = join(cwd, 'real-signer.sock');
   const DAEMON = new URL('../../scripts/legba/legba-signer-daemon.mjs', import.meta.url).pathname;
   const RELAY = new URL('../../scripts/legba/legba-signer-relay.mjs', import.meta.url).pathname;
   const daemon = spawn(process.execPath, [DAEMON], { env: { ...process.env, LEGBA_SIGNER_SOCKET: sockPath }, stdio: 'ignore' });
+  const relay = (cmd, req) => spawnSync(process.execPath, [RELAY, cmd], { input: JSON.stringify(req), env: { ...process.env, LEGBA_SIGNER_SOCKET: sockPath }, encoding: 'utf8' });
   try {
     for (let i = 0; i < 60 && !existsSync(sockPath); i++) await new Promise((r) => setTimeout(r, 50));
-    spawnSync(process.execPath, [RELAY, 'init-keys'], { input: JSON.stringify({ gatekeeperId: 'poteau-gate' }), env: { ...process.env, LEGBA_SIGNER_SOCKET: sockPath }, encoding: 'utf8' });
+    // (1) WITNESS the daemon is UP + functional — init-keys returns a real pubkey. This is what
+    //     makes the exit 5 below mean "the contract was rejected", NOT "the daemon never started"
+    //     (BB #71 HIGH: exit 5 is custodyRefuse for ANY fault; pin down which fault).
+    const init = JSON.parse((relay('init-keys', { gatekeeperId: 'poteau-gate' }).stdout || '{}').trim() || '{}');
+    assert.ok(init.publicKeyPem, 'precondition: the REAL daemon is up + keyed (so exit 5 cannot mean daemon-never-started)');
+    // (2) WITNESS the CAUSE directly — the daemon's sign-gate REJECTS poteau's {token} payload
+    //     with the contract-mismatch error (it ignores token, runs buildGateToken(req.dir,…) → undefined).
+    const probe = JSON.parse((relay('sign-gate', { token: { receipt_kind: 'poteau_gate_pass', run_id: 'sec-test', gate_index: 0 }, gatekeeperId: 'poteau-gate' }).stdout || '{}').trim() || '{}');
+    assert.equal(probe.ok, false, 'the real daemon REJECTS poteau\'s sign-gate payload');
+    assert.match(JSON.stringify(probe), /path|undefined|dir/i, 'the rejection is the req.dir contract mismatch, not a transient error');
+    // (3) the gatekeeper therefore fails CLOSED — exit 5, no receipt, refusal names the signer failure.
     const r = await runGateAsync(cwd, { LEGBA_SIGNER_SOCKET: sockPath, POTEAU_REQUIRE_CUSTODY: '1' });
-    // the daemon's sign-gate runs buildGateToken(req.dir,…); req.dir is undefined for poteau → throws.
-    assert.equal(r.status, 5, 'custody mint against the REAL daemon fails closed (kdm) · ' + r.stdout + r.stderr);
-    assert.equal(existsSync(join(cwd, '.run/poteau', 'sec-test', 'receipts.jsonl')), false, 'fails closed — no forged receipt minted');
+    assert.equal(r.status, 5, 'custody mint fails closed (kdm) · ' + r.stdout + r.stderr);
+    assert.match(lastLine(r.stdout).refusal || '', /signer|custody|mint/i, 'the refusal names the signer-mediated failure, not a generic fault');
+    assert.equal(existsSync(join(cwd, '.run/poteau', 'sec-test', 'receipts.jsonl')), false, 'no forged receipt minted');
   } finally { daemon.kill(); rmSync(cwd, { recursive: true, force: true }); }
 });
 
