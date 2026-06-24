@@ -77,10 +77,17 @@ provider-qualified claim requires the **provider to match** (no cross-provider
 slug spoof). Plus 1:1 proof consumption, corrupt-line-in-window fail-close, and a
 top-level fail-closed catch.
 
-**Known limit (tracked separately):** the gate trusts the MODELINV chain's
-*integrity*. It reads `models_succeeded` but does not yet verify the hash-chain
-linkage / Ed25519 signatures — a writer to `.run/model-invoke.jsonl` could forge a
-dispatch. Verifying chain integrity is legba / audit-envelope's responsibility;
-this gate proves *coverage* against whatever the (separately-attested) chain says.
+**Chain integrity — a known integration point (not a missing capability).** This
+gate proves *coverage* (every claimed voice has a covering dispatch) but reads
+`models_succeeded` at face value — it does not itself verify the chain wasn't
+forged. That verification ALREADY EXISTS:
+`loa_cheval.audit_envelope.audit_verify_chain(log_path) -> (ok, msg)` walks the
+MODELINV jsonl and checks each `prev_hash == sha256(JCS chain-input of the prior
+entry)`, GENESIS at the head, and Ed25519 signatures when present. MODELINV writes
+through it via `audit_emit`. The only gap is a CLI seam so this node gate can call
+it cross-language; the fix is a thin `python -m loa_cheval.audit_envelope verify`
+wrapper + a fail-closed shell-out here (tracked as arrakis-4tfv). Until wired,
+run `audit_verify_chain` alongside this gate: coverage (here) + integrity (there)
+are the two halves of a trustworthy proof-of-call.
 
 Verify: `node --test poteau/test/voice-attestation.test.mjs` (15/15).
