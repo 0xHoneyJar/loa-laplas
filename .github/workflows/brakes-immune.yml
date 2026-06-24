@@ -1,0 +1,27 @@
+name: brakes-immune
+
+# The brakes-layer immune system as a standing gate. Born from the poteau forgeable-gate fix
+# (#67) and the Forgeable-Gate doctrine (grimoires/loa/doctrine/the-forgeable-gate.md): every
+# push is swept for the vulnerability class — agent-readable signing keys (Form A) and verify
+# contexts that never check the signature (Form B) — and the poteau gate's own teeth are run.
+# Unlike layer-law, this is fully laplas-internal (the brakes files are all here), so it needs
+# no sibling repos.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  brakes-immune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Forgeable-gate scan (fail on A-class mint-residue)
+        run: node scripts/brakes-forgeable-scan.mjs
+      - name: Scanner teeth (planted Form-A gate must be caught)
+        run: node --test scripts/brakes-forgeable-scan.test.mjs
+      - name: poteau gate security tests (custody mint + signature verify)
+        run: node --test poteau/bin/poteau-gatekeeper.security.test.mjs poteau/bin/poteau-verify-receipts.test.mjs
