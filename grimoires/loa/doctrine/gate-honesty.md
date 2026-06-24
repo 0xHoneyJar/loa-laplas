@@ -5,7 +5,9 @@
 > every direction at once.** A gate that fails any one axis is not strict — it is broken in a way
 > that *looks* like strictness. Composes with `the-forgeable-gate.md`. *(Began as a triad; a
 > completeness audit — 2026-06-24 — added a fourth, GROUNDED, the Trusting-Trust axis the original
-> doctrine named but never axiomatized. The honest framework grows when refuted.)*
+> doctrine named but never axiomatized, and then a fifth, FAITHFUL, graduated from the frontier when
+> poteau's own G3 was caught measuring a proxy. The honest framework grows only by evidence — a new
+> axis earns its place when a real gate is caught failing it while passing all the others.)*
 
 A gate stands between an agent and a capability. It is **honest** when all of these hold:
 
@@ -120,13 +122,37 @@ content-addressed, re-derivable by hand), not vouched — and never let a builde
 in for re-execution against the real thing. *(This whole session is the worked example: the gate I
 built lied to me through a mock, and only re-running against the real daemon caught it.)*
 
-> **Frontier (candidate axes the same panel raised, not yet canonized — pending grounding):**
-> **Faithful** (Goodhart — the gate's *measure* tracks the good it guards; poteau's G3 honestly
-> reports "H1 echoed," which is not "grounded"); **Auditable** (a true verdict must be cheaply,
-> portably re-checkable by a third party); **Fresh-and-Bound** (honest at decision time, a lie after
-> revocation / expiry / replay). Each got majority cross-lens support; none is yet reproduced in a
-> repo gate the way GROUNDED is. Named here so the next instance is recognized, not canonized so the
-> doctrine over-claims its own completeness — which would itself be a GROUNDED failure.
+## 5. Faithful — the gate's *measure* tracks the good it guards *(proxy / Goodhart integrity)* — graduated from the frontier
+
+A frontier candidate the completeness panel raised, now **canonized — because it is reproduced
+in-repo, with the gate's own admission, exactly as GROUNDED was.** The other axes ask whether the
+gate's *pass* is faithful to the agent, the door, the state, its own machinery. This asks whether
+the gate's *measure* is faithful to the **good it exists to guard.** A gate can be unforgeable,
+exitable, truthful-state, and grounded — and still lie, because the thing it honestly checks is a
+**proxy** for the thing the pass implies. The gate tells the truth about its measure; the lie is in
+the gap between the measure and the meaning. (Goodhart: when a measure becomes a gate, it stops
+being a good measure.)
+
+Grounded in this repo: poteau's **G3 grounding check** (`poteau-gatekeeper.mjs`) refuses unless the
+packet's rationale **echoes the H1** of each mandated read. Its own comment is the confession:
+*"this checks the H1 string was REPRODUCED, not that the document was read or the reasoning grounded
+in it… a weak signal… a present echo is necessary but not sufficient… DO NOT over-claim 'proof'."*
+The pass implies **grounded**; the gate verifies **echoed**. An agent that copies the H1 string
+without reading the doc passes G3 honestly — and the gate honestly reports "grounding: present"
+while grounding is absent. The measure (echo) does not track the good (grounding). **The cure** (the
+gatekeeper's own deferral): an *out-of-band* check — the gate reads the actual file and tests that
+the rationale engages its content, not that it reproduced a string the agent could read from
+`run_state`. Tracked: bead `construct-rooms-substrate-g3f`.
+
+> **Frontier (candidate axes the panel raised, NOT canonized — still pending a reproduced instance):**
+> **Auditable** (a true verdict must be cheaply, portably re-checkable by a third party — but a gate
+> true-to-itself yet un-auditable may be a *trustworthiness* property, not strictly a says-vs-true
+> gap); **Fresh-and-Bound** (honest at decision time, a lie after revocation / expiry / replay — may
+> refine *unforgeable* rather than stand alone). Each got cross-lens support; neither is yet
+> reproduced in a repo gate the way grounded and faithful are. Named so the next instance is
+> recognized, not canonized — over-claiming completeness would itself be a GROUNDED failure. *(The
+> framework grows only by evidence: a candidate graduates when a real gate is caught failing it
+> while passing all the others — as G3 graduated Faithful here.)*
 
 ## Why the axes are one thing
 
@@ -136,13 +162,15 @@ built lied to me through a mock, and only re-running against the real daemon cau
 | Exitable | (forced) "I completed" / silence | the honest agent | a deadlock |
 | Truthful-state | "this session is in run X" | a bystander session | a deadlock for the uninvolved |
 | **Grounded** | "the check I ran is the check I claim to run" | the auditor / the composer | **a silent false-green** |
+| **Faithful** | "what I measured is the good I guard" | whoever relies on the gate's *purpose* | **a Goodharted pass** (true measure, wrong meaning) |
 
-Forge, deadlock, and false-green are the same disease seen from different sides — **a gap between
-what the gate *says* and what is *true*.** A forgeable gate says "pass" louder than the truth; a
-deadlocking gate says "not done" louder than the truth; a false-arming gate says "you're in this"
-louder than the truth; an **ungrounded** gate says "verified" louder than its own machinery can
-prove. Close all the gaps and the gate becomes what it claims to be: a place where the substrate's
-word and the world's state are the same word.
+Forge, deadlock, false-green, and Goodhart are the same disease seen from different sides — **a gap
+between what the gate *says* and what is *true*.** A forgeable gate says "pass" louder than the
+truth; a deadlocking gate says "not done" louder than the truth; a false-arming gate says "you're in
+this" louder than the truth; an **ungrounded** gate says "verified" louder than its own machinery can
+prove; an **unfaithful** gate says "grounded" when it only checked "echoed." Close all the gaps and
+the gate becomes what it claims to be: a place where the substrate's word and the world's state are
+the same word.
 
 That is the whole of the ACVP thesis, stated as a property of a single gate: *agents reason,
 the substrate verifies, and the substrate never says anything it cannot prove* — about a pass,
