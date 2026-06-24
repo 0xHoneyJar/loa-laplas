@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
+import { jcs as legbaJcs } from '../../scripts/legba/legba-core.mjs';
 
 const VERIFY = join(dirname(fileURLToPath(import.meta.url)), 'poteau-verify-receipts.mjs');
 const jcs = (v) => v === null || typeof v !== 'object' ? JSON.stringify(v)
@@ -75,6 +76,21 @@ test('TAMPERED: signed, then receipt body mutated without re-hashing → REJECTE
     const r = run([chain, pubPath]);
     assert.equal(r.status, 4);
     assert.match(r.stderr, /tampered|hash/i);
+  } finally { rmSync(cwd, { recursive: true, force: true }); }
+});
+
+test('JCS CONFORMANCE: a receipt signed over LEGBA\'s jcs (as the real daemon signs) verifies — guards the custody path against jcs drift', () => {
+  const cwd = tmp();
+  try {
+    const { kp, pubPath } = withPub(cwd);
+    // The signer daemon signs over LEGBA's jcs; the verify helper checks over its own jcs.
+    // Correctness depends on the two being identical — so sign here exactly as the daemon would.
+    const receipt = { receipt_kind: 'poteau_gate_pass', run_id: 'r1', gate_index: 0, prev_receipt_hash: null };
+    const sealed = { receipt, signature: sign(null, Buffer.from(legbaJcs(receipt)), kp.privateKey).toString('base64'), receipt_hash: sha(jcs(receipt)) };
+    const p = join(cwd, 'receipts.jsonl');
+    writeFileSync(p, JSON.stringify(sealed) + '\n');
+    const r = run([p, pubPath]);
+    assert.equal(r.status, 0, 'helper jcs must equal legba jcs or custody-signed receipts will not verify · ' + r.stderr);
   } finally { rmSync(cwd, { recursive: true, force: true }); }
 });
 
