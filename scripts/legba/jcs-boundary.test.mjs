@@ -10,13 +10,28 @@
 // Run: node --test scripts/legba/jcs-boundary.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { jcs as legbaJcs } from './legba-core.mjs';
 
-// The exact inline canonicalizer copied across the layer (poteau-gatekeeper.mjs,
-// poteau-verify-receipts.mjs, the test helpers). If legba's and this drift, cross-verification breaks.
-const inlineJcs = (v) => v === null || typeof v !== 'object' ? JSON.stringify(v)
-  : Array.isArray(v) ? '[' + v.map(inlineJcs).join(',') + ']'
-  : '{' + Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + inlineJcs(v[k])).join(',') + '}';
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+// Load the ACTUAL inline jcs FROM A PRODUCTION SOURCE FILE — not a fresh copy written here. (BB #77
+// HIGH: a fresh copy compared to legba proves only that I copied legba correctly; it does not guard
+// the REAL copies. The drift guard has to check the source that ships.) eval is deliberate and the
+// whole point: it runs the production source exactly as written, so a drift in that file is caught.
+function loadInlineJcs(relPath) {
+  const src = readFileSync(join(REPO, relPath), 'utf8');
+  const m = src.match(/const jcs = (\(v\) =>[\s\S]*?\+ '\}');/);
+  if (!m) throw new Error('could not locate an inline `const jcs = (v) => …` in ' + relPath);
+  // the arrow references `jcs` recursively; binding it to this const resolves the recursion at call time.
+  const jcs = eval('(' + m[1] + ')'); // eslint-disable-line no-eval -- runs trusted in-repo source on purpose
+  return jcs;
+}
+// every production file carrying its OWN inline copy. (settle imports legba's jcs, so it is covered
+// by the GOLDEN freeze below, not re-listed here.)
+const PRODUCTION_COPIES = ['poteau/bin/poteau-gatekeeper.mjs', 'poteau/bin/poteau-verify-receipts.mjs'];
 
 // GOLDEN: frozen outputs. A change to legba's jcs that would invalidate existing signatures fails here.
 const GOLDEN = [
@@ -36,10 +51,17 @@ test('GOLDEN: legba jcs output is frozen — a silent change that breaks signatu
   }
 });
 
-test('DRIFT: the inline copy used across the layer equals legba jcs (the 7 copies must agree)', () => {
-  for (const [input] of GOLDEN) {
-    assert.equal(inlineJcs(input), legbaJcs(input), 'an inline jcs copy diverged from legba jcs — cross-verification (daemon-signed vs locally-checked) would silently break');
+test('DRIFT: every PRODUCTION inline jcs (loaded from its source file) equals legba jcs', () => {
+  let checked = 0;
+  for (const relPath of PRODUCTION_COPIES) {
+    const prodJcs = loadInlineJcs(relPath);
+    for (const [input, golden] of GOLDEN) {
+      assert.equal(prodJcs(input), legbaJcs(input), relPath + ': its inline jcs drifted from legba jcs — cross-verification (daemon-signed vs locally-checked) would silently break');
+      assert.equal(prodJcs(input), golden, relPath + ': its inline jcs drifted from the frozen golden');
+    }
+    checked++;
   }
+  assert.equal(checked, PRODUCTION_COPIES.length, 'every declared production copy must be locatable + checked');
 });
 
 test('SUBSET boundary, made explicit: keys sorted, arrays preserved, primitives via JSON.stringify', () => {
