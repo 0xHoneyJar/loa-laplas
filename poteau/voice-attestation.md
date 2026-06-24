@@ -67,4 +67,20 @@ roster (not just reviewer keys), the gatekeeper runs voice-attestation against t
 MODELINV chain scoped to the run, and refuses (exit 2) on UNATTESTED — so the
 council-honor check covers *both* "a key signed" (G4) and "the model ran" (G4.5).
 
-Verify: `node --test poteau/test/voice-attestation.test.mjs` (12/12).
+## Hardening + known limit
+
+Hardened after a cross-model adversarial review (codex + cursor, 2026-06-24) that
+converged on three HIGH holes — all closed: a scope is now **required** by default
+(`--last`/`--since`, or explicit `--all-history`); an empty/malformed claim
+**fail-closes** (a review claiming no voices is not a passing council); a
+provider-qualified claim requires the **provider to match** (no cross-provider
+slug spoof). Plus 1:1 proof consumption, corrupt-line-in-window fail-close, and a
+top-level fail-closed catch.
+
+**Known limit (tracked separately):** the gate trusts the MODELINV chain's
+*integrity*. It reads `models_succeeded` but does not yet verify the hash-chain
+linkage / Ed25519 signatures — a writer to `.run/model-invoke.jsonl` could forge a
+dispatch. Verifying chain integrity is legba / audit-envelope's responsibility;
+this gate proves *coverage* against whatever the (separately-attested) chain says.
+
+Verify: `node --test poteau/test/voice-attestation.test.mjs` (15/15).

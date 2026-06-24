@@ -116,10 +116,42 @@ test('callingPrimitive filter: dispatches from a different primitive do not coun
   assert.equal(r.verdict, 'UNATTESTED');
 });
 
-test('empty claim is vacuously attested (nothing claimed → nothing to prove)', () => {
+test('empty claim is UNATTESTED — a review that claims no voices is not a council', () => {
+  // Hardened after the codex+cursor review: empty roster must NOT vacuously pass.
   const r = attestVoices({ claimed: [], entries: [] });
-  assert.equal(r.verdict, 'ATTESTED');
-  assert.deepEqual(r.proven, []);
+  assert.equal(r.verdict, 'UNATTESTED');
+  assert.match(r.reasons.join(' '), /no voices claimed/);
+});
+
+test('provider-qualified claim is NOT proven by a different provider with the same slug', () => {
+  // openai:codex-headless must not be proven by fake:codex-headless (cross-model
+  // review converged HIGH: provider-blind slug match is unsound).
+  const r = attestVoices({
+    claimed: ['openai:codex-headless'],
+    entries: [entry({ succeeded: ['fake:codex-headless'] })],
+  });
+  assert.equal(r.verdict, 'UNATTESTED');
+  assert.deepEqual(r.missing, ['openai:codex-headless']);
+});
+
+test('one dispatch cannot prove two claimed voices (1:1 matching)', () => {
+  // Two claims for the same model, but only ONE dispatch — the second is missing.
+  const r = attestVoices({
+    claimed: ['anthropic:claude-headless', 'anthropic:claude-headless'],
+    entries: [entry({ succeeded: ['anthropic:claude-headless'] })],
+  });
+  assert.equal(r.verdict, 'UNATTESTED');
+  assert.equal(r.proven.length, 1);
+  assert.equal(r.missing.length, 1);
+});
+
+test('scopeEntries keeps corrupt (null) lines positionally inside the --last window', () => {
+  // So a tampered current line cannot be silently dropped, letting an older
+  // valid line slip into the window (codex review finding).
+  const chain = [{ ts_utc: 'a', payload: {} }, null, { ts_utc: 'b', payload: {} }];
+  const scoped = scopeEntries(chain, { last: 2 });
+  assert.equal(scoped.length, 2);
+  assert.ok(scoped.includes(null));
 });
 
 test('SCOPING is load-bearing: an unrelated past council does not prove the current review', () => {
