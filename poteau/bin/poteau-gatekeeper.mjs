@@ -56,13 +56,28 @@ catch { process.stdout.write(JSON.stringify({ pass: false, code: 'P500', refusal
 
 const { run_state: rs = {}, packet } = input;
 
+// 2h1: cite the EXACT packet path the exit-gate reads — run-scoped when armed
+// (.run/poteau/<run_id>/packet.json), flat only on the unarmed port fallback. An agent that
+// obeys a flat-path refusal while armed writes where the gate never looks → deadlock. Align
+// the message with exit-gate.sh's RUN_DIR resolution.
+const packetPath = rs.run_id ? `.run/poteau/${rs.run_id}/packet.json` : '.run/poteau/packet.json';
+
 // G1 — the EOF
-if (!packet) refuse('P101', 'No handoff packet found. Emit the construct-handoff packet (verdict, outputs, rationale) to .run/poteau/packet.json, then stop again. The packet IS the exit — there is no door without it.');
+if (!packet) refuse('P101', `No handoff packet found. Emit the construct-handoff packet (verdict, outputs, rationale) to ${packetPath}, then stop again. The packet IS the exit — there is no door without it.`);
 for (const f of ['verdict', 'rationale']) if (!(f in packet))
   refuse('P102', `Handoff packet missing required field "${f}". Add it and stop again. (Three-tier discipline: required fields fail closed.)`);
 
-// G2 — task conformance (#29: the gate must see the task)
-if (rs.task) {
+// HONEST EXIT (xok): an aborting agent cannot truthfully assert conformance.in_scope — it is
+// NOT completing the task in scope. Without a sanctioned abort, an honest no-op deadlocks at
+// G2 (only operator break-glass or the loop-guard releases it). verdict:'aborted' is the
+// truthful door: it clears the COMPLETION gates (G2 in_scope, G3 grounding, G4 council — none
+// apply to a withdrawal) and mints an ABORT receipt, recorded as an abort, NOT a pass. The
+// gated capability still requires a real pass downstream; an abort grants nothing — it only
+// lets honest non-completion stop cleanly, with a truthful trail entry instead of a deadlock.
+const ABORTING = packet.verdict === 'aborted';
+
+// G2 — task conformance (#29: the gate must see the task). Skipped for an honest abort (xok).
+if (!ABORTING && rs.task) {
   const want = sha(jcs(rs.task));
   if (packet.task_ref !== want)
     refuse('P201', `Packet.task_ref does not match the armed task (expected ${want.slice(0, 26)}…). Copy run_state.task_ref into the packet and assert conformance — the gate judges work AGAINST THE TASK, not coherence in a vacuum.`);
@@ -78,7 +93,7 @@ if (rs.task) {
 // also produce by reading the run-state if the proof is embedded there; closing
 // this absolutely requires an out-of-band check (the gatekeeper reading the actual
 // file), which is deferred. We keep the signal but DO NOT over-claim "proof".
-if ((rs.mandated_reads ?? []).length) {
+if (!ABORTING && (rs.mandated_reads ?? []).length) {
   const rationale = String(packet.rationale ?? '');
   for (const read of rs.mandated_reads) {
     const h1 = String(read.h1 ?? '').trim();
@@ -101,7 +116,7 @@ if ((rs.mandated_reads ?? []).length) {
 //   reviewer private keys into the agent-readable run dir, forgery returns. The PUBLIC
 //   keys in run_state.review_routing.reviewer_keys are safe to be readable.
 let councilVoices = 0;
-if (rs.review_routing?.council === true) {
+if (!ABORTING && rs.review_routing?.council === true) {
   const min = rs.review_routing.min_voices ?? 2;
   const pems = rs.review_routing.reviewer_keys ?? [];
   let keys;
@@ -162,12 +177,13 @@ try {
     if (lines.length) prev = JSON.parse(lines[lines.length - 1]).receipt_hash;
   }
   const receipt = {
-    receipt_kind: 'poteau_gate_pass', poteau_version: '0.1.0',
+    receipt_kind: ABORTING ? 'poteau_gate_abort' : 'poteau_gate_pass', poteau_version: '0.1.0',
+    outcome: ABORTING ? 'aborted' : 'pass',
     run_id: rs.run_id, gate_index: rs.gate_index ?? 0,
     prev_receipt_hash: prev,
     task_ref: packet.task_ref ?? null,
     packet_hash: sha(jcs(packet)),
-    checks: { task_conformance: !!rs.task, grounding: (rs.mandated_reads ?? []).length, council: (rs.review_routing?.council === true ? councilVoices : false) },
+    checks: ABORTING ? { aborted: true } : { task_conformance: !!rs.task, grounding: (rs.mandated_reads ?? []).length, council: (rs.review_routing?.council === true ? councilVoices : false) },
     ts: new Date().toISOString(),
   };
   // IMP-011 freshness: the run-scoped chain already makes cross-run replay
@@ -175,7 +191,7 @@ try {
   if (rs.armed_at && receipt.ts < rs.armed_at) custodyRefuse('gatekeeper: receipt ts predates run armed_at (clock skew or replay) — refused (IMP-011).');
   const sealed = { receipt, signature: sign(null, Buffer.from(jcs(receipt)), priv).toString('base64'), receipt_hash: sha(jcs(receipt)) };
   writeFileSync(chainPath, (existsSync(chainPath) ? readFileSync(chainPath, 'utf8') : '') + JSON.stringify(sealed) + '\n');
-  process.stdout.write(JSON.stringify({ pass: true, receipt_hash: sealed.receipt_hash, gate_index: receipt.gate_index }) + '\n');
+  process.stdout.write(JSON.stringify({ pass: !ABORTING, aborted: ABORTING, receipt_hash: sealed.receipt_hash, gate_index: receipt.gate_index }) + '\n');
 } catch (e) {
   custodyRefuse('gatekeeper: receipt mint failed (' + (e && e.message ? e.message : e) + ') — custody fails closed, never waved through.');
 }
