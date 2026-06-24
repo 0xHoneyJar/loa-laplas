@@ -18,10 +18,15 @@ real, but it is one question. A gate can be perfectly impassable to an adversary
 in directions the "keep the bad guy out" frame never looks. The honesty of a gate is larger than its
 strength.
 
-Here is the larger frame, in one sentence: **a gate is honest exactly when what it says and what is
-true are the same word.** Every way a gate can be untrustworthy is a *gap* between those two — and
-the gaps come in distinct shapes, each with a different liar, a different victim, and a different
-symptom. We found five.
+Here is the larger frame: **a gate is honest when its verdict and the truth do not diverge.** Most
+divergences are the gate *asserting* something false — but not all: one of the five (Exitable) is
+the gate asserting nothing false and instead *withholding the truthful verdict the agent needs*,
+forcing the lie onto the agent. So the frame is not perfectly uniform — a critic was right to catch
+that the slogan "what it *says* vs what is true" fits four of the five and strains on the second (see
+the receipt at the end). Read it as the *spine*, not a theorem: each axis is a distinct way verdict
+and truth come apart, each with a different liar, victim, and symptom. We found five — three peers
+and, the critic insisted and I agree, two that are better understood as *operators on the other
+three* than as coordinates beside them.
 
 ## The five axes
 
@@ -104,19 +109,52 @@ party; a verdict honest now must not become a lie after revocation or expiry) re
 canonical** — no reproduced instance yet. They wait. Naming them is recognition; canonizing them
 without evidence would be the very over-claim axis 4 forbids.
 
-## Why this is the strongest thing the framework can say about itself
+## What the framework can — and cannot — say about itself
 
-A framework that grows by argument can rationalize anything. A framework that grows only when a real
-artifact is *caught* failing a candidate axis cannot inflate, because the world has to cooperate.
-Its discipline is external. The most trustworthy property of this account of gate honesty is not any
-single axis — it is that **the account is held to its own standard.** While writing the fifth axis,
-the author referenced a tracking item that did not exist; that is a *grounded* failure, in the
-document that defines *grounded*; it was caught and corrected, with a note that "the discipline
-doesn't get to be ironic." The doctrine is not something written *about* the gates. It is something
-the gates, and the writing about the gates, keep having to *pass*.
+A framework that grows by argument can rationalize anything. This one's axis *count* cannot inflate:
+a candidate becomes canonical only when a real artifact is *caught* failing it while passing the
+rest, so the world has to cooperate. That discipline is external — but it gates **only the count.**
+Everything else here — the unifying frame, the cures, the victim/symptom table, the word "axes," and
+every superlative — grew by argument, carries no reproduced receipt, and should be priced
+accordingly. An earlier draft draped the count's credibility over that ungated prose; that was *this
+document* committing axis 5's sin — a true measure (a disciplined axis count) standing in for a
+larger meaning (a disciplined account) it had not earned. This sentence is the correction.
 
-That is the whole of it, stated as a property of a single gate: **agents reason; the substrate
-verifies; and the substrate never says anything it cannot prove** — about a pass, an exit, who is at
-the door, its own machinery, or the meaning of what it measured. A gate that holds all five is not
-merely strong. It is honest. And a framework that found them by hiring its own critics, and grows
-only when caught, is the closest a builder can come to honesty about *the gates themselves.*
+The one reflexive self-catch the work actually *reproduced* is narrow and real: while writing the
+fifth axis, I referenced a tracking item that did not exist — a *grounded* failure, in the document
+that defines grounded — and corrected it, noting that the discipline doesn't get to be ironic. That
+is one axis caught once, not the whole account vindicated.
+
+So the honest claim is small: **agents reason; the substrate verifies; and the substrate should say
+only what it can prove** — about a pass, an exit, who is at the door, its own machinery, or the
+meaning of what it measured. A gate that holds all five is not finished — two candidate axes remain
+named-without-evidence, and a gate could close five and still lie by expiry. It is only *more honest
+than a gate that holds one.* And a framework that found its axes by hiring critics, and revises when
+caught, is not the truest possible account of gate honesty — it is one that has, so far, changed
+every time it was refuted. Including this essay.
+
+---
+
+## Receipt: this essay was refuted (axis 4, applied to itself)
+
+The essay argues you should hire critics to refute your own framework, so it was put to its own
+method — a summoned adversarial critic reviewed it against its own axes 4 (Grounded) and 5
+(Faithful). It found, correctly:
+- **The framing wears the axis-list's credibility.** "Cannot inflate" was true of the axis *count* and
+  false of the prose; the draft then inflated with superlatives. *(Scoped, above.)*
+- **The unifying frame strains on Exitable** — whose lie is coerced onto the agent, not asserted by
+  the gate; the "(coerced)" parenthetical was the seam. *(The frame is now the spine, not a theorem.)*
+- **Grounded and Faithful are not peers of the first three** — they are *operators* that apply to all
+  the others and to each other (an Unforgeable check is worthless if un-Grounded; a reproduction run
+  can itself be Goodharted). The table flattened a meta-axis into a coordinate. *(Read 1–3 as
+  first-order, 4–5 as operators on them.)*
+- **The jury and the independence test are vouched, not reproduced** — the essay asserts the panel
+  cross-examined each axis "while passing all the rest," but never *shows* the pairwise-independence
+  construction. By axis 4's own rule, take that on the builder's word, discounted accordingly.
+
+What it praised — the named-vs-canonical promotion discipline, reproduced for axes 4 and 5, with the
+two further candidates correctly held uncanonized — is the real contribution, and it passes its own
+standard.
+
+You are reading the second draft. The first failed its own test. That failure-and-revision is the
+only endorsement this method can honestly offer — and the only one consistent with what it claims.
