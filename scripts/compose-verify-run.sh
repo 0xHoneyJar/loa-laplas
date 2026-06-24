@@ -222,9 +222,21 @@ LEGBA_RECEIPT=""
 # Emit the verdict + exit. $1=verdict $2=exit_code $3=reason
 _verdict() {
     local verdict="$1" code="$2" reason="$3"
+    # proof_class (trust-lens audit, 2026-06-24): the GATEABLE honesty. Checks 1-4 are
+    # SELF-CONSISTENCY over agent-writable .run/compose/<run_id>/ files — a default valid_run proves
+    # "not an inline fake" (the header's stated threat: the LAZY agent that leaves no trail), NOT
+    # cryptographic authorship; a same-uid agent that fabricates a consistent run dir passes. Only
+    # --legba (a chain rooted in the pinned maintainer root) or an armed --poteau receipt chain roots
+    # trust off-agent. The headline verdict/exit code is identical either way, so surface the class
+    # explicitly: a consumer that gates on exit 0 can now read proof_class to tell the two apart.
+    local proof_class="self_consistency"
+    if [[ "$LEGBA_VERIFIED" == "true" || "$POTEAU_GOVERNANCE" == '"armed"' ]]; then
+        proof_class="cryptographic"
+    fi
     if [[ "$OUTPUT_JSON" == "1" ]]; then
         jq -n \
             --arg verdict "$verdict" \
+            --arg proof_class "$proof_class" \
             --arg run_id "$RUN_ID" \
             --arg reason "$reason" \
             --argjson manifest "$CHK_MANIFEST" \
@@ -239,6 +251,7 @@ _verdict() {
             --argjson poteau_governance "$POTEAU_GOVERNANCE" \
             '{
                 verdict: $verdict,
+                proof_class: $proof_class,
                 run_id: $run_id,
                 reason: $reason,
                 checks: {
@@ -256,10 +269,15 @@ _verdict() {
             }'
     else
         if [[ "$code" -eq 0 ]]; then
-            echo "[compose-verify-run] $RUN_ID — VALID governed run ($reason)"
+            echo "[compose-verify-run] $RUN_ID — VALID governed run [proof_class: $proof_class] ($reason)"
         else
             echo "[compose-verify-run] $RUN_ID — $verdict: $reason" >&2
         fi
+    fi
+    # The audit's critical finding made load-bearing: a valid_run that rests only on self-consistency
+    # must SAY SO loudly, not bury it in checks.legba_chain:null.
+    if [[ "$code" -eq 0 && "$proof_class" == "self_consistency" ]]; then
+        echo "[compose-verify-run] WARNING: valid_run is SELF-CONSISTENCY ONLY (proof_class:self_consistency) — it proves this is not an inline fake, NOT that an adversary did not fabricate a consistent run dir. Pass --legba/--poteau (with a provisioned trust-store) for cryptographic authorship." >&2
     fi
     exit "$code"
 }
