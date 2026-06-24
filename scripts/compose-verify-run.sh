@@ -538,7 +538,21 @@ if [[ "$POTEAU" == "1" ]]; then
         ' "$_receipts" 2>/dev/null; then
             _verdict "broken_run" 3 "--poteau: receipt chain is broken or splices across runs (IMP-011) — the gate receipts do not form an unbroken single-run chain"
         fi
-        # POTEAU_GOVERNANCE already stamped "armed" early; chain integrity verified here.
+        # AUTHENTICITY (construct-rooms-substrate-chk): the chain above proves LINKAGE; the
+        # signatures prove AUTHORSHIP. Without this, a work agent forges a gate by writing a
+        # chain-valid receipts.jsonl with NO valid signature (it was never checked). Verify each
+        # receipt against the trusted gatekeeper key — custody (LEGBA_SIGNER_SOCKET → daemon,
+        # agent-untouchable) or the legacy on-disk gate.key.pub. Runs only when a pubkey is
+        # resolvable (non-breaking for pre-fix runs); custody is the secure end-state.
+        _POT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+        _POT_VERIFY="$_POT_ROOT/poteau/bin/poteau-verify-receipts.mjs"
+        _POT_PUB="${POTEAU_KEY:-$_POT_ROOT/.run/poteau/gate.key}.pub"
+        if [[ -f "$_POT_VERIFY" ]] && { [[ -n "${LEGBA_SIGNER_SOCKET:-}${POTEAU_SIGNER_SOCKET:-}" ]] || [[ -f "$_POT_PUB" ]]; }; then
+            if ! node "$_POT_VERIFY" "$_receipts" "$_POT_PUB" >/dev/null 2>&1; then
+                _verdict "broken_run" 3 "--poteau: a receipt signature does not verify against the gatekeeper key — the chain is chain-valid but NOT authentically signed (forged gate pass; construct-rooms-substrate-chk)"
+            fi
+        fi
+        # POTEAU_GOVERNANCE already stamped "armed" early; chain integrity + authenticity verified here.
     fi
 fi
 
