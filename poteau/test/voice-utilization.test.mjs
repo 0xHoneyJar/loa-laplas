@@ -11,8 +11,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { summarizeUtilization } from '../bin/voice-utilization.mjs';
 
-function entry({ succeeded = [], transport = 'cli', primitive = 'reviewing-diffs' }) {
-  return { payload: { models_succeeded: succeeded, transport, calling_primitive: primitive } };
+function entry({ succeeded = [], failed = [], transport = 'cli', primitive = 'reviewing-diffs' }) {
+  return {
+    payload: {
+      models_succeeded: succeeded,
+      models_failed: failed.map((m) => (typeof m === 'string' ? { model: m } : m)),
+      transport, calling_primitive: primitive,
+    },
+  };
 }
 
 test('counts dispatches per provider family', () => {
@@ -62,6 +68,40 @@ test('empty chain summarizes to zero without throwing', () => {
   const s = summarizeUtilization([]);
   assert.equal(s.totalDispatches, 0);
   assert.deepEqual(s.underutilized, []);
+});
+
+test('auto-detects a DEAD voice — fails repeatedly, never succeeds', () => {
+  // gemini-shaped: dispatched (and failed) but never in models_succeeded.
+  const entries = [
+    entry({ succeeded: ['anthropic:claude-headless'] }),
+    entry({ failed: ['google:gemini-headless'] }),
+    entry({ failed: ['google:gemini-headless'] }),
+    entry({ failed: ['google:gemini-headless'] }),
+  ];
+  const s = summarizeUtilization(entries);
+  const dead = s.health.find((h) => h.family === 'google');
+  assert.ok(dead, 'google should appear in health');
+  assert.equal(dead.status, 'DEAD');           // failed thrice, succeeded zero
+  assert.equal(dead.failed, 3);
+  assert.equal(dead.succeeded, 0);
+  assert.ok(s.deadVoices.includes('google'));
+});
+
+test('a DEGRADED voice fails often but sometimes succeeds', () => {
+  const entries = [
+    entry({ succeeded: ['openai:codex-headless'] }),
+    entry({ failed: ['openai:codex-headless'] }),
+    entry({ failed: ['openai:codex-headless'] }),
+  ];
+  const s = summarizeUtilization(entries);
+  const o = s.health.find((h) => h.family === 'openai');
+  assert.equal(o.status, 'DEGRADED');          // 2 of 3 failed but 1 succeeded
+  assert.ok(!s.deadVoices.includes('openai'));
+});
+
+test('a healthy voice with no failures is HEALTHY', () => {
+  const s = summarizeUtilization([entry({ succeeded: ['cursor:cursor-headless'] })]);
+  assert.equal(s.health.find((h) => h.family === 'cursor').status, 'HEALTHY');
 });
 
 test('ignores corrupt (null) and shapeless entries', () => {

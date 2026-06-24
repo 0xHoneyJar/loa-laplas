@@ -35,6 +35,7 @@ export function summarizeUtilization(entries, { floorPct = 5 } = {}) {
   const byFamily = {};     // fam -> { count, cli, http }
   const byTransport = {};  // transport -> count
   const byPrimitive = {};  // calling_primitive -> count
+  const failByFamily = {}; // fam -> failure count (from models_failed)
   let totalDispatches = 0;
 
   for (const e of entries) {
@@ -52,6 +53,12 @@ export function summarizeUtilization(entries, { floorPct = 5 } = {}) {
       byPrimitive[primitive] = (byPrimitive[primitive] || 0) + 1;
       totalDispatches += 1;
     }
+    // Failures (models_failed[] = {model, ...}) — for dead-voice detection.
+    for (const fe of (p.models_failed || [])) {
+      const id = fe && typeof fe === 'object' ? fe.model : fe;
+      const fam = familyOf(id);
+      failByFamily[fam] = (failByFamily[fam] || 0) + 1;
+    }
   }
 
   // Shares + under-utilization.
@@ -66,9 +73,26 @@ export function summarizeUtilization(entries, { floorPct = 5 } = {}) {
   const topFamilySharePct = totalDispatches
     ? Math.round((topCount / totalDispatches) * 100) : 0;
 
+  // Voice health: a family is DEAD if it has failures and ~never succeeds
+  // (gemini-shaped — IneligibleTierError every time); DEGRADED if it fails a
+  // lot but sometimes succeeds; HEALTHY otherwise. Auto-surfaces a broken voice
+  // from the data rather than hardcoding which one is dead.
+  const health = [];
+  const deadVoices = [];
+  const fams = new Set([...Object.keys(byFamily), ...Object.keys(failByFamily)]);
+  for (const fam of fams) {
+    const succeeded = byFamily[fam]?.count || 0;
+    const failed = failByFamily[fam] || 0;
+    let status = 'HEALTHY';
+    if (failed > 0 && succeeded === 0) { status = 'DEAD'; deadVoices.push(fam); }
+    else if (failed > 0 && failed >= succeeded) status = 'DEGRADED';
+    health.push({ family: fam, succeeded, failed, status });
+  }
+  health.sort((a, b) => b.failed - a.failed);
+
   return {
     totalDispatches, byFamily, byTransport, byPrimitive,
-    topFamily, topFamilySharePct, underutilized,
+    topFamily, topFamilySharePct, underutilized, health, deadVoices,
   };
 }
 
@@ -112,6 +136,16 @@ function render(s, floor) {
   L.push(`top family: ${s.topFamily} (${s.topFamilySharePct}% — single-family dominance)`);
   if (s.underutilized.length) {
     L.push(`under-utilized (<${floor}%): ${s.underutilized.join(', ')}`);
+  }
+  const unhealthy = s.health.filter((h) => h.status !== 'HEALTHY');
+  if (unhealthy.length) {
+    L.push('');
+    L.push('voice health:');
+    for (const h of unhealthy) {
+      const mark = h.status === 'DEAD' ? '☠' : '⚠';
+      L.push(`  ${mark} ${h.family.padEnd(10)} ${h.status}  (succeeded:${h.succeeded} failed:${h.failed})`);
+    }
+    if (s.deadVoices.length) L.push(`  → dead voice(s) burning retries in the chain: ${s.deadVoices.join(', ')}`);
   }
   return L.join('\n');
 }
