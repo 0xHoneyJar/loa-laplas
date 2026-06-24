@@ -33,6 +33,7 @@
 import { createHash, generateKeyPairSync, sign, verify, createPrivateKey, createPublicKey } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const jcs = (v) => v === null || typeof v !== 'object' ? JSON.stringify(v)
   : Array.isArray(v) ? '[' + v.map(jcs).join(',') + ']'
@@ -145,16 +146,6 @@ try {
   if (!rs.run_id) custodyRefuse('gatekeeper: armed mint requires run_state.run_id — refusing to mint an unscoped receipt. An unarmed session produces NO receipts (verify-gate stamps governance:unarmed); arm via the dispatcher gate 0.');
   const runDir = '.run/poteau/' + rs.run_id;
   mkdirSync(runDir, { recursive: true });
-  const keyPath = process.env.POTEAU_KEY ?? '.run/poteau/gate.key';  // shared until FR-E per-run keys
-  let priv;
-  if (existsSync(keyPath)) priv = createPrivateKey(readFileSync(keyPath));
-  else {
-    const kp = generateKeyPairSync('ed25519');
-    mkdirSync(dirname(keyPath), { recursive: true });
-    writeFileSync(keyPath, kp.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
-    writeFileSync(keyPath + '.pub', kp.publicKey.export({ type: 'spki', format: 'pem' }));
-    priv = kp.privateKey;
-  }
   const chainPath = runDir + '/receipts.jsonl';
   let prev = null;
   if (existsSync(chainPath)) {
@@ -173,7 +164,51 @@ try {
   // IMP-011 freshness: the run-scoped chain already makes cross-run replay
   // structurally impossible; additionally refuse a receipt predating arming.
   if (rs.armed_at && receipt.ts < rs.armed_at) custodyRefuse('gatekeeper: receipt ts predates run armed_at (clock skew or replay) — refused (IMP-011).');
-  const sealed = { receipt, signature: sign(null, Buffer.from(jcs(receipt)), priv).toString('base64'), receipt_hash: sha(jcs(receipt)) };
+  // ── G5 signing custody (security: severity:critical fix — self-minted gate passes) ──────────
+  // The gatekeeper's OWN signing key must obey the same rule it enforces on council keys (G4,
+  // lines 98-102): a key inside the agent-readable run dir is FORGEABLE — a work agent reads it
+  // and self-mints a valid poteau_gate_pass. So:
+  //   1. If a signer socket is configured → sign via the legba signer daemon (key held
+  //      in-memory, off the agent-readable disk). Compose legba's custody; don't duplicate it.
+  //   2. Else if custody is REQUIRED (POTEAU_REQUIRE_CUSTODY=1) → REFUSE (fail closed). Never
+  //      mint with an agent-readable on-disk key when enforcement is on.
+  //   3. Else → the legacy on-disk-key path, but loudly warned as forgeable (dev only). Flip
+  //      POTEAU_REQUIRE_CUSTODY once the signer daemon is wired (operator-gated, shadow→enforce).
+  const signerSocket = process.env.LEGBA_SIGNER_SOCKET ?? process.env.POTEAU_SIGNER_SOCKET;
+  let signature;
+  if (signerSocket) {
+    const relay = new URL('../../scripts/legba/legba-signer-relay.mjs', import.meta.url).pathname;
+    const gatekeeperId = process.env.POTEAU_GATEKEEPER_ID ?? 'poteau-gate';
+    let out;
+    try {
+      out = JSON.parse(execFileSync(process.execPath, [relay, 'sign-gate'], {
+        input: JSON.stringify({ token: receipt, gatekeeperId }),
+        encoding: 'utf8', maxBuffer: 1024 * 1024,
+        env: { ...process.env, LEGBA_SIGNER_SOCKET: signerSocket },
+      }));
+    } catch (e) {
+      custodyRefuse('gatekeeper: signer-mediated mint failed (' + (e && e.message ? e.message : e) + ') — custody fails closed, never waved through.');
+    }
+    if (!out || out.ok === false || typeof out.signature !== 'string')
+      custodyRefuse('gatekeeper: signer daemon refused or returned no signature (' + JSON.stringify(out) + ') — custody fails closed.');
+    signature = out.signature;
+  } else if (process.env.POTEAU_REQUIRE_CUSTODY === '1') {
+    custodyRefuse('gatekeeper: armed mint requires signer custody (set LEGBA_SIGNER_SOCKET / POTEAU_SIGNER_SOCKET) — refusing to sign with an agent-readable on-disk key. A work agent that can read .run/poteau/gate.key self-mints a valid poteau_gate_pass (forgeable gate, severity:critical). Run the legba signer daemon, or unset POTEAU_REQUIRE_CUSTODY for dev (forgeable).');
+  } else {
+    process.stderr.write('poteau-gatekeeper: WARNING — signing with an agent-readable on-disk key (.run/poteau/gate.key). This is FORGEABLE (a work agent can self-mint). Wire the legba signer daemon + set POTEAU_REQUIRE_CUSTODY=1 for production.\n');
+    const keyPath = process.env.POTEAU_KEY ?? '.run/poteau/gate.key';
+    let priv;
+    if (existsSync(keyPath)) priv = createPrivateKey(readFileSync(keyPath));
+    else {
+      const kp = generateKeyPairSync('ed25519');
+      mkdirSync(dirname(keyPath), { recursive: true });
+      writeFileSync(keyPath, kp.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+      writeFileSync(keyPath + '.pub', kp.publicKey.export({ type: 'spki', format: 'pem' }));
+      priv = kp.privateKey;
+    }
+    signature = sign(null, Buffer.from(jcs(receipt)), priv).toString('base64');
+  }
+  const sealed = { receipt, signature, receipt_hash: sha(jcs(receipt)) };
   writeFileSync(chainPath, (existsSync(chainPath) ? readFileSync(chainPath, 'utf8') : '') + JSON.stringify(sealed) + '\n');
   process.stdout.write(JSON.stringify({ pass: true, receipt_hash: sealed.receipt_hash, gate_index: receipt.gate_index }) + '\n');
 } catch (e) {
