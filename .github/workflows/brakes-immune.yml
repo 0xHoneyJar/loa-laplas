@@ -30,3 +30,5 @@ jobs:
         run: node --test poteau/bin/poteau-gatekeeper.honest-exit.test.mjs
       - name: poteau gate-honesty fuzzer (320 generated adversarial cases — the gate can't be made to lie)
         run: node --test poteau/bin/poteau-gatekeeper.fuzz.test.mjs
+      - name: poteau arm-on-entry (no session armed to a run it never entered — TRUTHFUL-STATE)
+        run: node --test poteau/hooks/prompt-arm.test.mjs
