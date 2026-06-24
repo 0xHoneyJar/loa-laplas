@@ -36,3 +36,5 @@ jobs:
         run: node scripts/grounded-scan.mjs
       - name: grounded scan teeth (a planted mock-only custody test must be caught)
         run: node --test scripts/grounded-scan.test.mjs
+      - name: jcs boundary (the TCB canonicalizer is frozen + drift-guarded — no signature breaks silently)
+        run: node --test scripts/legba/jcs-boundary.test.mjs
