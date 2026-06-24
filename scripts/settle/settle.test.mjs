@@ -218,6 +218,24 @@ test('checkSync: a verdict-consistent HELD->settled snapshot still proceeds (no 
   assert.equal(d.proceed, true, 'a snapshot whose claimed tier matches its verdict proceeds');
 });
 
+test('checkSync: UNDER-claim is also denied as a mismatch (BB #72 — message accurate both ways)', () => {
+  const h = harness();
+  // HELD earns 'settled', but the snapshot claims the lower 'claimed' — an inconsistent snapshot.
+  const s = h.signedSnap({ verdict: 'HELD', earned_tier: 'claimed', bar_sha: 'sha256:x' });
+  const d = h.realCheck(s, { requiredTier: 'claimed' });
+  assert.equal(d.proceed, false, 'any claimed-vs-derived disagreement is denied, not just over-claims');
+  assert.match(d.reason, /tier mismatch/);
+  assert.doesNotMatch(d.reason, /over-claim/, 'the reason must NOT mislabel an under-claim as over-claim');
+});
+
+test('checkSync: an unrecognized verdict is caught and denied (fail-closed, BB #72 untested path)', () => {
+  const h = harness();
+  const s = h.signedSnap({ verdict: 'BOGUS', earned_tier: 'settled', bar_sha: 'sha256:x' });
+  const d = h.realCheck(s, { requiredTier: 'claimed' });
+  assert.equal(d.proceed, false);
+  assert.match(d.reason, /not a recognized verdict/);
+});
+
 test('checkSync: untrusted signer key denies (A-6)', () => {
   const h = harness();
   // Sign with a DIFFERENT key than the configured trusted key.
