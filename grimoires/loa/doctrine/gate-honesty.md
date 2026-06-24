@@ -27,8 +27,11 @@ The gate must not assert that a session is *participating* when it never entered
 that only inspected gets linked to a run it never ran a segment for, and then the exit-gate
 demands a packet for work it never did. The gate lied about who was in it. The cure is
 **arm-on-entry, not arm-on-prompt**: the session→run link is written when the session actually
-does gated work, not when it merely types a command near an armed run. *(poteau 9x7 — open;
-axis 2's abort door mitigates the deadlock symptom, but the root is this false claim.)*
+does gated work, not when it merely types a command near an armed run. *(poteau 9x7 — fixed:
+`prompt-arm` no longer forges the link from a most-recent-run heuristic; the dispatcher's gate 0,
+the sole holder of both the real session id and the run_id, is the only writer. The hook now only
+READS a link the dispatcher wrote. A recon session that never dispatches is never armed, never
+deadlocks.)*
 
 ## Why the triad is one thing
 
