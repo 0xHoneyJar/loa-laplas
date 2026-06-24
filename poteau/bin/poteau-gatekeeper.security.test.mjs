@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { generateKeyPairSync, sign, verify, createPrivateKey, createPublicKey } from 'node:crypto';
+import { generateKeyPairSync, sign, verify, createPrivateKey, createPublicKey, createHash } from 'node:crypto';
 
 const GK = join(dirname(fileURLToPath(import.meta.url)), 'poteau-gatekeeper.mjs');
 const jcs = (v) => v === null || typeof v !== 'object' ? JSON.stringify(v)
@@ -39,6 +39,69 @@ const runGateAsync = (cwd, env = {}) => new Promise((resolve) => {
   child.stdin.end(JSON.stringify(PACKET));
 });
 const lastLine = (s) => JSON.parse(String(s).trim().split('\n').pop());
+
+// ── G4 council-honor distinctness (cross-model audit 2026-06-24) ──────────────
+const sha = (s) => 'sha256:' + createHash('sha256').update(s, 'utf8').digest('hex');
+const pubPem = (kp) => kp.publicKey.export({ type: 'spki', format: 'pem' });
+const privPem = (kp) => kp.privateKey.export({ type: 'pkcs8', format: 'pem' });
+const runGateCustom = (cwd, run_state, packet, env = {}) =>
+  spawnSync(process.execPath, [GK], { cwd, input: JSON.stringify({ run_state, packet }),
+    encoding: 'utf8', env: { ...process.env, ...ENV0, ...env } });
+// Craft a council packet: reviewer_keys + the reviewers who actually sign the
+// council subject (legba/forge-fixture shape).
+function councilPacket({ keys, signers, min_voices = 2 }) {
+  const run_id = 'council-test', gate_index = 0;
+  const run_state = { run_id, gate_index, armed_at: '2020-01-01T00:00:00.000Z',
+    review_routing: { council: true, min_voices, reviewer_keys: keys } };
+  const packetCore = { verdict: 'pass', rationale: 'ok' };
+  const packetHash = sha(jcs(packetCore));
+  const councilSubject = sha(jcs({ gate_index, packet_hash: packetHash, run_id }));
+  const council_receipts = signers.map((kp) =>
+    ({ signature: sign(null, Buffer.from(councilSubject), kp.privateKey).toString('base64') }));
+  return { run_state, packet: { ...packetCore, council_receipts } };
+}
+
+test('G4 distinctness: a DUPLICATE reviewer key cannot let one reviewer satisfy min_voices', () => {
+  const cwd = tmp();
+  try {
+    const rev = generateKeyPairSync('ed25519');
+    // reviewer_keys lists the SAME public key twice; ONE reviewer signs (twice).
+    const { run_state, packet } = councilPacket({ keys: [pubPem(rev), pubPem(rev)], signers: [rev, rev], min_voices: 2 });
+    const r = runGateCustom(cwd, run_state, packet);
+    assert.equal(r.status, 2, 'one distinct reviewer must NOT satisfy a 2-voice council via a duplicate key');
+    assert.match(r.stdout, /P204/, 'refusal names the council-signature failure');
+  } finally { rmSync(cwd, { recursive: true, force: true }); }
+});
+
+test('G4: a real 2-distinct-key council still passes (no over-correction)', () => {
+  const cwd = tmp();
+  try {
+    const a = generateKeyPairSync('ed25519'), b = generateKeyPairSync('ed25519');
+    const { run_state, packet } = councilPacket({ keys: [pubPem(a), pubPem(b)], signers: [a, b], min_voices: 2 });
+    const r = runGateCustom(cwd, run_state, packet);
+    assert.equal(r.status, 0, 'two distinct reviewers must satisfy the council');
+  } finally { rmSync(cwd, { recursive: true, force: true }); }
+});
+
+test('G4: a non-positive min_voices fails closed (no council passes with 0 valid signatures)', () => {
+  const cwd = tmp();
+  try {
+    const rev = generateKeyPairSync('ed25519');
+    const { run_state, packet } = councilPacket({ keys: [pubPem(rev)], signers: [], min_voices: 0 });
+    const r = runGateCustom(cwd, run_state, packet);
+    assert.notEqual(r.status, 0, 'min_voices<1 must not silently pass a mandated council');
+  } finally { rmSync(cwd, { recursive: true, force: true }); }
+});
+
+test('G4: a PRIVATE key in reviewer_keys fails closed (not a forgeable council)', () => {
+  const cwd = tmp();
+  try {
+    const rev = generateKeyPairSync('ed25519');
+    const { run_state, packet } = councilPacket({ keys: [privPem(rev)], signers: [rev], min_voices: 1 });
+    const r = runGateCustom(cwd, run_state, packet);
+    assert.notEqual(r.status, 0, 'a private key in reviewer_keys must fail closed');
+  } finally { rmSync(cwd, { recursive: true, force: true }); }
+});
 
 test('FORGEABILITY (the vuln): the legacy on-disk key lets a work agent self-mint a pass that verifies', () => {
   const cwd = tmp();
