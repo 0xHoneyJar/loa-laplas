@@ -222,9 +222,21 @@ LEGBA_RECEIPT=""
 # Emit the verdict + exit. $1=verdict $2=exit_code $3=reason
 _verdict() {
     local verdict="$1" code="$2" reason="$3"
+    # proof_class (trust-lens audit, 2026-06-24): the GATEABLE honesty. Checks 1-4 are
+    # SELF-CONSISTENCY over agent-writable .run/compose/<run_id>/ files — a default valid_run proves
+    # "not an inline fake" (the header's stated threat: the LAZY agent that leaves no trail), NOT
+    # cryptographic authorship; a same-uid agent that fabricates a consistent run dir passes. Only
+    # --legba (a chain rooted in the pinned maintainer root) or an armed --poteau receipt chain roots
+    # trust off-agent. The headline verdict/exit code is identical either way, so surface the class
+    # explicitly: a consumer that gates on exit 0 can now read proof_class to tell the two apart.
+    local proof_class="self_consistency"
+    if [[ "$LEGBA_VERIFIED" == "true" || "$POTEAU_GOVERNANCE" == '"armed"' ]]; then
+        proof_class="cryptographic"
+    fi
     if [[ "$OUTPUT_JSON" == "1" ]]; then
         jq -n \
             --arg verdict "$verdict" \
+            --arg proof_class "$proof_class" \
             --arg run_id "$RUN_ID" \
             --arg reason "$reason" \
             --argjson manifest "$CHK_MANIFEST" \
@@ -239,6 +251,7 @@ _verdict() {
             --argjson poteau_governance "$POTEAU_GOVERNANCE" \
             '{
                 verdict: $verdict,
+                proof_class: $proof_class,
                 run_id: $run_id,
                 reason: $reason,
                 checks: {
@@ -256,10 +269,15 @@ _verdict() {
             }'
     else
         if [[ "$code" -eq 0 ]]; then
-            echo "[compose-verify-run] $RUN_ID — VALID governed run ($reason)"
+            echo "[compose-verify-run] $RUN_ID — VALID governed run [proof_class: $proof_class] ($reason)"
         else
             echo "[compose-verify-run] $RUN_ID — $verdict: $reason" >&2
         fi
+    fi
+    # The audit's critical finding made load-bearing: a valid_run that rests only on self-consistency
+    # must SAY SO loudly, not bury it in checks.legba_chain:null.
+    if [[ "$code" -eq 0 && "$proof_class" == "self_consistency" ]]; then
+        echo "[compose-verify-run] WARNING: valid_run is SELF-CONSISTENCY ONLY (proof_class:self_consistency) — it proves this is not an inline fake, NOT that an adversary did not fabricate a consistent run dir. Pass --legba/--poteau (with a provisioned trust-store) for cryptographic authorship." >&2
     fi
     exit "$code"
 }
@@ -538,7 +556,21 @@ if [[ "$POTEAU" == "1" ]]; then
         ' "$_receipts" 2>/dev/null; then
             _verdict "broken_run" 3 "--poteau: receipt chain is broken or splices across runs (IMP-011) — the gate receipts do not form an unbroken single-run chain"
         fi
-        # POTEAU_GOVERNANCE already stamped "armed" early; chain integrity verified here.
+        # AUTHENTICITY (construct-rooms-substrate-chk): the chain above proves LINKAGE; the
+        # signatures prove AUTHORSHIP. Without this, a work agent forges a gate by writing a
+        # chain-valid receipts.jsonl with NO valid signature (it was never checked). Verify each
+        # receipt against the trusted gatekeeper key — custody (LEGBA_SIGNER_SOCKET → daemon,
+        # agent-untouchable) or the legacy on-disk gate.key.pub. Runs only when a pubkey is
+        # resolvable (non-breaking for pre-fix runs); custody is the secure end-state.
+        _POT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+        _POT_VERIFY="$_POT_ROOT/poteau/bin/poteau-verify-receipts.mjs"
+        _POT_PUB="${POTEAU_KEY:-$_POT_ROOT/.run/poteau/gate.key}.pub"
+        if [[ -f "$_POT_VERIFY" ]] && { [[ -n "${LEGBA_SIGNER_SOCKET:-}${POTEAU_SIGNER_SOCKET:-}" ]] || [[ -f "$_POT_PUB" ]]; }; then
+            if ! node "$_POT_VERIFY" "$_receipts" "$_POT_PUB" >/dev/null 2>&1; then
+                _verdict "broken_run" 3 "--poteau: a receipt signature does not verify against the gatekeeper key — the chain is chain-valid but NOT authentically signed (forged gate pass; construct-rooms-substrate-chk)"
+            fi
+        fi
+        # POTEAU_GOVERNANCE already stamped "armed" early; chain integrity + authenticity verified here.
     fi
 fi
 

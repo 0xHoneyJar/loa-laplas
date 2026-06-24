@@ -1,0 +1,40 @@
+name: brakes-immune
+
+# The brakes-layer immune system as a standing gate. Born from the poteau forgeable-gate fix
+# (#67/#68) and the GATE-HONESTY doctrine (grimoires/loa/doctrine/gate-honesty.md — now a TETRAD:
+# unforgeable, exitable, truthful-state, GROUNDED). Every push, the gate's honesty is hunted in
+# all FOUR directions: the forgeable-gate sweep + custody/verify (unforgeable), the honest-abort
+# door (exitable), arm-on-entry (truthful-state), and the grounded scan — a mock that stands in
+# for the real daemon as the sole attestation (the kdm Trusting-Trust failure). 320 generated
+# adversarial cases back it up. Fully laplas-internal (the brakes files are all here), no siblings.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  brakes-immune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Forgeable-gate scan (fail on A-class mint-residue)
+        run: node scripts/brakes-forgeable-scan.mjs
+      - name: Scanner teeth (planted Form-A gate must be caught)
+        run: node --test scripts/brakes-forgeable-scan.test.mjs
+      - name: poteau gate security tests (custody mint + signature verify — UNFORGEABLE)
+        run: node --test poteau/bin/poteau-gatekeeper.security.test.mjs poteau/bin/poteau-verify-receipts.test.mjs
+      - name: poteau honest-exit (the truthful abort door — EXITABLE)
+        run: node --test poteau/bin/poteau-gatekeeper.honest-exit.test.mjs
+      - name: poteau gate-honesty fuzzer (320 generated adversarial cases — the gate can't be made to lie)
+        run: node --test poteau/bin/poteau-gatekeeper.fuzz.test.mjs
+      - name: poteau arm-on-entry (no session armed to a run it never entered — TRUTHFUL-STATE)
+        run: node --test poteau/hooks/prompt-arm.test.mjs
+      - name: grounded scan (no mock standing alone as the attestation — GROUNDED)
+        run: node scripts/grounded-scan.mjs
+      - name: grounded scan teeth (a planted mock-only custody test must be caught)
+        run: node --test scripts/grounded-scan.test.mjs
+      - name: jcs boundary (the TCB canonicalizer is frozen + drift-guarded — no signature breaks silently)
+        run: node --test scripts/legba/jcs-boundary.test.mjs

@@ -33,6 +33,7 @@
 import { createHash, generateKeyPairSync, sign, verify, createPrivateKey, createPublicKey } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const jcs = (v) => v === null || typeof v !== 'object' ? JSON.stringify(v)
   : Array.isArray(v) ? '[' + v.map(jcs).join(',') + ']'
@@ -56,13 +57,28 @@ catch { process.stdout.write(JSON.stringify({ pass: false, code: 'P500', refusal
 
 const { run_state: rs = {}, packet } = input;
 
+// 2h1: cite the EXACT packet path the exit-gate reads — run-scoped when armed
+// (.run/poteau/<run_id>/packet.json), flat only on the unarmed port fallback. An agent that
+// obeys a flat-path refusal while armed writes where the gate never looks → deadlock. Align
+// the message with exit-gate.sh's RUN_DIR resolution.
+const packetPath = rs.run_id ? `.run/poteau/${rs.run_id}/packet.json` : '.run/poteau/packet.json';
+
 // G1 — the EOF
-if (!packet) refuse('P101', 'No handoff packet found. Emit the construct-handoff packet (verdict, outputs, rationale) to .run/poteau/packet.json, then stop again. The packet IS the exit — there is no door without it.');
+if (!packet) refuse('P101', `No handoff packet found. Emit the construct-handoff packet (verdict, outputs, rationale) to ${packetPath}, then stop again. The packet IS the exit — there is no door without it.`);
 for (const f of ['verdict', 'rationale']) if (!(f in packet))
   refuse('P102', `Handoff packet missing required field "${f}". Add it and stop again. (Three-tier discipline: required fields fail closed.)`);
 
-// G2 — task conformance (#29: the gate must see the task)
-if (rs.task) {
+// HONEST EXIT (xok): an aborting agent cannot truthfully assert conformance.in_scope — it is
+// NOT completing the task in scope. Without a sanctioned abort, an honest no-op deadlocks at
+// G2 (only operator break-glass or the loop-guard releases it). verdict:'aborted' is the
+// truthful door: it clears the COMPLETION gates (G2 in_scope, G3 grounding, G4 council — none
+// apply to a withdrawal) and mints an ABORT receipt, recorded as an abort, NOT a pass. The
+// gated capability still requires a real pass downstream; an abort grants nothing — it only
+// lets honest non-completion stop cleanly, with a truthful trail entry instead of a deadlock.
+const ABORTING = packet.verdict === 'aborted';
+
+// G2 — task conformance (#29: the gate must see the task). Skipped for an honest abort (xok).
+if (!ABORTING && rs.task) {
   const want = sha(jcs(rs.task));
   if (packet.task_ref !== want)
     refuse('P201', `Packet.task_ref does not match the armed task (expected ${want.slice(0, 26)}…). Copy run_state.task_ref into the packet and assert conformance — the gate judges work AGAINST THE TASK, not coherence in a vacuum.`);
@@ -78,7 +94,7 @@ if (rs.task) {
 // also produce by reading the run-state if the proof is embedded there; closing
 // this absolutely requires an out-of-band check (the gatekeeper reading the actual
 // file), which is deferred. We keep the signal but DO NOT over-claim "proof".
-if ((rs.mandated_reads ?? []).length) {
+if (!ABORTING && (rs.mandated_reads ?? []).length) {
   const rationale = String(packet.rationale ?? '');
   for (const read of rs.mandated_reads) {
     const h1 = String(read.h1 ?? '').trim();
@@ -101,7 +117,7 @@ if ((rs.mandated_reads ?? []).length) {
 //   reviewer private keys into the agent-readable run dir, forgery returns. The PUBLIC
 //   keys in run_state.review_routing.reviewer_keys are safe to be readable.
 let councilVoices = 0;
-if (rs.review_routing?.council === true) {
+if (!ABORTING && rs.review_routing?.council === true) {
   const min = rs.review_routing.min_voices ?? 2;
   const pems = rs.review_routing.reviewer_keys ?? [];
   let keys;
@@ -145,16 +161,6 @@ try {
   if (!rs.run_id) custodyRefuse('gatekeeper: armed mint requires run_state.run_id — refusing to mint an unscoped receipt. An unarmed session produces NO receipts (verify-gate stamps governance:unarmed); arm via the dispatcher gate 0.');
   const runDir = '.run/poteau/' + rs.run_id;
   mkdirSync(runDir, { recursive: true });
-  const keyPath = process.env.POTEAU_KEY ?? '.run/poteau/gate.key';  // shared until FR-E per-run keys
-  let priv;
-  if (existsSync(keyPath)) priv = createPrivateKey(readFileSync(keyPath));
-  else {
-    const kp = generateKeyPairSync('ed25519');
-    mkdirSync(dirname(keyPath), { recursive: true });
-    writeFileSync(keyPath, kp.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
-    writeFileSync(keyPath + '.pub', kp.publicKey.export({ type: 'spki', format: 'pem' }));
-    priv = kp.privateKey;
-  }
   const chainPath = runDir + '/receipts.jsonl';
   let prev = null;
   if (existsSync(chainPath)) {
@@ -162,20 +168,68 @@ try {
     if (lines.length) prev = JSON.parse(lines[lines.length - 1]).receipt_hash;
   }
   const receipt = {
-    receipt_kind: 'poteau_gate_pass', poteau_version: '0.1.0',
+    receipt_kind: ABORTING ? 'poteau_gate_abort' : 'poteau_gate_pass', poteau_version: '0.1.0',
+    outcome: ABORTING ? 'aborted' : 'pass',
     run_id: rs.run_id, gate_index: rs.gate_index ?? 0,
     prev_receipt_hash: prev,
     task_ref: packet.task_ref ?? null,
     packet_hash: sha(jcs(packet)),
-    checks: { task_conformance: !!rs.task, grounding: (rs.mandated_reads ?? []).length, council: (rs.review_routing?.council === true ? councilVoices : false) },
+    checks: ABORTING ? { aborted: true } : { task_conformance: !!rs.task, grounding: (rs.mandated_reads ?? []).length, council: (rs.review_routing?.council === true ? councilVoices : false) },
     ts: new Date().toISOString(),
   };
   // IMP-011 freshness: the run-scoped chain already makes cross-run replay
   // structurally impossible; additionally refuse a receipt predating arming.
   if (rs.armed_at && receipt.ts < rs.armed_at) custodyRefuse('gatekeeper: receipt ts predates run armed_at (clock skew or replay) — refused (IMP-011).');
-  const sealed = { receipt, signature: sign(null, Buffer.from(jcs(receipt)), priv).toString('base64'), receipt_hash: sha(jcs(receipt)) };
+  // ── G5 signing custody (security: severity:critical fix — self-minted gate passes) ──────────
+  // The gatekeeper's OWN signing key must obey the same rule it enforces on council keys (G4,
+  // lines 98-102): a key inside the agent-readable run dir is FORGEABLE — a work agent reads it
+  // and self-mints a valid poteau_gate_pass. So:
+  //   1. If a signer socket is configured → sign via the legba signer daemon (key held
+  //      in-memory, off the agent-readable disk). Compose legba's custody; don't duplicate it.
+  //   2. Else if custody is REQUIRED (POTEAU_REQUIRE_CUSTODY=1) → REFUSE (fail closed). Never
+  //      mint with an agent-readable on-disk key when enforcement is on.
+  //   3. Else → the legacy on-disk-key path, but loudly warned as forgeable (dev only). Flip
+  //      POTEAU_REQUIRE_CUSTODY once the signer daemon is wired (operator-gated, shadow→enforce).
+  // `||` (not `??`) so an EMPTY-string LEGBA_SIGNER_SOCKET falls through to POTEAU_SIGNER_SOCKET —
+  // matching the verifier (poteau-verify-receipts.mjs); `??` would keep "" and ignore the fallback,
+  // so mint + verify could resolve different anchors on an empty env (BB #78 MEDIUM).
+  const signerSocket = process.env.LEGBA_SIGNER_SOCKET || process.env.POTEAU_SIGNER_SOCKET;
+  let signature;
+  if (signerSocket) {
+    const relay = new URL('../../scripts/legba/legba-signer-relay.mjs', import.meta.url).pathname;
+    const gatekeeperId = process.env.POTEAU_GATEKEEPER_ID ?? 'poteau-gate';
+    let out;
+    try {
+      out = JSON.parse(execFileSync(process.execPath, [relay, 'sign-gate'], {
+        input: JSON.stringify({ token: receipt, gatekeeperId }),
+        encoding: 'utf8', maxBuffer: 1024 * 1024,
+        env: { ...process.env, LEGBA_SIGNER_SOCKET: signerSocket },
+      }));
+    } catch (e) {
+      custodyRefuse('gatekeeper: signer-mediated mint failed (' + (e && e.message ? e.message : e) + ') — custody fails closed, never waved through.');
+    }
+    if (!out || out.ok === false || typeof out.signature !== 'string')
+      custodyRefuse('gatekeeper: signer daemon refused or returned no signature (' + JSON.stringify(out) + ') — custody fails closed.');
+    signature = out.signature;
+  } else if (process.env.POTEAU_REQUIRE_CUSTODY === '1') {
+    custodyRefuse('gatekeeper: armed mint requires signer custody (set LEGBA_SIGNER_SOCKET / POTEAU_SIGNER_SOCKET) — refusing to sign with an agent-readable on-disk key. A work agent that can read .run/poteau/gate.key self-mints a valid poteau_gate_pass (forgeable gate, severity:critical). Run the legba signer daemon, or unset POTEAU_REQUIRE_CUSTODY for dev (forgeable).');
+  } else {
+    process.stderr.write('poteau-gatekeeper: WARNING — signing with an agent-readable on-disk key (.run/poteau/gate.key). This is FORGEABLE (a work agent can self-mint). Wire the legba signer daemon + set POTEAU_REQUIRE_CUSTODY=1 for production.\n');
+    const keyPath = process.env.POTEAU_KEY ?? '.run/poteau/gate.key';
+    let priv;
+    if (existsSync(keyPath)) priv = createPrivateKey(readFileSync(keyPath));
+    else {
+      const kp = generateKeyPairSync('ed25519');
+      mkdirSync(dirname(keyPath), { recursive: true });
+      writeFileSync(keyPath, kp.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+      writeFileSync(keyPath + '.pub', kp.publicKey.export({ type: 'spki', format: 'pem' }));
+      priv = kp.privateKey;
+    }
+    signature = sign(null, Buffer.from(jcs(receipt)), priv).toString('base64');
+  }
+  const sealed = { receipt, signature, receipt_hash: sha(jcs(receipt)) };
   writeFileSync(chainPath, (existsSync(chainPath) ? readFileSync(chainPath, 'utf8') : '') + JSON.stringify(sealed) + '\n');
-  process.stdout.write(JSON.stringify({ pass: true, receipt_hash: sealed.receipt_hash, gate_index: receipt.gate_index }) + '\n');
+  process.stdout.write(JSON.stringify({ pass: !ABORTING, aborted: ABORTING, receipt_hash: sealed.receipt_hash, gate_index: receipt.gate_index }) + '\n');
 } catch (e) {
   custodyRefuse('gatekeeper: receipt mint failed (' + (e && e.message ? e.message : e) + ') — custody fails closed, never waved through.');
 }
