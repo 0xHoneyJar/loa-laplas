@@ -140,8 +140,9 @@ The refusal alphabet is `poteau/data/error-codes.json` — 17 P-codes in loa's E
 | Surface | What it does | Where it lives |
 |---|---|---|
 | **Laplas** | The three preparations — `quest` (WHAT) · `party` (WHO) · `dungeon` (WHERE), validated together by six cross-checks `P601–P606`; a pass mints a ready receipt binding all three manifest hashes. | `laplas/bin/laplas-ready.mjs` · `laplas/README.md` |
-| **Poteau** | The hook-lattice law: `prompt-arm` · `tool-gate` (`exit-2` deny) · `move-record` · `exit-gate` (`Stop` loop guard) · `compact-clew`; the exit-gate judge mints an ed25519-chained receipt; manifest→settings generator refuses drift (`P401`). Closes `#29` `#30` `#31` `#7`. | `poteau/bin/{poteau-gatekeeper,poteau-gen,reviewer-keys}.mjs` · `poteau/hooks/` (5) · `poteau/data/error-codes.json` |
-| **Legba** | The custody chain: spans propose, gates validate, ed25519 tokens carry custody, a run compiles to one verifiable receipt hash. Verbs: `record · gate · verify · challenge` (challenge = fraud-proof by re-execution). Zero-dep (`node:crypto` + `node:fs`). External anchor catches a wholesale rebuild over tampered envelopes. | `scripts/legba/legba.mjs` · `legba-core.mjs` · `compose-bridge.mjs` · `scripts/legba/README.md` |
+| **Poteau** | The hook-lattice law: `prompt-arm` · `tool-gate` (`exit-2` deny) · `move-record` · `exit-gate` (`Stop` loop guard) · `compact-clew`; the exit-gate judge mints an ed25519-chained receipt; manifest→settings generator refuses drift (`P401`). Closes `#29` `#30` `#31` `#7`. **Gate honesty (v0.5.0):** the *forgeable gate* closed — custody mint + the verifier checks the receipt **signature**, not just chain structure (`#67`/`#68`); a truthful **abort** door, not a coerced "complete" (`#69`); arm-on-**entry**, not on-prompt (`#70`). | `poteau/bin/{poteau-gatekeeper,poteau-gen,reviewer-keys}.mjs` · `poteau/hooks/` (5) · `poteau/data/error-codes.json` |
+| **Legba** | The custody chain: spans propose, gates validate, ed25519 tokens carry custody, a run compiles to one verifiable receipt hash. Verbs: `record · gate · verify · challenge` (challenge = fraud-proof by re-execution). Zero-dep (`node:crypto` + `node:fs`). External anchor catches a wholesale rebuild over tampered envelopes. **Custody separation (v0.5.0):** the signer daemon holds the gate key off the agent's filesystem; `verifyRun` anchors to a **root-signed trust-store**, not an in-repo key (`#59`/`#62`). | `scripts/legba/legba.mjs` · `legba-core.mjs` · `compose-bridge.mjs` · `scripts/legba/README.md` |
+| **Settle** | The verify-then-proceed tier gate: a stage's earned tier is **re-derived at the gate** from the verdict, never trusted from a self-reported field (`#61`/`#72`). | `scripts/settle/settle.mjs` · `settle.test.mjs` |
 | **Observatory** | The operator's design instrument, rendered as an RPG map: `room=span · seam=corridor · gate=door+key · character=construct · party=the agents · liveness=enrage clock`. MVP S1–S5 complete, deployed. | `observatory/` · `ORIENTATION.md` · `VERIFY.md` · [the-observatory-kappa.vercel.app](https://the-observatory-kappa.vercel.app) |
 | Adapter generator | Produces `.claude/agents/construct-<slug>.md` from any `construct.yaml`. | `scripts/construct-adapter-gen.sh` |
 | Form C compiler | validate → cut at seams → emit `.workflow.js` segments + per-stage room packets + manifest. | `scripts/compose-dispatch.sh --form-c` |
@@ -152,9 +153,16 @@ The refusal alphabet is `poteau/data/error-codes.json` — 17 P-codes in loa's E
 
 | Component | Command | Result |
 |---|---|---|
-| Laplas | `node --test laplas/test/*.test.mjs` | `35/35` |
-| Poteau | `bash poteau/test/run-demo.sh` | fixture demo, `poteau/test/INVENTORY.md`-pinned at `32` assertions (`ck` rows; count drift fails CI) |
-| Legba | `node --test scripts/legba/legba.test.mjs` | `17/17` |
+| Laplas | `node --test laplas/test/*.test.mjs` | `87/87` |
+| Poteau (demo) | `POTEAU_SRC=$PWD/poteau bash poteau/test/run-demo.sh` | fixture demo, `poteau/test/INVENTORY.md`-pinned at `32` assertions (`ck` rows; count drift fails CI) |
+| Legba | `node --test scripts/legba/legba.test.mjs` | `27/27` |
+| Settle (tier gate) | `node --test scripts/settle/settle.test.mjs` | `45/45` |
+| Brakes — forgeable scan | `node scripts/brakes-forgeable-scan.mjs` ; `node --test scripts/brakes-forgeable-scan.test.mjs` | `0` candidates (exit 0) · `3/3` |
+| Brakes — grounded scan | `node scripts/grounded-scan.mjs` ; `node --test scripts/grounded-scan.test.mjs` | `0` ungrounded (exit 0) · `3/3` |
+| Brakes — jcs drift guard | `node --test scripts/legba/jcs-boundary.test.mjs` | `3/3` |
+| Brakes — trust-root proof | `node --test scripts/trust-root-proof.test.mjs` | `1/1` |
+| Poteau — security · exit · fuzz | `node --test poteau/bin/poteau-gatekeeper.{security,honest-exit,fuzz}.test.mjs` | `5/5` · `4/4` · `3/3` |
+| Brakes — immune CI | `.github/workflows/brakes-immune.yml` | all 4 gate-honesty axes, green on every push |
 | Observatory | `node --test observatory/tests/policies.test.mjs observatory/tests/share.test.mjs` | `18/18` |
 | Observatory veve | `node observatory/cli/verify-vectors.mjs` | `5/5` byte-match |
 | Observatory selftest | `node observatory/cli/obs.mjs selftest` | contract wall fires (S1) |

@@ -1,0 +1,115 @@
+name: Release signal
+
+# Signals when a release is DUE — it does NOT auto-tag or auto-release.
+# laplas cuts deliberate, named releases (v0.3.0 "Form C", v0.4.0 …), so this
+# adapts loa's post-merge mechanism (classify-merge-pr + semver-bump, the same
+# scripts) to OPEN/UPDATE one tracking issue listing the unreleased commits +
+# the suggested next version. You then name + cut the release by hand:
+#   gh release create vX.Y.Z --title "vX.Y.Z — <your name>" --generate-notes
+#
+# Why signal-not-autotag: loa tags on every merge (continuous). laplas releases
+# are named events, so a per-merge tag would be noise — the issue is the signal,
+# the human is the namer.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 16 * * 1"   # Mondays 16:00 UTC — catch accumulation even with no merges
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: release-signal
+  cancel-in-progress: false
+
+jobs:
+  signal:
+    name: Is a release due?
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # need full history + tags to count since last release
+          submodules: recursive   # laplas is a submodule mount: .claude/scripts/* symlink into .loa
+
+      # The .claude/* symlinks are gitignored on submodule mounts (recreated on mount),
+      # so even a recursive checkout lacks them — reconcile before invoking any Loa script.
+      - name: Reconcile Loa symlinks (submodule mount)
+        run: |
+          if [ -x .loa/.claude/scripts/mount-submodule.sh ]; then
+            bash .loa/.claude/scripts/mount-submodule.sh --reconcile
+          fi
+
+      - name: Compute release-due state
+        id: state
+        run: |
+          set -euo pipefail
+          LAST_TAG="$(git tag --list 'v*' --sort=-creatordate | head -1)"
+          if [ -z "$LAST_TAG" ]; then LAST_TAG="$(git rev-list --max-parents=0 HEAD | tail -1)"; fi
+          COUNT="$(git rev-list --count "${LAST_TAG}..HEAD")"
+          NEXT=""
+          if [ -f .claude/scripts/semver-bump.sh ]; then
+            chmod +x .claude/scripts/semver-bump.sh
+            NEXT="$(.claude/scripts/semver-bump.sh 2>/dev/null | jq -r '.next // empty' || true)"
+          fi
+          {
+            echo "last_tag=$LAST_TAG"
+            echo "count=$COUNT"
+            echo "next=${NEXT:-unknown}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Since $LAST_TAG: $COUNT commit(s); suggested next: ${NEXT:-unknown}"
+
+      - name: Open / update the "release due" issue
+        if: steps.state.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LAST_TAG: ${{ steps.state.outputs.last_tag }}
+          COUNT: ${{ steps.state.outputs.count }}
+          NEXT: ${{ steps.state.outputs.next }}
+        run: |
+          set -euo pipefail
+          TITLE="🚀 Release due — v${NEXT} (${COUNT} commits since ${LAST_TAG})"
+          LOG="$(git log "${LAST_TAG}..HEAD" --no-merges --pretty='- %s (%h)' | head -60)"
+          BODY="$(cat <<EOF
+          **${COUNT} commit(s)** have landed on \`main\` since \`${LAST_TAG}\`. semver-bump suggests **v${NEXT}**.
+
+          This is a signal, not an action — name + cut the release when ready:
+          \`\`\`sh
+          gh release create v${NEXT} --title "v${NEXT} — <your name>" --generate-notes
+          \`\`\`
+          Before cutting, confirm the README's reproducible-count table still matches reality (run the commands; a stale count is a downstream-hallucination surface — this is why the table exists).
+
+          <details><summary>Unreleased commits (newest first)</summary>
+
+          ${LOG}
+          </details>
+
+          _Auto-maintained by \`.github/workflows/release-signal.yml\`. Closes itself once a \`v${NEXT}\`+ tag exists._
+          EOF
+          )"
+          EXISTING="$(gh issue list --label release-signal --state open --json number --jq '.[0].number' 2>/dev/null || true)"
+          # ensure the label exists (idempotent)
+          gh label create release-signal --color BFD4F2 --description "Auto: a release is due" 2>/dev/null || true
+          if [ -n "$EXISTING" ]; then
+            gh issue edit "$EXISTING" --title "$TITLE" --body "$BODY"
+            echo "Updated release-signal issue #$EXISTING"
+          else
+            gh issue create --title "$TITLE" --body "$BODY" --label release-signal
+            echo "Opened release-signal issue"
+          fi
+
+      - name: Close the signal once a release caught up
+        if: steps.state.outputs.count == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          EXISTING="$(gh issue list --label release-signal --state open --json number --jq '.[0].number' 2>/dev/null || true)"
+          if [ -n "$EXISTING" ]; then
+            gh issue close "$EXISTING" --comment "main is level with the latest tag — release shipped. Closing the signal."
+          fi
