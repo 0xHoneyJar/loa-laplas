@@ -158,7 +158,15 @@ RT="$HOME/.loa/constructs/substrates/construct-rooms-substrate"
    "$RT/scripts/compose-verify-run.sh" <id> --require-executed --legba --json
    ```
    - `valid_run` (exit 0) → segments executed + handoffs verified → present the result as
-     a **completed composition**; cite the `run_id` + `envelope_digest` as the proof.
+     a **completed composition** — but read **`proof_class`** before you call it *proof*:
+     - `proof_class: cryptographic` (ran with `--legba`/`--poteau` + a provisioned trust-store)
+       → authorship is cryptographically anchored; cite `run_id` + `envelope_digest` +
+       `legba_receipt_hash` as the proof.
+     - `proof_class: self_consistency` (the default) → this proves the run is **not an inline
+       fake**, NOT that a same-uid agent didn't fabricate a consistent run dir. Present it as
+       completed + self-consistent, but do **not** call it cryptographic proof — say so plainly,
+       and note that `--legba` + a provisioned root upgrades it. (The gate prints this same
+       warning on stderr; surface it, don't launder it away.)
    - `compiled_run` (exit 4) → the compile is real but **no segments executed** — the work
      was skipped. NOT a completed composition; go run the segments (step 3), then re-gate.
    - `not_a_run` (exit 2) / `broken_run` (exit 3) → no / forged provenance → **do NOT

@@ -237,14 +237,14 @@ if [[ -n "$MODULE_PATH" ]]; then
                 cat "$_ready_err" >&2; rm -f "$_ready_err"; exit 2
             fi
             echo "[gate-0] armed: run-state seeded (task + reads + routing) at .run/poteau/$RUN_ID/run-state.json" >&2
-            # T3 session->run link (the exit-gate's last mile): bind THIS CC
-            # session to the armed run so the exit-gate (Stop) resolves run_id
-            # from its session_id. prompt-arm only ADOPTS a pre-armed run, and it
-            # fires BEFORE this dispatch — so for a one-shot /compose the
-            # DISPATCHER is the only actor holding BOTH the session id
-            # (CLAUDE_CODE_SESSION_ID env == the Stop payload's session_id) AND
-            # the freshly-minted run_id. Same {run_id,armed_at} shape prompt-arm
-            # writes; the exit-gate reads by-session/<session> -> run_id verbatim.
+            # T3 session->run link (the last mile): bind THIS CC session to the
+            # armed run so both prompt-arm (gradient injection) and the exit-gate
+            # (Stop) resolve run_id from its session_id. 9x7 (arm-on-entry): prompt-
+            # arm no longer ADOPTS the most-recent run or writes this link — it only
+            # READS it. The DISPATCHER is the sole writer (gate 0), the one actor
+            # holding BOTH the session id (CLAUDE_CODE_SESSION_ID == the Stop
+            # payload's session_id) AND the freshly-minted run_id. {run_id,armed_at}
+            # is the shape prompt-arm + the exit-gate read by-session/<session> verbatim.
             _sess="${CLAUDE_CODE_SESSION_ID:-local}"
             mkdir -p "$SUBSTRATE_ROOT/.run/poteau/by-session"
             jq -n --arg r "$RUN_ID" --arg a "$(date -u +%FT%TZ)" '{run_id:$r, armed_at:$a}' \
