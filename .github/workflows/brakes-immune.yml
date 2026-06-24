@@ -1,11 +1,12 @@
 name: brakes-immune
 
 # The brakes-layer immune system as a standing gate. Born from the poteau forgeable-gate fix
-# (#67) and the Forgeable-Gate doctrine (grimoires/loa/doctrine/the-forgeable-gate.md): every
-# push is swept for the vulnerability class — agent-readable signing keys (Form A) and verify
-# contexts that never check the signature (Form B) — and the poteau gate's own teeth are run.
-# Unlike layer-law, this is fully laplas-internal (the brakes files are all here), so it needs
-# no sibling repos.
+# (#67/#68) and the GATE-HONESTY doctrine (grimoires/loa/doctrine/gate-honesty.md — the triad:
+# unforgeable, exitable, truthful-state). Every push: the layer is swept for the forgeable-gate
+# class (Form A agent-readable keys, Form B structure-only verify), and the poteau gate's own
+# honesty is proven in all three directions — custody mint + signature verify (unforgeable), the
+# honest-abort door (exitable), and 320 generated adversarial cases (the gate can't be made to
+# lie no matter the input). Fully laplas-internal (the brakes files are all here), no siblings.
 
 on:
   push:
@@ -23,5 +24,9 @@ jobs:
         run: node scripts/brakes-forgeable-scan.mjs
       - name: Scanner teeth (planted Form-A gate must be caught)
         run: node --test scripts/brakes-forgeable-scan.test.mjs
-      - name: poteau gate security tests (custody mint + signature verify)
+      - name: poteau gate security tests (custody mint + signature verify — UNFORGEABLE)
         run: node --test poteau/bin/poteau-gatekeeper.security.test.mjs poteau/bin/poteau-verify-receipts.test.mjs
+      - name: poteau honest-exit (the truthful abort door — EXITABLE)
+        run: node --test poteau/bin/poteau-gatekeeper.honest-exit.test.mjs
+      - name: poteau gate-honesty fuzzer (320 generated adversarial cases — the gate can't be made to lie)
+        run: node --test poteau/bin/poteau-gatekeeper.fuzz.test.mjs
