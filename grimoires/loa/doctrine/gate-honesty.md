@@ -142,7 +142,7 @@ without reading the doc passes G3 honestly — and the gate honestly reports "gr
 while grounding is absent. The measure (echo) does not track the good (grounding). **The cure** (the
 gatekeeper's own deferral): an *out-of-band* check — the gate reads the actual file and tests that
 the rationale engages its content, not that it reproduced a string the agent could read from
-`run_state`. Tracked: bead `construct-rooms-substrate-g3f`.
+`run_state`. Tracked: bead `construct-rooms-substrate-jr6`.
 
 > **Frontier (candidate axes the panel raised, NOT canonized — still pending a reproduced instance):**
 > **Auditable** (a true verdict must be cheaply, portably re-checkable by a third party — but a gate
