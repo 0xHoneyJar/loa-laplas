@@ -9,8 +9,8 @@
     "id":        { "type": "string", "pattern": "^lrn-[0-9]{8}-[a-z0-9-]+$" },
     "tier":      { "type": "string", "const": "construct" },
     "type":      { "type": "string", "enum": ["correction", "pattern", "gap", "friction", "improvement", "anti_pattern"] },
-    "trigger":   { "type": "string", "maxLength": 500,
-                   "description": "VERBATIM operator quote — LOCAL ONLY, redacted before any export (FR-8)" },
+    "trigger":   { "type": "string", "maxLength": 2000,
+                   "description": "VERBATIM operator quote — LOCAL ONLY, redacted before any export (FR-8). Cap matches `solution` (2000): real agent-reflex captures run 600-750 chars, and the prior 500 cap was below actual usage — it never rejected anything because the agent-reflex write path (clew-loop.mjs --add) bypassed validation entirely." },
     "solution":  { "type": "string", "maxLength": 2000,
                    "description": "Generalized fix; the GENERALITY gate (FR-3) strips project-specifics before this leaves" },
     "target": {

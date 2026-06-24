@@ -20,6 +20,10 @@
 #   loa-clew-distill.sh --list                       packs with undistilled (pending) clews
 #   loa-clew-distill.sh <construct> [--show]         pending clews + source repo + target SKILL paths
 #   loa-clew-distill.sh <construct> --mark-proposed <clew-id> [--pr <url>]
+#   loa-clew-distill.sh <construct> --retag <clew-id> --to-skill <skill> [--to-construct <construct>]
+#                                                    re-home a mis-captured clew: rewrite the target +
+#                                                    re-derive `confirmed` against the real pack (schema-
+#                                                    validated). Cross-construct = MOVE the ledger line.
 set -uo pipefail
 DRAIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUBSTRATE_ROOT="$(cd "$DRAIN_DIR/../.." && pwd)"
@@ -54,12 +58,15 @@ PY
     ;;
   *)
     construct="$sub"; shift || true
-    action="show"; clewid=""; prurl=""; CBD=""
+    action="show"; clewid=""; prurl=""; CBD=""; toskill=""; toconstruct=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --show) action="show"; shift ;;
         --mark-proposed) action="mark"; clewid="${2:-}"; shift 2 || shift $# ;;
         --mark-distilled) action="distill"; clewid="${2:-}"; shift 2 || shift $# ;;
+        --retag) action="retag"; clewid="${2:-}"; shift 2 || shift $# ;;
+        --to-skill) toskill="${2:-}"; shift 2 || shift $# ;;
+        --to-construct) toconstruct="${2:-}"; shift 2 || shift $# ;;
         --pr) prurl="${2:-}"; shift 2 || shift $# ;;
         --compose-base-dir) CBD="${2:-}"; shift 2 || shift $# ;;
         *) shift ;;
@@ -91,6 +98,90 @@ sys.exit(0 if found else 3)
 PY
       rc=$?
       if [ "$rc" -eq 0 ]; then mv "$tmp" "$ledger"; echo "  ✓ $construct/$clewid → proposed${prurl:+ (pr: $prurl)}"; else rm -f "$tmp"; echo "  ✗ clew-id '$clewid' not found in $construct ledger" >&2; exit 1; fi
+      exit 0
+    fi
+
+    # --retag (re-home a mis-captured clew). Capture historically stamped target.confirmed
+    # blindly, and the >>clew@<construct>/<skill> marker accepts any string — so clews land
+    # on skills that don't exist or under the wrong construct. This is the SAFE correction:
+    # rewrite target.{construct,skill_slug} + re-derive `confirmed` against the real pack,
+    # schema-validated. Cross-construct = MOVE the ledger line (append-to-target THEN remove-
+    # from-source, so a crash duplicates — recoverable — and never loses the clew).
+    if [ "$action" = "retag" ]; then
+      [ -n "$clewid" ] && [ -n "$toskill" ] || { echo "usage: loa-clew-distill.sh $construct --retag <clew-id> --to-skill <skill> [--to-construct <construct>]" >&2; exit 1; }
+      to_construct="${toconstruct:-$construct}"
+      [[ "$toskill" =~ ^[a-z][a-z0-9-]*$ ]] || { echo "  ✗ invalid --to-skill '$toskill' (must match ^[a-z][a-z0-9-]*\$)" >&2; exit 1; }
+      [[ "$to_construct" =~ ^[a-z][a-z0-9-]*$ ]] || { echo "  ✗ invalid --to-construct '$to_construct'" >&2; exit 1; }
+      # re-derive `confirmed` the SAME way capture now does: the skill dir must exist in the pack.
+      confirmed=false
+      [ -d "$PACKS/$to_construct/skills/$toskill" ] && confirmed=true
+      retag_schema="$DRAIN_DIR/learnings-construct.schema.json"
+      # 1. extract + rewrite + schema-validate the target clew → the new compact line.
+      newline="$(CLEW_ID="$clewid" TO_CONSTRUCT="$to_construct" TO_SKILL="$toskill" CONFIRMED="$confirmed" SCHEMA="$retag_schema" python3 - "$ledger" <<'PY'
+import json, os, sys
+try: import jsonschema
+except ImportError: sys.stderr.write("retag: python 'jsonschema' not available\n"); sys.exit(70)
+cid=os.environ["CLEW_ID"]; tc=os.environ["TO_CONSTRUCT"]; ts=os.environ["TO_SKILL"]
+confirmed=os.environ["CONFIRMED"]=="true"; schema=json.load(open(os.environ["SCHEMA"]))
+found=None
+for ln in open(sys.argv[1], errors='replace'):
+    ln=ln.strip()
+    if not ln: continue
+    try: d=json.loads(ln)
+    except Exception: continue
+    if d.get("id")==cid:
+        d.setdefault("target", {})
+        d["target"]["construct"]=tc; d["target"]["skill_slug"]=ts; d["target"]["confirmed"]=confirmed
+        found=d; break
+if found is None: sys.exit(3)
+try: jsonschema.validate(found, schema)
+except jsonschema.ValidationError as e:
+    sys.stderr.write("retag: rewritten clew is schema-invalid: %s\n" % e.message); sys.exit(2)
+sys.stdout.write(json.dumps(found, separators=(",", ":"), ensure_ascii=False))
+PY
+)"
+      rc=$?
+      [ "$rc" -eq 3 ] && { echo "  ✗ clew-id '$clewid' not found in $construct ledger" >&2; exit 1; }
+      [ "$rc" -ne 0 ] && { echo "  ✗ retag aborted (rc=$rc)" >&2; exit 1; }
+
+      if [ "$to_construct" = "$construct" ]; then
+        # within-construct: rewrite the line in place (tmp+mv, matching --mark-proposed).
+        tmp="$(mktemp)"
+        CLEW_ID="$clewid" NEWLINE="$newline" python3 - "$ledger" > "$tmp" <<'PY'
+import json, os, sys
+cid=os.environ["CLEW_ID"]; newline=os.environ["NEWLINE"]
+for ln in open(sys.argv[1], errors='replace'):
+    raw=ln.rstrip("\n")
+    if not raw.strip(): continue
+    try: d=json.loads(raw)
+    except Exception: print(raw); continue
+    print(newline if d.get("id")==cid else raw)
+PY
+        mv "$tmp" "$ledger"
+        echo "  ✓ retag $construct/$clewid → skill '$toskill' (confirmed=$confirmed)"
+      else
+        # cross-construct: append to target via the locked + schema-validating canonical
+        # primitive, THEN remove from source. append-first = a crash duplicates (recoverable),
+        # never loses the clew. The id keeps its capture-construct as a provenance trace.
+        if ! bash "$DRAIN_DIR/ledger-append.sh" "$to_construct" "$newline"; then
+          echo "  ✗ retag aborted: could not append to '$to_construct' ledger — source unchanged (no loss)" >&2; exit 1
+        fi
+        tmp="$(mktemp)"
+        CLEW_ID="$clewid" python3 - "$ledger" > "$tmp" <<'PY'
+import json, os, sys
+cid=os.environ["CLEW_ID"]
+for ln in open(sys.argv[1], errors='replace'):
+    raw=ln.rstrip("\n")
+    if not raw.strip(): continue
+    try: d=json.loads(raw)
+    except Exception: print(raw); continue
+    if d.get("id")==cid: continue
+    print(raw)
+PY
+        mv "$tmp" "$ledger"
+        echo "  ✓ retag $clewid: $construct → $to_construct/$toskill (confirmed=$confirmed); removed from $construct ledger"
+      fi
+      [ "$confirmed" = false ] && echo "  ⚠ '$toskill' is not a skill of '$to_construct' — target QUARANTINED (create the skill, or re-retag to a real one)" >&2
       exit 0
     fi
 
