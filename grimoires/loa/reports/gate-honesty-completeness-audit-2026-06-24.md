@@ -43,7 +43,19 @@ These are real candidates but not yet reproduced in a repo gate the way GROUNDED
 next instance is recognized; *not* canonized, so the doctrine does not over-claim its own
 completeness — which would itself be a GROUNDED failure.
 
+## Update — Faithful graduated (the frontier process worked)
+Shortly after, **Faithful** was promoted from the frontier to a canonical 5th axis — *by evidence*,
+not assertion. poteau's own **G3 grounding check** is the reproduced instance, with the gate's own
+confession in-code: it refuses unless the rationale *echoes* the mandated read's H1, while its
+comment admits "this checks the H1 string was REPRODUCED, not that the document was read … a present
+echo is necessary but not sufficient." The pass implies *grounded*; the gate verifies *echoed* —
+Goodhart, admitted. That is the **same bar** that canonized GROUNDED, so the frontier rule fired
+exactly as written: *a candidate graduates when a real gate is caught failing it while passing all
+the others.* Cure tracked: bead `jr6`.
+
 ## Disposition
-`grimoires/loa/doctrine/gate-honesty.md` extended: triad → **tetrad** (unforgeable, exitable,
-truthful-state, **grounded**), with the frontier recorded. The framework grew because it was
-refuted — by a jury it summoned, on the evidence of its author's own mistakes.
+`grimoires/loa/doctrine/gate-honesty.md`: triad → tetrad → **pentad** (unforgeable, exitable,
+truthful-state, **grounded**, **faithful**) — each axis earned by a reproduced in-repo instance, none
+asserted. **Auditable** and **Fresh-and-Bound** remain frontier (no reproduced instance yet). The
+framework grew because it was refuted — by a jury it summoned, on the evidence of its author's own
+mistakes — and it grows *only* that way, which is the strongest thing it can say about itself.
