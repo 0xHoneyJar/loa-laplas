@@ -203,6 +203,19 @@ test('checkSync: TIER OVER-CLAIM — a signed PENDING snapshot claiming earned_t
   assert.match(d.reason, /over-claim|earns "claimed"/);
 });
 
+test('checkSync: VERIFIER-BUG — a signed FALSIFIED snapshot claiming earned_tier:settled is DENIED (defense-in-depth, #65)', () => {
+  const h = harness();
+  // A buggy/compromised VERIFIER (or anyone holding the trusted key) signs a
+  // SELF-CONTRADICTORY snapshot: verdict FALSIFIED but earned_tier settled. The
+  // gate re-derives FALSIFIED -> abstained and denies the mismatch, so even a
+  // valid trusted-key signature cannot smuggle a settled tier onto a falsified
+  // verdict. This is the producer-trust hole's twin one layer up.
+  const s = h.signedSnap({ verdict: 'FALSIFIED', earned_tier: 'settled', bar_sha: 'sha256:x' });
+  const d = h.realCheck(s, { requiredTier: 'settled' });
+  assert.equal(d.proceed, false, 'a falsified verdict can never earn settled, regardless of the signed tier field');
+  assert.match(d.reason, /tier mismatch|earns "abstained"/);
+});
+
 test('checkSync: a verdict-less snapshot cannot be tiered -> DENIED (fail-closed)', () => {
   const h = harness();
   const s = h.signedSnap({ earned_tier: 'settled', bar_sha: 'sha256:x' }); // no verdict
