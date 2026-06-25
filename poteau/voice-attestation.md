@@ -1,0 +1,93 @@
+# poteau G4.5 — voice attestation (proof-of-call)
+
+> G4 proves a reviewer **key signed**. G4.5 proves the claimed **model-voice was
+> actually dispatched to a real provider** — by cross-checking the MODELINV audit
+> chain. It is the deterministic answer to *"did the agent actually call what it
+> says it called?"*
+
+## The gap it closes
+
+A review can **claim** a cross-model council (claude + codex + cursor) and then
+single-voice one model. G4's Ed25519 council-honor check proves a *provisioned
+reviewer key* signed each receipt — but a key signing is not a model being run.
+The thing that records a model actually reaching a provider CLI is the cheval
+**MODELINV** audit chain (`.run/model-invoke.jsonl`): every invocation writes
+`models_succeeded`, `transport` (`cli` | `http`), and `calling_primitive`,
+hash-chained. `voice-attestation` reads that chain and refuses, fail-closed, a
+claim it cannot prove.
+
+## The check (bipartite, honeycomb / EULER framing)
+
+Claimed voices are **left** nodes; MODELINV dispatch events are **right** nodes.
+An edge exists when an event's `models_succeeded` covers the claimed voice (and
+`transport=cli` under `--require-cli`). The verdict is **ATTESTED** iff every
+left node is covered — a full left-coverage / left-perfect matching. A missing
+left node is an unproven claim: a lie the verdict must not carry.
+
+```
+claimed              MODELINV (scoped to this review)
+  claude  ───────────►  anthropic:claude-headless   ✓ proven
+  codex   ──── ✗ ────►  (no dispatch)                 ← UNATTESTED
+  cursor  ──── ✗ ────►  (no dispatch)
+```
+
+## Usage
+
+```bash
+# Scope to THIS review's window (--last N or --since <ts>) — attesting against
+# the whole historical chain is meaningless: a stale codex call would mask a
+# single-voice present.
+node poteau/bin/voice-attestation.mjs \
+  --invoke .run/model-invoke.jsonl \
+  --last 5 \
+  --claim "anthropic:claude-headless,openai:codex-headless,cursor:cursor-headless" \
+  --require-cli \
+  --require-families 2
+# exit 0 ATTESTED · 2 UNATTESTED (refusal teaches via .reasons) · 5 fail-closed
+
+# Or attest a verdict_quality envelope's declared roster:
+node poteau/bin/voice-attestation.mjs --envelope final_consensus.json --last 8
+```
+
+| Flag | Effect |
+|------|--------|
+| `--claim a,b,c` | the voices the review claims it consulted |
+| `--envelope <f>` | take the claim from a verdict_quality envelope's `voices_succeeded_ids` |
+| `--invoke <f>` | MODELINV chain (default `.run/model-invoke.jsonl`) |
+| `--last N` / `--since <ts>` | **scope** to the review's window (load-bearing) |
+| `--require-cli` | only `transport=cli` dispatches prove a call (catches an http masquerade) |
+| `--require-families N` | proven voices must span ≥ N provider families (catches single-family-masquerading-as-council) |
+| `--primitive <name>` | only count dispatches from this `calling_primitive` |
+
+## Wiring point
+
+This is a standalone, fail-closed gate today. The intended home is **next to G4**
+in `poteau-gatekeeper.mjs`: when `run_state.review_routing` declares a model-voice
+roster (not just reviewer keys), the gatekeeper runs voice-attestation against the
+MODELINV chain scoped to the run, and refuses (exit 2) on UNATTESTED — so the
+council-honor check covers *both* "a key signed" (G4) and "the model ran" (G4.5).
+
+## Hardening + known limit
+
+Hardened after a cross-model adversarial review (codex + cursor, 2026-06-24) that
+converged on three HIGH holes — all closed: a scope is now **required** by default
+(`--last`/`--since`, or explicit `--all-history`); an empty/malformed claim
+**fail-closes** (a review claiming no voices is not a passing council); a
+provider-qualified claim requires the **provider to match** (no cross-provider
+slug spoof). Plus 1:1 proof consumption, corrupt-line-in-window fail-close, and a
+top-level fail-closed catch.
+
+**Chain integrity — a known integration point (not a missing capability).** This
+gate proves *coverage* (every claimed voice has a covering dispatch) but reads
+`models_succeeded` at face value — it does not itself verify the chain wasn't
+forged. That verification ALREADY EXISTS:
+`loa_cheval.audit_envelope.audit_verify_chain(log_path) -> (ok, msg)` walks the
+MODELINV jsonl and checks each `prev_hash == sha256(JCS chain-input of the prior
+entry)`, GENESIS at the head, and Ed25519 signatures when present. MODELINV writes
+through it via `audit_emit`. The only gap is a CLI seam so this node gate can call
+it cross-language; the fix is a thin `python -m loa_cheval.audit_envelope verify`
+wrapper + a fail-closed shell-out here (tracked as arrakis-4tfv). Until wired,
+run `audit_verify_chain` alongside this gate: coverage (here) + integrity (there)
+are the two halves of a trustworthy proof-of-call.
+
+Verify: `node --test poteau/test/voice-attestation.test.mjs` (15/15).
