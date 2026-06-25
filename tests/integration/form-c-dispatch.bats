@@ -1486,16 +1486,19 @@ DAG_RESPONSES='{"general-purpose":{"output":"did the item","rationale":"stub"},"
     [[ "$(echo "$output" | jq -r '.degraded.detail.error')" == *"unknown id: ghost"* ]]
 }
 
-@test "dag oo2: a reserved item id (__proto__) is REJECTED, not silently lost (prototype-magic guard)" {
+@test "dag oo2: reserved item ids (__proto__/constructor/prototype) are REJECTED (prototype-magic guard)" {
     command -v node >/dev/null || skip "node not available"
-    # runDag keys itemResults/failed/stranded by id; a '__proto__' id would reassign
-    # the per-object prototype and the item's result would VANISH with no error.
-    # dagValidate must reject it up-front, mirroring the output_schema guard.
+    # runDag keys itemResults/failed/stranded by id. '__proto__' would reassign the
+    # per-object prototype and the item's result would VANISH; 'constructor'/'prototype'
+    # are reserved keys rejected for defense-in-depth (mirrors the output_schema guard).
+    # council #86 (cheval codex+cursor): cover all three, not just __proto__.
     local js; js="$(_emit_dag_seg)"
-    run node "$HARNESS" "$js" "$DAG_RESPONSES" '{"task":"T","items":[{"id":"__proto__","task":"x"}]}'
-    [ "$status" -eq 0 ]
-    [ "$(echo "$output" | jq -r '.outcome')" = "degraded" ]
-    [[ "$(echo "$output" | jq -r '.degraded.detail.error')" == *"reserved object key"* ]]
+    for badid in __proto__ constructor prototype; do
+      run node "$HARNESS" "$js" "$DAG_RESPONSES" "{\"task\":\"T\",\"items\":[{\"id\":\"$badid\",\"task\":\"x\"}]}"
+      [ "$status" -eq 0 ]
+      [ "$(echo "$output" | jq -r '.outcome')" = "degraded" ]
+      [[ "$(echo "$output" | jq -r '.degraded.detail.error')" == *"reserved object key"* ]]
+    done
 }
 
 @test "dag R35: no items -> serial path unchanged (back-compat)" {
