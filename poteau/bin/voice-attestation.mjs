@@ -66,6 +66,12 @@ export function scopeEntries(entries, { last = 0, since = null } = {}) {
   let out = entries;
   if (since) {
     const floor = Date.parse(since);
+    // Fail closed on an unparseable --since: an NaN floor makes every `>= floor`
+    // comparison false, silently emptying the window → a misleading UNATTESTED
+    // instead of a refusal (cross-model review, #82).
+    if (!Number.isFinite(floor)) {
+      throw new Error(`scopeEntries: invalid --since timestamp: ${since}`);
+    }
     // Date-based compare (not lexical): mixed fractional precision like
     // "…00Z" vs "…00.001Z" sorts wrong lexically. A null (corrupt) line has no
     // ts; keep it so the window-integrity check below can still see it.
@@ -108,15 +114,28 @@ function slug(modelId) {
  *   - a BARE slug claim ("codex-headless") matches by model slug across
  *     providers, by design (the human named a model, not a provider).
  */
+/** The provider prefix (before the colon), or '' for a bare model id. */
+function providerOf(modelId) {
+  const id = String(modelId).toLowerCase();
+  return id.includes(':') ? id.slice(0, id.indexOf(':')) : '';
+}
+
 function voiceMatches(claimed, succeeded) {
   const c = String(claimed).toLowerCase();
   const s = String(succeeded).toLowerCase();
   if (c === s) return true;
-  if (c.includes(':')) {
-    // qualified claim: provider must match AND slug must match.
-    return familyOf(c) === familyOf(s) && slug(c) === slug(s);
+  if (slug(c) !== slug(s)) return false; // the model slug must always match
+  // Both provider-qualified → the PROVIDER prefix must match EXACTLY, not just
+  // the family. familyOf() aliases bedrock→anthropic / vertex→google and infers
+  // a family from the model prefix, so comparing families would let
+  // bedrock:claude prove anthropic:claude AND fake:codex-headless prove
+  // openai:codex-headless — the exact provider-spoof this guard exists to stop
+  // (cross-model review, #82). A bare claim, or a bare (provider-unrecorded)
+  // succeeded id, falls back to the slug match already established above.
+  if (c.includes(':') && s.includes(':')) {
+    return providerOf(c) === providerOf(s);
   }
-  return slug(c) === slug(s); // bare slug: cross-provider by model name
+  return true;
 }
 
 /**
@@ -128,36 +147,58 @@ function voiceMatches(claimed, succeeded) {
  */
 export function attestVoices({ claimed = [], entries = [], requireCli = false,
                                requireFamilies = 0, callingPrimitive = null } = {}) {
-  // Right side: successfully-dispatched models that count as proof. Each proof
-  // is consumable exactly once (1:1 matching).
-  const proofs = []; // {model, family, used}
-  for (const e of entries) {
+  // Right side: each MODELINV ENTRY is ONE consumable proof. A single dispatch
+  // cannot prove two claimed voices (codex + cursor CONVERGED on this, #82): an
+  // entry's models_succeeded is the SET a voice may match against, but consuming
+  // the entry burns the WHOLE entry — at most ONE claimed voice per dispatch. The
+  // old per-model push let one ensemble/chain-walk entry attest several voices.
+  const proofs = []; // [{ models: [{model, family}] }] — array index is the proof id
+  entries.forEach((e) => {
     const p = (e && typeof e === 'object' && e.payload) ? e.payload : null;
-    if (!p) continue; // skip null (corrupt) / shapeless entries
-    if (callingPrimitive && p.calling_primitive !== callingPrimitive) continue;
-    if (requireCli && p.transport !== 'cli') continue;
-    for (const m of (p.models_succeeded || [])) {
-      proofs.push({ model: m, family: familyOf(m), used: false });
-    }
-  }
+    if (!p) return; // skip null (corrupt) / shapeless entries
+    if (callingPrimitive && p.calling_primitive !== callingPrimitive) return;
+    if (requireCli && p.transport !== 'cli') return;
+    const models = (p.models_succeeded || []).map((m) => ({ model: m, family: familyOf(m) }));
+    if (models.length) proofs.push({ models });
+  });
 
+  // Left-perfect bipartite matching via augmenting paths (Kuhn's algorithm).
+  // Greedy first-fit can FALSE-REJECT a satisfiable claim set — e.g. claimed
+  // ["gpt-4","openai:gpt-4"] with proofs [openai:gpt-4, anthropic:gpt-4]: the
+  // bare claim greedily eats openai:gpt-4, then the qualified claim has only
+  // anthropic:gpt-4 (wrong provider) left → false UNATTESTED though a valid
+  // matching exists (cursor review, #82). Augmenting paths find it if it exists.
+  const proofToVoice = new Array(proofs.length).fill(-1); // proof idx → voice idx
+  const tryMatch = (voiceIdx, seen) => {
+    for (let pi = 0; pi < proofs.length; pi++) {
+      if (seen[pi]) continue;
+      if (!proofs[pi].models.some((mm) => voiceMatches(claimed[voiceIdx], mm.model))) continue;
+      seen[pi] = true;
+      if (proofToVoice[pi] === -1 || tryMatch(proofToVoice[pi], seen)) {
+        proofToVoice[pi] = voiceIdx;
+        return true;
+      }
+    }
+    return false;
+  };
   const proven = [];
   const missing = [];
+  claimed.forEach((voice, vi) => {
+    if (tryMatch(vi, new Array(proofs.length).fill(false))) proven.push(voice);
+    else missing.push(voice);
+  });
+
+  // Families proven: the family of the matched model in each consumed proof.
   const provenFamilies = new Set();
-  for (const voice of claimed) {
-    const hit = proofs.find((pr) => !pr.used && voiceMatches(voice, pr.model));
-    if (hit) {
-      hit.used = true;            // consume the proof — no double-counting
-      proven.push(voice);
-      provenFamilies.add(hit.family);
-    } else {
-      missing.push(voice);
-    }
-  }
+  proofToVoice.forEach((vi, pi) => {
+    if (vi === -1) return;
+    const mm = proofs[pi].models.find((x) => voiceMatches(claimed[vi], x.model));
+    if (mm) provenFamilies.add(mm.family);
+  });
 
   const claimedSlugs = new Set(claimed.map(slug));
   const extra = [...new Set(
-    proofs.map((pr) => pr.model).filter((m) => !claimedSlugs.has(slug(m))),
+    proofs.flatMap((pr) => pr.models.map((mm) => mm.model)).filter((m) => !claimedSlugs.has(slug(m))),
   )];
 
   const familiesProven = [...provenFamilies];
@@ -183,7 +224,7 @@ export function attestVoices({ claimed = [], entries = [], requireCli = false,
 function parseArgs(argv) {
   const a = { invoke: '.run/model-invoke.jsonl', claim: null, envelope: null,
               requireCli: false, requireFamilies: 0, primitive: null,
-              last: 0, since: null, allHistory: false };
+              last: 0, lastGiven: false, since: null, allHistory: false };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     if (k === '--invoke') a.invoke = argv[++i];
@@ -192,7 +233,7 @@ function parseArgs(argv) {
     else if (k === '--require-cli') a.requireCli = true;
     else if (k === '--require-families') a.requireFamilies = parseInt(argv[++i], 10) || 0;
     else if (k === '--primitive') a.primitive = argv[++i];
-    else if (k === '--last') a.last = parseInt(argv[++i], 10) || 0;
+    else if (k === '--last') { a.last = parseInt(argv[++i], 10); a.lastGiven = true; }
     else if (k === '--since') a.since = argv[++i];
     else if (k === '--all-history') a.allHistory = true;
   }
@@ -238,6 +279,19 @@ function main() {
       return failClosed('resolved claim is EMPTY — a review that claims no voices is not a passing council; refuse.');
     }
 
+    // Validate the scope INPUTS — a negative/NaN --last would slip past the
+    // required-scope guard below (a.last !== 0) yet scopeEntries only slices on
+    // last > 0, silently attesting against the FULL history (a stale dispatch
+    // proving a current claim — codex #82). An invalid --since parses to NaN and
+    // filters out every entry → a silent UNATTESTED, not a fail-close (cursor
+    // #82). Refuse both, loudly, before they can mislead.
+    if (a.lastGiven && !(Number.isInteger(a.last) && a.last > 0)) {
+      return failClosed(`--last must be a positive integer; got ${JSON.stringify(a.last)}`);
+    }
+    if (a.since && !Number.isFinite(Date.parse(a.since))) {
+      return failClosed(`--since must be a parseable timestamp; got ${JSON.stringify(a.since)}`);
+    }
+
     // A scope is REQUIRED (converged HIGH): the whole history is meaningless.
     if (a.last === 0 && !a.since && !a.allHistory) {
       return failClosed('no scope — pass --last N or --since <ts> to scope to THIS review (attesting against the whole MODELINV history lets a stale dispatch prove a current council). Pass --all-history to override deliberately.');
@@ -248,7 +302,10 @@ function main() {
     }
 
     const raw = readRawEntries(a.invoke);
-    const scoped = scopeEntries(raw, { last: a.last, since: a.since });
+    // --all-history means the FULL chain — it must override --last/--since rather
+    // than scope AND still emit the unscoped warning (cursor #82). When not set,
+    // scope to the review's own window.
+    const scoped = a.allHistory ? raw : scopeEntries(raw, { last: a.last, since: a.since });
 
     // A corrupt line WITHIN the attestation window is tampering/loss of evidence
     // — fail closed rather than attest on a partial window (converged MED).

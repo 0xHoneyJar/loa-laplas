@@ -194,3 +194,99 @@ test('familyOf normalizes provider prefixes and bare model slugs', () => {
   assert.equal(familyOf('claude-opus-4-8'), 'anthropic'); // bare slug inferred
   assert.equal(familyOf('gpt-5.2'), 'openai');
 });
+
+// ---------------------------------------------------------------------------
+// Cross-model review (#82) — hardening found by the governed council on this PR
+// ---------------------------------------------------------------------------
+
+test('1:1 ENTRY-LEVEL: one dispatch listing two models attests AT MOST one voice', () => {
+  // A single MODELINV entry must not prove two distinct claimed voices — one
+  // dispatch is one consumable proof (codex L144 + cursor L140 CONVERGED). The
+  // old per-model push let an ensemble/chain-walk entry attest several voices.
+  const r = attestVoices({
+    claimed: ['openai:codex-headless', 'anthropic:claude-headless'],
+    entries: [entry({ succeeded: ['openai:codex-headless', 'anthropic:claude-headless'] })],
+  });
+  assert.equal(r.verdict, 'UNATTESTED');
+  assert.equal(r.proven.length, 1);   // exactly one voice consumed the single entry
+  assert.equal(r.missing.length, 1);
+});
+
+test('1:1 ENTRY-LEVEL: two SEPARATE dispatches prove two voices → ATTESTED', () => {
+  const r = attestVoices({
+    claimed: ['openai:codex-headless', 'anthropic:claude-headless'],
+    entries: [
+      entry({ succeeded: ['openai:codex-headless'] }),
+      entry({ succeeded: ['anthropic:claude-headless'] }),
+    ],
+  });
+  assert.equal(r.verdict, 'ATTESTED');
+});
+
+test('PROVIDER-SPOOF: a fake provider prefix does NOT prove a provider-qualified claim', () => {
+  // claim openai:codex-headless; MODELINV shows fake:codex-headless ran — same
+  // slug + same INFERRED family, but a different provider. familyOf would have
+  // matched it; provider-exact must not.
+  const r = attestVoices({
+    claimed: ['openai:codex-headless'],
+    entries: [entry({ succeeded: ['fake:codex-headless'] })],
+  });
+  assert.equal(r.verdict, 'UNATTESTED');
+  assert.deepEqual(r.proven, []);
+});
+
+test('PROVIDER-SPOOF: bedrock:claude does NOT prove an anthropic:claude claim', () => {
+  const r = attestVoices({
+    claimed: ['anthropic:claude-opus'],
+    entries: [entry({ succeeded: ['bedrock:claude-opus'] })],
+  });
+  assert.equal(r.verdict, 'UNATTESTED');
+});
+
+test('PROVIDER-EXACT: a provider-qualified claim IS proven by the same provider', () => {
+  const r = attestVoices({
+    claimed: ['openai:codex-headless'],
+    entries: [entry({ succeeded: ['openai:codex-headless'] })],
+  });
+  assert.equal(r.verdict, 'ATTESTED');
+});
+
+test('BARE CLAIM: a bare slug claim is still proven across providers by model name', () => {
+  const r = attestVoices({
+    claimed: ['codex-headless'],
+    entries: [entry({ succeeded: ['openai:codex-headless'] })],
+  });
+  assert.equal(r.verdict, 'ATTESTED');
+});
+
+test('BIPARTITE: augmenting paths find a matching that greedy first-fit would miss', () => {
+  // claimed [bare gpt-4, openai:gpt-4]; proofs [openai:gpt-4, anthropic:gpt-4].
+  // Greedy: the bare claim eats openai:gpt-4 first → the qualified claim is left
+  // with anthropic:gpt-4 (wrong provider) → false UNATTESTED. Kuhn's re-routes
+  // the bare claim to anthropic:gpt-4 (slug match) and proves BOTH.
+  const r = attestVoices({
+    claimed: ['gpt-4', 'openai:gpt-4'],
+    entries: [
+      entry({ succeeded: ['openai:gpt-4'] }),
+      entry({ succeeded: ['anthropic:gpt-4'] }),
+    ],
+  });
+  assert.equal(r.verdict, 'ATTESTED');
+  assert.equal(r.missing.length, 0);
+});
+
+test('SCOPE: an unparseable --since fails closed (throws), never a silent empty window', () => {
+  assert.throws(
+    () => scopeEntries([{ ts_utc: '2026-06-24T00:00:00Z' }], { since: 'not-a-date' }),
+    /invalid --since/,
+  );
+});
+
+test('SCOPE: a valid --since keeps only entries at/after the floor', () => {
+  const out = scopeEntries(
+    [{ ts_utc: '2026-06-23T00:00:00Z' }, { ts_utc: '2026-06-24T12:00:00Z' }],
+    { since: '2026-06-24T00:00:00Z' },
+  );
+  assert.equal(out.length, 1);
+  assert.equal(out[0].ts_utc, '2026-06-24T12:00:00Z');
+});
