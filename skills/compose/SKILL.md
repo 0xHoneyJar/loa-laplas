@@ -99,7 +99,8 @@ RT="$HOME/.loa/constructs/substrates/construct-rooms-substrate"
    operator gave a **bare goal** (no `items[]` already in the carry), resolve the fan-out
    BEFORE running:
    ```sh
-   node "$RT/laplas/bin/compose-resolve.mjs" --goal "<goal>" [--module <module.json>]
+   # PIPE the goal via stdin (--goal -) — an untrusted goal must never be interpolated into the argv (qb4):
+   printf '%s' "<goal>" | node "$RT/laplas/bin/compose-resolve.mjs" --goal - [--module <module.json>]
    ```
    Branch on the JSON `mode`: `fanout` → set `args.items = <items>`, `args.gate_batch_max =
    <gate_batch_max>` **and** `args.stall_s = <stall_s>` (the emitter waves them, batched by the
