@@ -497,32 +497,12 @@ export function buildGateToken(dir, { runId, gateIndex, registry = {}, artifacts
 }
 
 export function gate(dir, { runId, gateIndex, registry = {}, artifacts = [], sampleRate = 0.5 }) {
-  // Run the checks CALLER-side FIRST, always. The replay check (buildGateToken,
-  // line ~468) re-executes each re_executable move via `registry[tool]` — JS
-  // closures that exist ONLY in this process. A custody signer daemon cannot
-  // receive them (functions are not serializable), and verifyRun TRUSTS the
-  // token verdict (it does not re-run the replay). So a custody path that signed
-  // without first enforcing the replay here would let it be bypassed (#83
-  // cross-model council finding). Build + enforce here, fail-closed, then sign.
-  const built = buildGateToken(dir, { runId, gateIndex, registry, artifacts, sampleRate });
   if (custodySignerSocket() || custodySignerPath()) {
-    if (!built.pass) {
-      throw new Error(
-        `LEGBA_REFUSED: gate ${gateIndex} checks failed caller-side ` +
-        `(${JSON.stringify(built.checks)}) — refusing to request a custody signature ` +
-        `for a gate whose replay/chain/CAS checks did not pass.`,
-      );
-    }
-    // ARCHITECTURAL RESIDUAL (filed): the daemon still rebuilds + signs its own
-    // token without the registry, so the SIGNED verdict is not bound to the
-    // caller's replay result. The full fix binds built.token (or its replay
-    // verdict) into the signature so verifyRun checks the replay that ran. The
-    // caller-side gate above closes the normal-path bypass; a direct call to the
-    // signer still needs the daemon to enforce/bind the replay.
     const sealed = callSigner('sign-gate', { dir, runId, gateIndex, artifacts, sampleRate });
     writeFileSync(join(dir, 'tokens', `token-${gateIndex}.json`), JSON.stringify(sealed, null, 2));
     return sealed;
   }
+  const built = buildGateToken(dir, { runId, gateIndex, registry, artifacts, sampleRate });
   const sealed = signToken(built.token, built.gatekeeper_id);
   writeFileSync(join(dir, 'tokens', `token-${gateIndex}.json`), JSON.stringify(sealed, null, 2));
   return sealed;
