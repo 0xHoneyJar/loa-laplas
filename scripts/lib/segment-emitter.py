@@ -1278,6 +1278,7 @@ const dagValidate = (items) => {
   const ids = new Set();
   for (const it of items) {
     if (!it || typeof it !== "object" || !it.id || !it.task) return "every item needs {id, task}";
+    if (it.id === "__proto__" || it.id === "constructor" || it.id === "prototype") return "item id '" + it.id + "' is a reserved object key — rejected (it would be SILENTLY LOST when results are keyed by id; mirrors the output_schema prototype-magic guard)";
     if (ids.has(it.id)) return "duplicate item id: " + it.id;
     if (it.depends_on != null && !Array.isArray(it.depends_on)) return "item " + it.id + " depends_on must be an array";
     if (it.intelligence_tier != null && !TIER_MODEL_JS[it.intelligence_tier]) return "item " + it.id + " has unknown intelligence_tier: " + it.intelligence_tier;

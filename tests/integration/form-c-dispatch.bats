@@ -1486,6 +1486,18 @@ DAG_RESPONSES='{"general-purpose":{"output":"did the item","rationale":"stub"},"
     [[ "$(echo "$output" | jq -r '.degraded.detail.error')" == *"unknown id: ghost"* ]]
 }
 
+@test "dag oo2: a reserved item id (__proto__) is REJECTED, not silently lost (prototype-magic guard)" {
+    command -v node >/dev/null || skip "node not available"
+    # runDag keys itemResults/failed/stranded by id; a '__proto__' id would reassign
+    # the per-object prototype and the item's result would VANISH with no error.
+    # dagValidate must reject it up-front, mirroring the output_schema guard.
+    local js; js="$(_emit_dag_seg)"
+    run node "$HARNESS" "$js" "$DAG_RESPONSES" '{"task":"T","items":[{"id":"__proto__","task":"x"}]}'
+    [ "$status" -eq 0 ]
+    [ "$(echo "$output" | jq -r '.outcome')" = "degraded" ]
+    [[ "$(echo "$output" | jq -r '.degraded.detail.error')" == *"reserved object key"* ]]
+}
+
 @test "dag R35: no items -> serial path unchanged (back-compat)" {
     command -v node >/dev/null || skip "node not available"
     local js; js="$(_emit_dag_seg)"
