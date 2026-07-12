@@ -59,6 +59,53 @@ test('LG-6: a forged gate token (no private key) is caught (signature invalid)',
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('LG-8: tampering the unsigned token_hash is caught — verifyRun recomputes, never trusts', () => {
+  // The ed25519 signature covers jcs(token), NOT sealed.token_hash. The custody
+  // chain + run receipt anchor on token_hash, so a run-dir writer who rewrites it
+  // (to splice the chain or forge the receipt) must be caught. verifyRun must
+  // recompute hashObj(token) and refuse a stored token_hash that does not match.
+  const { dir } = freshRun();
+  const p = join(dir, 'tokens', 'token-0.json');
+  const sealed = JSON.parse(readFileSync(p, 'utf8'));
+  sealed.token_hash = 'deadbeef'.repeat(8); // valid signature, lying hash
+  writeFileSync(p, JSON.stringify(sealed));
+  assert.equal(verifyRun(dir, { strict: false }).ok, false, 'a token_hash that does not match the signed token must NOT verify');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('LG-9: a token bound to a different run_id is rejected (no cross-run replay)', () => {
+  // codex CRITICAL #2: verifyRun must bind each token to THIS run, else another
+  // run's signed tokens (same gatekeeper key) can be replayed in.
+  const { dir } = freshRun();
+  const mp = join(dir, 'manifest.json');
+  const man = JSON.parse(readFileSync(mp, 'utf8'));
+  man.run_id = 'a-different-run'; // signed token still carries the original run_id
+  writeFileSync(mp, JSON.stringify(man));
+  const r = verifyRun(dir, { strict: false });
+  assert.equal(r.ok, false, 'token.run_id must match the manifest run_id');
+  assert.ok(r.gates.some((g) => g.run_id_matches === false), 'the run_id binding is what caught it');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('LG-10: a gap in the gate sequence (skip / first-token delete) is rejected', () => {
+  // codex #3: gates must be a contiguous sequence from 0 — no skips/reorders.
+  const dir = mkdtempSync(join(tmpdir(), 'legba-test-'));
+  const runId = 'contig-run';
+  const gk = initKeys('legba:test');
+  provisionRun(runId, gk, dir);
+  record(dir, { runId, spanIndex: 0, kind: 'tool', determinism: 're_executable', tool: 'arith', input: { expr: '1 + 1' }, output: { result: 2 } });
+  gate(dir, { runId, gateIndex: 0, registry: REGISTRY });
+  openSpan(dir, { runId, spanIndex: 1 });
+  record(dir, { runId, spanIndex: 1, kind: 'tool', determinism: 're_executable', tool: 'arith', input: { expr: '2 + 2' }, output: { result: 4 } });
+  gate(dir, { runId, gateIndex: 1, registry: REGISTRY });
+  assert.equal(verifyRun(dir, { strict: false }).ok, true, 'honest 2-gate run verifies');
+  rmSync(join(dir, 'tokens', 'token-0.json')); // gap: token-1 (gate_index 1) is now first
+  const r = verifyRun(dir, { strict: false });
+  assert.equal(r.ok, false, 'a non-contiguous gate sequence must NOT verify');
+  assert.ok(r.gates.some((g) => g.gate_index_contiguous === false), 'the contiguity gap is what caught it');
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('LG-4: a confabulated re_executable output is fraud-proven by re-execution', () => {
   const { dir, runId } = freshRun();
   record(dir, { runId, spanIndex: 0, kind: 'tool', determinism: 're_executable', tool: 'arith', input: { expr: '2 + 2' }, output: { result: 5 } });
