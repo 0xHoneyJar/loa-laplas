@@ -119,10 +119,34 @@ if (!ABORTING && (rs.mandated_reads ?? []).length) {
 let councilVoices = 0;
 if (!ABORTING && rs.review_routing?.council === true) {
   const min = rs.review_routing.min_voices ?? 2;
+  // min_voices must be a positive integer: a 0 / negative / NaN threshold would
+  // let a MANDATED council "pass" with zero valid signatures (cross-model audit
+  // 2026-06-24: codex HIGH). A council policy that sets no real threshold cannot
+  // be honored — custody fails closed.
+  if (!Number.isInteger(min) || min < 1)
+    custodyRefuse(`gatekeeper: review_routing.min_voices must be a positive integer (got ${JSON.stringify(min)}) — a council with no real threshold cannot be honored; custody fails closed.`);
   const pems = rs.review_routing.reviewer_keys ?? [];
+  // reviewer_keys must be PUBLIC keys. createPublicKey silently DERIVES a public
+  // key from a private PEM, so a private key here would be accepted — but a
+  // private signing secret in the (potentially agent-readable) run_state is a
+  // forgery vector (codex HIGH). Guard on the PEM text before parsing.
+  if (pems.some((p) => typeof p === 'string' && /PRIVATE KEY/.test(p)))
+    custodyRefuse('gatekeeper: review_routing.reviewer_keys contains a PRIVATE key — reviewer keys must be PUBLIC; a private key in the run-state is a forgery vector, custody fails closed.');
   let keys;
   try { keys = pems.map(p => createPublicKey(p)); }
   catch { custodyRefuse('gatekeeper: review_routing.reviewer_keys holds an unparseable public key — custody fails closed, never waved through.'); }
+  // Dedupe by KEY MATERIAL (SPKI fingerprint), not array position: a duplicate
+  // PEM must not let ONE private key satisfy min_voices via two indices — the
+  // distinctness loop below blocks re-use of the same INDEX, not the same KEY
+  // (cross-model audit: cursor + codex HIGH, converged with a manual trace).
+  {
+    const seen = new Set();
+    keys = keys.filter((k) => {
+      const fp = createHash('sha256').update(k.export({ type: 'spki', format: 'der' })).digest('hex');
+      if (seen.has(fp)) return false;
+      seen.add(fp); return true;
+    });
+  }
   if (!keys.length)
     refuse('P204', `This surface mandates a council (min ${min} voices) but no reviewer public keys are provisioned (run_state.review_routing.reviewer_keys is empty). A council that cannot be verified cannot be honored — provision reviewer keys via the council runner.`);
   // C-REPLAY + freshness (audit): each reviewer signs the COUNCIL SUBJECT —
